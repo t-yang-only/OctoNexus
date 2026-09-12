@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -17,11 +18,16 @@ import (
 //   - responses: 仅 gpt-x 200, 其余 404
 //   - messages: 仅 claude-y 200, 其余 404
 //     并把每次请求的 Authorization / X-Api-Key 记入 seen, 供断言凭据头正确。
+//     seen 由测试收尾后串行读取, 写入侧必须持锁: probeModels 对同一模型三协议并发,
+//     messages 分支一次写两个键, 无锁并发写 map 会直接 fatal("concurrent map writes")。
 func newProbeTestUpstream(t *testing.T, seen *map[string]string) *httptest.Server {
 	t.Helper()
+	var seenMu sync.Mutex
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		seenMu.Lock()
 		(*seen)["chat-auth"] = r.Header.Get("Authorization")
+		seenMu.Unlock()
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		// 只有 gpt-x 与 claude-y 走 chat; dead-chat 与 nothing-works 一律 404。
@@ -34,7 +40,9 @@ func newProbeTestUpstream(t *testing.T, seen *map[string]string) *httptest.Serve
 		_, _ = io.WriteString(w, `{"id":"ok","choices":[{"message":{"content":"pong"}}]}`)
 	})
 	mux.HandleFunc("/v1/responses", func(w http.ResponseWriter, r *http.Request) {
+		seenMu.Lock()
 		(*seen)["response-auth"] = r.Header.Get("Authorization")
+		seenMu.Unlock()
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body["model"] != "gpt-x" {
@@ -46,8 +54,10 @@ func newProbeTestUpstream(t *testing.T, seen *map[string]string) *httptest.Serve
 		_, _ = io.WriteString(w, `{"id":"resp_1","status":"completed"}`)
 	})
 	mux.HandleFunc("/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		seenMu.Lock()
 		(*seen)["message-auth"] = r.Header.Get("X-Api-Key")
 		(*seen)["message-version"] = r.Header.Get("Anthropic-Version")
+		seenMu.Unlock()
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body["model"] != "claude-y" {
