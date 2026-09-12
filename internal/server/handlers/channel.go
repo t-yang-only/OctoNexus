@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
@@ -332,8 +333,10 @@ func fetchModel(c *gin.Context) {
 		return
 	}
 
-	// 实测模式: /models 只用来圈定候选, 每个模型再按三协议各发一次最小请求, 协议位以实测结论为准。
-	models := probeModels(httpClient, ctx, target, request.Key, order, protocolsByModel)
+	// 实测模式: /models 只用来圈定候选模型集合, 每个模型对 chat/response/message 三协议
+	// 各发一次最小请求, 协议位完全以实测结论为准, 不再采用列表归属推断:
+	// 列表侧只能旁证 "该 /models 讲得通", 证明不了单个模型在某个转发端点上可用。
+	models := probeModels(httpClient, ctx, target, request.Key, order)
 	resp.Success(c, models)
 }
 
@@ -345,8 +348,8 @@ const probeModelTimeout = 20 * time.Second
 const probeModelBodyLimit = 256
 
 // probeModels 对候选模型逐一实测三协议, 返回带实测明细的模型列表。
-// 同一模型的三个协议并发, 模型与模型之间也并发: 单凭据一次拉取的总时长约为最慢一轮, 而非逐个累加。
-func probeModels(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key string, order []string, candidates map[string]model.Protocol) []model.ChannelFetchModel {
+// 模型与模型之间并发, 同一模型的三协议也并发: 单凭据一次拉取的总时长约为最慢一组合, 而非逐个累加。
+func probeModels(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key string, order []string) []model.ChannelFetchModel {
 	// 上游对并发的容忍远低于拉模型列表, 限在 4: 模型数常达数十个, 不限流会触发上游限频。
 	sem := make(chan struct{}, 4)
 	var wg sync.WaitGroup
@@ -357,19 +360,23 @@ func probeModels(httpClient *http.Client, ctx context.Context, target model.Chan
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[i] = model.ChannelFetchModel{
-				Name:      name,
-				Protocols: probeModelProtocols(httpClient, ctx, target, key, name, candidates[name]),
-				Probes:    probeSingleModel(httpClient, ctx, target, key, name, candidates[name]),
+			probes := probeSingleModel(httpClient, ctx, target, key, name)
+			protocols := model.Protocol(0)
+			for _, probe := range probes {
+				if probe.OK {
+					protocols |= probe.Protocol
+				}
 			}
+			results[i] = model.ChannelFetchModel{Name: name, Protocols: protocols, Probes: probes}
 		}(i, name)
 	}
 	wg.Wait()
 	return results
 }
 
-// probeSingleModel 对单个模型实测其候选协议, 返回各协议结论, 按位值定序保证明细稳定。
-func probeSingleModel(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string, candidates model.Protocol) []model.ChannelProtocolProbe {
+// probeSingleModel 对单个模型实测三协议全部端点, 返回各协议结论, 按位值定序保证明细稳定。
+// 不按 /models 归属裁剪候选: 网关常只在一侧列模型却在多侧可转发, 列表旁证不可信, 以实测为准。
+func probeSingleModel(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string) []model.ChannelProtocolProbe {
 	definitions := []struct {
 		bit      model.Protocol
 		sendFunc probeSendFunc
@@ -380,9 +387,6 @@ func probeSingleModel(httpClient *http.Client, ctx context.Context, target model
 	}
 	probes := make([]model.ChannelProtocolProbe, 0, len(definitions))
 	for _, definition := range definitions {
-		if candidates&definition.bit == 0 {
-			continue
-		}
 		status, body, err := definition.sendFunc(httpClient, ctx, target, key, modelName)
 		probe := model.ChannelProtocolProbe{Protocol: definition.bit, Status: status}
 		if err != nil {
@@ -395,22 +399,26 @@ func probeSingleModel(httpClient *http.Client, ctx context.Context, target model
 	return probes
 }
 
-// probeModelProtocols 把实测结论折算成协议位掩码。
-func probeModelProtocols(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string, candidates model.Protocol) model.Protocol {
-	protocols := model.Protocol(0)
-	for _, probe := range probeSingleModel(httpClient, ctx, target, key, modelName, candidates) {
-		if probe.OK {
-			protocols |= probe.Protocol
-		}
-	}
-	return protocols
-}
-
 // probeSendFunc 发送一种协议的最小实测请求, 返回上游状态码, 截断正文与错误。
 // err 非 nil 即该协议对模型不可用; 正文仅在 err 非 nil 时有值。
 type probeSendFunc func(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string) (int, []byte, error)
 
-// probeRequest 构造并执行一次实测请求, 校验状态码并读回截断正文。
+// probeEndpointPath 为探测补协议路径默认值: 探测收的是未落库的表单配置, 路径可能被清空,
+// 缺省回退到与保存时一致的默认路径, 无前导斜杠则补齐, 避免拼出错误地址导致协议误判为不支持。
+func probeEndpointPath(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	return value
+}
+
+// probeRequest 构造并执行一次实测请求, 校验状态码并读回正文摘要。
+// 判定口径: 非 2xx 一律失败; 2xx 还要求正文以 { 或 [ 开头(取前若干字节判断),
+// 部分网关对未知路径也回 200 + HTML, 只看状态码会误判为支持; 最小响应常超 256 字节, 故判首字符而不全量解 JSON。
 func probeRequest(httpClient *http.Client, ctx context.Context, request *http.Request) (int, []byte, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, probeModelTimeout)
 	defer cancel()
@@ -423,9 +431,8 @@ func probeRequest(httpClient *http.Client, ctx context.Context, request *http.Re
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return response.StatusCode, body, fmt.Errorf("upstream %s", response.Status)
 	}
-	// 2xx 且能解出 JSON 才算讲得通: 部分网关对未知路径也回 200 空体。
-	var payload any
-	if err := json.Unmarshal(body, &payload); err != nil {
+	head := strings.TrimLeftFunc(string(body), unicode.IsSpace)
+	if !strings.HasPrefix(head, "{") && !strings.HasPrefix(head, "[") {
 		return response.StatusCode, body, fmt.Errorf("upstream %s: non-json body", response.Status)
 	}
 	return response.StatusCode, body, nil
@@ -439,7 +446,7 @@ func probeOpenAIChatCompletion(httpClient *http.Client, ctx context.Context, tar
 		"max_tokens": 1,
 	})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(target.BaseURL, "/")+target.OpenAIChatCompletionPath, bytes.NewReader(payload))
+		strings.TrimRight(target.BaseURL, "/")+probeEndpointPath(target.OpenAIChatCompletionPath, "/v1/chat/completions"), bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -454,14 +461,15 @@ func probeOpenAIChatCompletion(httpClient *http.Client, ctx context.Context, tar
 }
 
 // probeOpenAIResponse 按 Responses 协议发一次最小请求。
+// max_output_tokens 取 16: OpenAI 规定该值下限为 16, 传更小会被上游以参数错误拒绝而误判为不支持。
 func probeOpenAIResponse(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string) (int, []byte, error) {
 	payload, _ := json.Marshal(map[string]any{
-		"model":        modelName,
-		"input":        "ping",
-		"max_output_tokens": 1,
+		"model":             modelName,
+		"input":             "ping",
+		"max_output_tokens": 16,
 	})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(target.BaseURL, "/")+target.OpenAIResponsePath, bytes.NewReader(payload))
+		strings.TrimRight(target.BaseURL, "/")+probeEndpointPath(target.OpenAIResponsePath, "/v1/responses"), bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -483,7 +491,7 @@ func probeAnthropicMessage(httpClient *http.Client, ctx context.Context, target 
 		"max_tokens": 1,
 	})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(target.BaseURL, "/")+target.AnthropicMessagePath, bytes.NewReader(payload))
+		strings.TrimRight(target.BaseURL, "/")+probeEndpointPath(target.AnthropicMessagePath, "/v1/messages"), bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -498,17 +506,17 @@ func probeAnthropicMessage(httpClient *http.Client, ctx context.Context, target 
 	return probeRequest(httpClient, ctx, request)
 }
 
-// summarizeProbeBody 压平失败正文或网络错误, 拼成一行摘要。
+// summarizeProbeBody 拼一行失败摘要: 错误原因必带, 上游正文截断附后, 两者都方便界面直接定位。
 func summarizeProbeBody(body []byte, err error) string {
 	text := strings.TrimSpace(string(body))
 	if text == "" {
-		text = err.Error()
+		return err.Error()
 	}
 	text = strings.Join(strings.Fields(text), " ")
 	if len(text) > probeModelBodyLimit {
 		text = text[:probeModelBodyLimit]
 	}
-	return text
+	return err.Error() + ": " + text
 }
 
 // modelsURL 取协议请求路径的父级目录, 与地址拼成同级的 /models 地址。

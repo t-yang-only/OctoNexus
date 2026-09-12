@@ -128,6 +128,36 @@
             "model": "Model",
             "noData": "No ranking data",
             "successRate": "Success Rate"
+        },
+        "monitor": {
+            "title": "Model Analytics",
+            "subtitle": "Calls, cost and success rate by model",
+            "totalCount": "Total calls",
+            "totalCost": "Total cost",
+            "totalTokens": "Total tokens",
+            "avgRpm": "Avg RPM",
+            "avgTpm": "Avg TPM",
+            "health": "Model health",
+            "noData": "No call data yet",
+            "successRate": "Success rate",
+            "avgLatency": "Avg latency",
+            "throughput": "Throughput",
+            "topModels": "Top models",
+            "distribution": "Cost distribution",
+            "range": {
+                "day": "24h",
+                "week": "7d",
+                "month": "30d"
+            },
+            "columns": {
+                "model": "Model",
+                "channel": "Channel",
+                "count": "Calls",
+                "success": "Success",
+                "latency": "Avg latency",
+                "tokens": "Tokens",
+                "cost": "Cost"
+            }
         }
     },
     "setting": {

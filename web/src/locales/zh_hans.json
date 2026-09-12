@@ -128,6 +128,36 @@
             "model": "模型",
             "noData": "暂无排行数据",
             "successRate": "成功率"
+        },
+        "monitor": {
+            "title": "模型调用分析",
+            "subtitle": "按模型聚合的调用量、费用与成功率",
+            "totalCount": "总调用",
+            "totalCost": "总费用",
+            "totalTokens": "总 Token",
+            "avgRpm": "平均 RPM",
+            "avgTpm": "平均 TPM",
+            "health": "模型健康",
+            "noData": "暂无调用数据",
+            "successRate": "成功率",
+            "avgLatency": "平均延迟",
+            "throughput": "吞吐",
+            "topModels": "调用 Top",
+            "distribution": "消耗分布",
+            "range": {
+                "day": "24小时",
+                "week": "7天",
+                "month": "30天"
+            },
+            "columns": {
+                "model": "模型",
+                "channel": "渠道",
+                "count": "调用",
+                "success": "成功率",
+                "latency": "平均延迟",
+                "tokens": "Token",
+                "cost": "费用"
+            }
         }
     },
     "setting": {
