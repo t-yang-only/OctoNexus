@@ -18,6 +18,7 @@ import (
 
 func init() {
 	router.NewGroupRouter("/api/v1/group").
+		ServeOn(router.ServerAdmin).
 		Use(middleware.Auth()).
 		Use(middleware.RequireJSON()).
 		AddRoute(

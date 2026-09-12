@@ -24,6 +24,7 @@ type statsDailyResponse struct {
 
 func init() {
 	router.NewGroupRouter("/api/v1/stats").
+		ServeOn(router.ServerAdmin).
 		Use(middleware.Auth()).
 		AddRoute(
 			router.NewRoute("/daily", http.MethodGet).

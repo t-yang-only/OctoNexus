@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"net/http"
@@ -16,6 +16,7 @@ import (
 
 func init() {
 	router.NewGroupRouter("/api/v1/model").
+		ServeOn(router.ServerAdmin).
 		Use(middleware.Auth()).
 		Use(middleware.RequireJSON()).
 		AddRoute(
@@ -47,6 +48,7 @@ func init() {
 				Handle(getLastUpdateTime),
 		)
 	router.NewGroupRouter("/v1").
+		ServeOn(router.ServerRelay).
 		Use(middleware.APIKeyAuth()).
 		AddRoute(
 			router.NewRoute("/models", http.MethodGet).

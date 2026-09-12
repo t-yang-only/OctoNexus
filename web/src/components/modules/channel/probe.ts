@@ -5,7 +5,8 @@ import { useFetchModel } from '@/api/channel';
 import { grantKey, toChannelConfig, type ChannelFormState } from './state';
 
 // useModelProbe 按凭据探测上游模型列表, 供模型页与凭据页共用。
-// 两侧并发探测与协议位判定都在后端完成, 此处只负责转圈状态, 结果并入表单和结果提示。
+// 两侧并发探测, 逐模型三协议实测与协议位判定都在后端完成, 此处只负责转圈状态, 结果并入表单和结果提示。
+// 探测一律带 probe=true: 协议位以实测结论为准, 谁讲得通就自动启用谁, 不再按 /models 侧猜测。
 export function useModelProbe() {
     const t = useTranslations('channel.form');
     const fetchModel = useFetchModel();
@@ -13,6 +14,7 @@ export function useModelProbe() {
 
     // probe 探测指定凭据可用的模型, 结果并入模型集合与授权表。
     // 上游未返回但本地已有的模型保留: 静默删除会打断正在使用该模型的路由。
+    // 已有授权不受实测结论降级: 探测只自动启用新证实的协议位, 人工勾选的位不会因本次上游偶发失败被撤销。
     const probe = async (
         state: ChannelFormState,
         setState: (next: ChannelFormState) => void,
@@ -29,6 +31,7 @@ export function useModelProbe() {
             const fetched = await fetchModel.mutateAsync({
                 channel: toChannelConfig(state),
                 key: channelKey.key.trim(),
+                probe: true,
             });
             if (fetched.length === 0) {
                 toast.warning(t('modelRefreshEmpty'));
@@ -42,7 +45,8 @@ export function useModelProbe() {
                 grants.set(mapKey, (grants.get(mapKey) ?? 0) | protocols);
             }
             setState({ ...state, models, grants });
-            toast.success(t('modelRefreshSuccess', { count: fetched.length }));
+            // 实测结论的模型数与 /models 返回一致, 协议位只多不少; 明细留待人工展开核对。
+            toast.success(t('modelRefreshProbed', { count: fetched.length }));
         } catch (error) {
             toast.error(t('modelRefreshFailed'), { description: String(error) });
         } finally {

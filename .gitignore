@@ -3,3 +3,16 @@ build
 static/out/*
 !static/out/README.md
 .vscode
+
+# 本地工作产物, 不入库
+数据备份*.json
+agent_word/
+skills/
+pyproject.toml
+.pytest_cache/
+__pycache__/
+*.egg-info/
+.venv/
+
+# 外部参考仓库, 不入库
+reference/

@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="web/public/logo.svg" alt="Octopus Logo" width="120" height="120">
+<img src="web/public/logo.svg" alt="OctoNexus Logo" width="120" height="120">
 
-### Octopus
+### OctoNexus
 
 **为个人打造的简单、美观、优雅的 LLM API 聚合服务**
 
@@ -10,6 +10,8 @@
 
 </div>
 
+> **OctoNexus** = **Octo**（取自 [Octopus](https://github.com/bestruirui/octopus)）+ **Nexus**（枢纽）。
+> 多触手（渠道）汇聚为统一流量枢纽 —— 基于 [bestruirui/octopus](https://github.com/bestruirui/octopus) 二次开发（GPL-3.0），改动范围见 [docs/worklog](docs/worklog/README.md)。
 
 ## ✨ 特性
 
