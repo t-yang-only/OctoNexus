@@ -1,7 +1,9 @@
 package op
 
 import (
+	"fmt"
 	"sort"
+	"sync/atomic"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -12,10 +14,14 @@ import (
 
 // openAutoGroupTestDB 打开一块内存 SQLite, 建出自动分组依赖的全部表。
 // 用 glebarez/sqlite 纯 Go 驱动: 与业务 db.go 同驱动, 无需 cgo, 测试在任何机器都能跑。
-// 每个测试独享一份内存库 (t.Name() 作区分): 并行或顺序跑都不会撞 channels.name 唯一键。
+// DSN 按测试名隔离, 再叠一层计数器后缀: 同一测试用 -count=N 重跑时, 共享缓存的内存库
+// 不会在进程内被复用, 否则第二次 Create 会撞 channels.name 唯一键 (NM-CUR-042 复现)。
+var autoGroupTestDBSeq int64
+
 func openAutoGroupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := "file:" + t.Name() + "?mode=memory&cache=shared"
+	seq := atomic.AddInt64(&autoGroupTestDBSeq, 1)
+	dsn := fmt.Sprintf("file:%s-%d?mode=memory&cache=shared", t.Name(), seq)
 	conn, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Discard,
 	})
