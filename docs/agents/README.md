@@ -10,6 +10,7 @@ docs/agents/
   README.md            # 本文件：协议 + 索引
   registry.json        # Agent 注册表（谁在协作）
   ledger.md            # 任务登记台账（活文档，每次认领/更新都改它）
+  需求登记.md          # 需求登记表（待确认→已确认→已立项，确认后拆入 ledger）
   claims/              # 每条认领一条文件，避免同时改 ledger 冲突
     YYYY-MM-DD-<agent>-<task>.md
 ```
@@ -53,4 +54,6 @@ todo → doing → review → done
 
 - 注册表：[`registry.json`](./registry.json)
 - 台账：[`ledger.md`](./ledger.md)
+- 需求登记：[`需求登记.md`](./需求登记.md)
+- 研究报告：[`../research/`](../research/)（对标研究等，一主题一文件，命名 `YYYY-MM-DD-<主题>.md`）
 - 工作日志规范：[`../worklog/README.md`](../worklog/README.md)
