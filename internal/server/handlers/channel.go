@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
@@ -24,6 +26,7 @@ import (
 
 func init() {
 	router.NewGroupRouter("/api/v1/channel").
+		ServeOn(router.ServerAdmin).
 		Use(middleware.Auth()).
 		Use(middleware.RequireJSON()).
 		AddRoute(
@@ -320,11 +323,192 @@ func fetchModel(c *gin.Context) {
 		protocolsByModel[name] |= model.ProtocolAnthropicMessage
 	}
 
-	models := make([]model.ChannelFetchModel, 0, len(order))
-	for _, name := range order {
-		models = append(models, model.ChannelFetchModel{Name: name, Protocols: protocolsByModel[name]})
+	if !request.Probe {
+		models := make([]model.ChannelFetchModel, 0, len(order))
+		for _, name := range order {
+			models = append(models, model.ChannelFetchModel{Name: name, Protocols: protocolsByModel[name]})
+		}
+		resp.Success(c, models)
+		return
 	}
+
+	// 实测模式: /models 只用来圈定候选, 每个模型再按三协议各发一次最小请求, 协议位以实测结论为准。
+	models := probeModels(httpClient, ctx, target, request.Key, order, protocolsByModel)
 	resp.Success(c, models)
+}
+
+// probeModelTimeout 是单个模型单个协议实测的等待上限。
+// 拉取 + 实测总时长须可接受: 候选 N 个模型 × 3 协议并发执行, 单发 20 秒封顶。
+const probeModelTimeout = 20 * time.Second
+
+// probeModelBodyLimit 截断失败响应正文, 只留诊断所需摘要。
+const probeModelBodyLimit = 256
+
+// probeModels 对候选模型逐一实测三协议, 返回带实测明细的模型列表。
+// 同一模型的三个协议并发, 模型与模型之间也并发: 单凭据一次拉取的总时长约为最慢一轮, 而非逐个累加。
+func probeModels(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key string, order []string, candidates map[string]model.Protocol) []model.ChannelFetchModel {
+	// 上游对并发的容忍远低于拉模型列表, 限在 4: 模型数常达数十个, 不限流会触发上游限频。
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	results := make([]model.ChannelFetchModel, len(order))
+	for i, name := range order {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			results[i] = model.ChannelFetchModel{
+				Name:      name,
+				Protocols: probeModelProtocols(httpClient, ctx, target, key, name, candidates[name]),
+				Probes:    probeSingleModel(httpClient, ctx, target, key, name, candidates[name]),
+			}
+		}(i, name)
+	}
+	wg.Wait()
+	return results
+}
+
+// probeSingleModel 对单个模型实测其候选协议, 返回各协议结论, 按位值定序保证明细稳定。
+func probeSingleModel(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string, candidates model.Protocol) []model.ChannelProtocolProbe {
+	definitions := []struct {
+		bit      model.Protocol
+		sendFunc probeSendFunc
+	}{
+		{model.ProtocolOpenAIChatCompletion, probeOpenAIChatCompletion},
+		{model.ProtocolOpenAIResponse, probeOpenAIResponse},
+		{model.ProtocolAnthropicMessage, probeAnthropicMessage},
+	}
+	probes := make([]model.ChannelProtocolProbe, 0, len(definitions))
+	for _, definition := range definitions {
+		if candidates&definition.bit == 0 {
+			continue
+		}
+		status, body, err := definition.sendFunc(httpClient, ctx, target, key, modelName)
+		probe := model.ChannelProtocolProbe{Protocol: definition.bit, Status: status}
+		if err != nil {
+			probe.Error = summarizeProbeBody(body, err)
+		} else {
+			probe.OK = true
+		}
+		probes = append(probes, probe)
+	}
+	return probes
+}
+
+// probeModelProtocols 把实测结论折算成协议位掩码。
+func probeModelProtocols(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string, candidates model.Protocol) model.Protocol {
+	protocols := model.Protocol(0)
+	for _, probe := range probeSingleModel(httpClient, ctx, target, key, modelName, candidates) {
+		if probe.OK {
+			protocols |= probe.Protocol
+		}
+	}
+	return protocols
+}
+
+// probeSendFunc 发送一种协议的最小实测请求, 返回上游状态码, 截断正文与错误。
+// err 非 nil 即该协议对模型不可用; 正文仅在 err 非 nil 时有值。
+type probeSendFunc func(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string) (int, []byte, error)
+
+// probeRequest 构造并执行一次实测请求, 校验状态码并读回截断正文。
+func probeRequest(httpClient *http.Client, ctx context.Context, request *http.Request) (int, []byte, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, probeModelTimeout)
+	defer cancel()
+	response, err := httpClient.Do(request.WithContext(probeCtx))
+	if err != nil {
+		return 0, nil, err
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(response.Body, probeModelBodyLimit))
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return response.StatusCode, body, fmt.Errorf("upstream %s", response.Status)
+	}
+	// 2xx 且能解出 JSON 才算讲得通: 部分网关对未知路径也回 200 空体。
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return response.StatusCode, body, fmt.Errorf("upstream %s: non-json body", response.Status)
+	}
+	return response.StatusCode, body, nil
+}
+
+// probeOpenAIChatCompletion 按对话补全协议发一次 1 token 的最小请求。
+func probeOpenAIChatCompletion(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string) (int, []byte, error) {
+	payload, _ := json.Marshal(map[string]any{
+		"model":      modelName,
+		"messages":   []map[string]string{{"role": "user", "content": "ping"}},
+		"max_tokens": 1,
+	})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(target.BaseURL, "/")+target.OpenAIChatCompletionPath, bytes.NewReader(payload))
+	if err != nil {
+		return 0, nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+key)
+	for _, header := range target.CustomHeader {
+		if header.HeaderKey != "" {
+			request.Header.Set(header.HeaderKey, header.HeaderValue)
+		}
+	}
+	return probeRequest(httpClient, ctx, request)
+}
+
+// probeOpenAIResponse 按 Responses 协议发一次最小请求。
+func probeOpenAIResponse(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string) (int, []byte, error) {
+	payload, _ := json.Marshal(map[string]any{
+		"model":        modelName,
+		"input":        "ping",
+		"max_output_tokens": 1,
+	})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(target.BaseURL, "/")+target.OpenAIResponsePath, bytes.NewReader(payload))
+	if err != nil {
+		return 0, nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+key)
+	for _, header := range target.CustomHeader {
+		if header.HeaderKey != "" {
+			request.Header.Set(header.HeaderKey, header.HeaderValue)
+		}
+	}
+	return probeRequest(httpClient, ctx, request)
+}
+
+// probeAnthropicMessage 按 Messages 协议发一次 1 token 的最小请求。
+func probeAnthropicMessage(httpClient *http.Client, ctx context.Context, target model.ChannelConfig, key, modelName string) (int, []byte, error) {
+	payload, _ := json.Marshal(map[string]any{
+		"model":      modelName,
+		"messages":   []map[string]string{{"role": "user", "content": "ping"}},
+		"max_tokens": 1,
+	})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(target.BaseURL, "/")+target.AnthropicMessagePath, bytes.NewReader(payload))
+	if err != nil {
+		return 0, nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Api-Key", key)
+	request.Header.Set("Anthropic-Version", "2023-06-01")
+	for _, header := range target.CustomHeader {
+		if header.HeaderKey != "" {
+			request.Header.Set(header.HeaderKey, header.HeaderValue)
+		}
+	}
+	return probeRequest(httpClient, ctx, request)
+}
+
+// summarizeProbeBody 压平失败正文或网络错误, 拼成一行摘要。
+func summarizeProbeBody(body []byte, err error) string {
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		text = err.Error()
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > probeModelBodyLimit {
+		text = text[:probeModelBodyLimit]
+	}
+	return text
 }
 
 // modelsURL 取协议请求路径的父级目录, 与地址拼成同级的 /models 地址。

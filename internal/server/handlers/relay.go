@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"net/http"
@@ -11,6 +11,7 @@ import (
 
 func init() {
 	router.NewGroupRouter("/v1").
+		ServeOn(router.ServerRelay).
 		Use(middleware.APIKeyAuth()).
 		AddRoute(
 			router.NewRoute("/chat/completions", http.MethodPost).

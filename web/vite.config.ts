@@ -29,7 +29,7 @@ export default defineConfig({
     watch: process.env.DISABLE_HMR === 'true' ? null : {},
     proxy: {
       '/api': {
-        target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080',
+        target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:3303',
         changeOrigin: false,
       },
     },

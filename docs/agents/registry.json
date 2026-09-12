@@ -1,0 +1,1 @@
+{"agents": [{"capabilities": ["repo-bootstrap", "worklog", "coordination-ledger"], "id": "cursor-local", "joined": "2026-09-12", "owner": "local-user", "role": "coordinator", "status": "active"}], "version": 1}

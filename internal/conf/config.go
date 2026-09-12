@@ -10,8 +10,9 @@ import (
 )
 
 type Server struct {
-	Host string `mapstructure:"host"`
-	Port int    `mapstructure:"port"`
+	Host      string `mapstructure:"host"`
+	AdminPort int    `mapstructure:"admin_port"`
+	RelayPort int    `mapstructure:"relay_port"`
 }
 
 type Log struct {
@@ -70,7 +71,8 @@ func Load(path string) error {
 
 func setDefaults() {
 	viper.SetDefault("server.host", "0.0.0.0")
-	viper.SetDefault("server.port", 8080)
+	viper.SetDefault("server.admin_port", 3303)
+	viper.SetDefault("server.relay_port", 1234)
 	viper.SetDefault("database.type", "sqlite")
 	viper.SetDefault("database.path", "data/data.db")
 	viper.SetDefault("log.level", "info")

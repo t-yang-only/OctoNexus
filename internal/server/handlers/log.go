@@ -16,6 +16,7 @@ import (
 
 func init() {
 	router.NewGroupRouter("/api/v1/log").
+		ServeOn(router.ServerAdmin).
 		Use(middleware.Auth()).
 		AddRoute(
 			router.NewRoute("/overview/stream", http.MethodGet).

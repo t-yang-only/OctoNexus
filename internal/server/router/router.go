@@ -9,30 +9,6 @@ import (
 )
 
 // GroupRouter represents a group of routes with shared path prefix and middlewares
-type GroupRouter struct {
-	Path        string
-	Routes      []*Route
-	Middlewares []gin.HandlerFunc
-}
-
-// Global registry for route groups
-var registeredRouters []*GroupRouter
-
-// NewGroupRouter creates a new GroupRouter with the given path and automatically registers it.
-func NewGroupRouter(path string) *GroupRouter {
-	router := &GroupRouter{
-		Path:   path,
-		Routes: make([]*Route, 0),
-	}
-	registeredRouters = append(registeredRouters, router)
-	return router
-}
-
-// Use adds middlewares to the group.
-func (g *GroupRouter) Use(middlewares ...gin.HandlerFunc) *GroupRouter {
-	g.Middlewares = append(g.Middlewares, middlewares...)
-	return g
-}
 
 // AddRoute adds a route to the group.
 func (g *GroupRouter) AddRoute(route *Route) *GroupRouter {
@@ -88,7 +64,26 @@ func GetRouterCount() int {
 
 // RegisterAll registers all globally registered route groups to the Gin engine
 func RegisterAll(engine *gin.Engine) error {
+	return RegisterOn(engine, ServerAdmin, ServerRelay)
+}
+
+// RegisterOn 只挂载归属指定端口的路由组, 双端口各调一次。
+func RegisterOn(engine *gin.Engine, kinds ...ServerKind) error {
+	wanted := make(map[ServerKind]bool, len(kinds))
+	for _, k := range kinds {
+		wanted[k] = true
+	}
 	for _, router := range registeredRouters {
+		mount := false
+		for _, k := range router.Servers {
+			if wanted[k] {
+				mount = true
+				break
+			}
+		}
+		if !mount {
+			continue
+		}
 		// Validate all routes in the group first
 		for _, route := range router.Routes {
 			if err := route.Validate(); err != nil {
@@ -108,8 +103,13 @@ func RegisterAll(engine *gin.Engine) error {
 			registerRoute(group, route.Method, route.Path, handlers)
 		}
 	}
-	registeredRouters = nil
 	return nil
+}
+
+// ResetRegistry 清空全局路由注册表, 仅测试使用: 双端口各调一次 RegisterOn 会消费注册表,
+// 单测需在两次挂载之间断言各端口路由数时用它恢复现场。
+func ResetRegistry() {
+	registeredRouters = nil
 }
 
 // registerRoute registers a single route to a Gin route group.

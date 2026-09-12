@@ -17,6 +17,7 @@ import (
 
 func init() {
 	router.NewGroupRouter("/api/v1/apikey").
+		ServeOn(router.ServerAdmin).
 		Use(middleware.Auth()).
 		Use(middleware.RequireJSON()).
 		AddRoute(
@@ -36,6 +37,7 @@ func init() {
 				Handle(deleteAPIKey),
 		)
 	router.NewGroupRouter("/api/v1/apikey").
+		ServeOn(router.ServerAdmin).
 		Use(middleware.APIKeyAuth()).
 		AddRoute(
 			router.NewRoute("/stats", http.MethodGet).

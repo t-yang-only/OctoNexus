@@ -113,17 +113,29 @@ export type ChannelStatsFormatted = {
 // 渠道尚未保存时也可试拉，故随请求携带整份渠道配置：探测用的地址、协议路径、代理、Header 与过滤表达式
 // 必须和保存后生效的完全一致，直接给编辑态即可，探测用不上的字段后端忽略。
 // 名称可为空：探测常发生在渠道尚未命名时，后端只要求地址非空。
-// 不带协议：后端一次同时探 OpenAI 与 Anthropic 两侧，协议支持由各侧响应决定。
+// probe 为真时后端对每个候选模型逐一实测 chat / response / message 三协议，协议位以实测结论为准。
 type FetchModelRequest = {
     channel: Omit<ChannelDetail, 'id' | 'keys' | 'models' | 'grants'>;
     key: string;
+    probe?: boolean;
+};
+
+// ProtocolProbe 是单个协议对单个模型的实测结论，随 FetchModel.probes 下发。
+// ok 为真表示上游按该协议完成了最小请求；失败时 error 携带上游原文摘要。
+export type ProtocolProbe = {
+    protocol: number; // Protocol 位掩码。
+    ok: boolean;
+    status: number; // 上游 HTTP 状态码；网络错误或超时未及响应为 0。
+    error?: string;
 };
 
 // FetchModel 是探测到的单个上游模型及其支持的协议集合。
-// OpenAI 侧记为 Responses 而非 Chat：Chat Completions 已被官方标记弃用，需要 Chat 的渠道由用户手动勾选。
+// 普通拉取记 /models 所在侧：OpenAI 侧记 Response（Chat 已被官方标记弃用，需手动勾选）。
+// 实测拉取（probe=true）只含实测通过的位，并附 probes 明细，可据此了解每个模型各协议的支持情况。
 export type FetchModel = {
     name: string;
     protocols: number; // Protocol 位掩码。
+    probes?: ProtocolProbe[];
 };
 
 // channelGrantListQueryOptions 供分组页查询可选授权。
@@ -283,13 +295,15 @@ export function useEnableChannel() {
  * @example
  * const fetchModel = useFetchModel();
  *
+ * // probe 为真时后端逐模型实测三协议，协议位以实测结论为准
  * fetchModel.mutate({
  *   channel: { base_url: 'https://api.openai.com', openai_response_path: '/v1/responses', ... },
  *   key: 'sk-xxx',
+ *   probe: true,
  * });
  *
- * // 在 onSuccess 中获取模型列表
- * fetchModel.data // [{ name: 'gpt-4o', protocols: 4 }, ...]
+ * // 在 onSuccess 中获取模型列表，实测模式附 probes 明细
+ * fetchModel.data // [{ name: 'gpt-4o', protocols: 6, probes: [...] }, ...]
  */
 export function useFetchModel() {
     return useMutation({

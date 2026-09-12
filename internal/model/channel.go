@@ -146,14 +146,25 @@ type CustomHeader struct {
 // 按凭据拉取上游模型列表的请求; 渠道尚未保存时也可试拉, 故随请求携带拉取所需的渠道配置。
 // 直接收整份渠道配置而不另立探测专用形状: 探测发生在编辑表单内, 提交方手上本就是完整配置,
 // 且探测用的地址, 路径, 代理与过滤表达式必须与保存后生效的完全一致, 收同一份即可; 探测用不上的字段忽略即可。
-// 不指定协议: 一次探测同时试 OpenAI 与 Anthropic 两侧, 协议支持情况由各侧的响应决定。
+// 不指定协议: 一次拉取同时试 OpenAI 与 Anthropic 两侧 /models, 协议支持情况由各侧的响应决定。
+// Probe 为真时进一步对每个候选模型逐一实测三协议, 协议位以实测结论为准, /models 只用来圈定候选。
 type ChannelFetchModelRequest struct {
 	Channel ChannelConfig `json:"channel"`                // 用于拉取的渠道配置, 提供地址, 路径, 代理与 Header。
 	Key     string        `json:"key" binding:"required"` // 拉取使用的上游凭据。
+	Probe   bool          `json:"probe"`                  // 为真时对每个候选模型实测 chat/response/message 三协议。
+}
+
+// 单个协议对单个模型的实测结论。
+type ChannelProtocolProbe struct {
+	Protocol Protocol `json:"protocol"`        // 被测协议位。
+	OK       bool     `json:"ok"`              // 上游按该协议完成一次最小请求(2xx)即为真。
+	Status   int      `json:"status"`          // 上游 HTTP 状态码; 网络错误或超时未及响应为 0。
+	Error    string   `json:"error,omitempty"` // 失败时的上游原文摘要, 已截断压平; 成功为空。
 }
 
 // 探测到的单个上游模型及其支持的协议集合。
 type ChannelFetchModel struct {
-	Name      string   `json:"name"`      // 上游模型名称。
-	Protocols Protocol `json:"protocols"` // 由探测结果得出的协议位掩码。
+	Name      string                 `json:"name"`             // 上游模型名称。
+	Protocols Protocol               `json:"protocols"`        // 协议位掩码; 实测模式下只含实测通过的位。
+	Probes    []ChannelProtocolProbe `json:"probes,omitempty"` // 各协议实测明细; 未开启实测时不返回。
 }

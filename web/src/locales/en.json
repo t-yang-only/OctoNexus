@@ -470,6 +470,7 @@
             "modelRefresh": "Fetch",
             "modelNoSelected": "No models",
             "modelRefreshSuccess": "Fetched {count} models",
+            "modelRefreshProbed": "Fetched {count} models; protocols enabled per live probe results",
             "modelRefreshFailed": "Fetch failed",
             "modelRefreshEmpty": "No models returned",
             "channelProxy": "Channel proxy",

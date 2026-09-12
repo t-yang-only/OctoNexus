@@ -69,6 +69,127 @@ func GroupGetByName(name string) (model.Group, error) {
 	return group, nil
 }
 
+// AutoGroupName 返回渠道自动分组的客户端模型名, 形如 渠道名/模型名。
+// 名称去空白, 模型名保留原大小写: 分组名是客户端请求的模型标识, 大小写属于协议语义,
+// 全局过滤等匹配另行规范化, 此处不替调用方改写。
+func AutoGroupName(channelName, modelName string) (string, error) {
+	channelName = strings.TrimSpace(channelName)
+	modelName = strings.TrimSpace(modelName)
+	if channelName == "" {
+		return "", fmt.Errorf("channel name is required")
+	}
+	if modelName == "" {
+		return "", fmt.Errorf("channel model name is required")
+	}
+	return channelName + "/" + modelName, nil
+}
+
+// autoGroupConfig 返回自动分组的固定配置: 故障转移优先按提交顺序选路,
+// 附默认 Relay 参数, 后续人工仍可在分组页改回手动或调整参数。
+func autoGroupConfig() (model.GroupMode, model.GroupRelayConfig) {
+	return model.GroupModeFailover, model.DefaultGroupRelayConfig()
+}
+
+// ensureAutoGroupsLocked 在同一事务内为指定渠道的模型补齐 渠道名/模型名 自动分组,
+// 已存在的分组按 grants 补齐缺失成员, 不删已有成员, 不改模式与 Relay 参数。
+// 幂等: 重复调用不会产生重复分组或重复成员, 只补缺失。
+// 调用方必须在渠道子表 (凭据, 模型, 授权) 同一事务内提交后调用, 否则查不到刚写入的授权。
+// 缓存由调用方在事务提交后统一刷新, 此处只写库: 事务内的行对外部缓存不可见, 写了也读不到。
+func ensureAutoGroupsLocked(tx *gorm.DB, channelID int, channelName string, modelNames []string) error {
+	channelName = strings.TrimSpace(channelName)
+	if channelName == "" {
+		return fmt.Errorf("channel name is required")
+	}
+	seenModels := make(map[string]struct{}, len(modelNames))
+	models := make([]string, 0, len(modelNames))
+	for _, name := range modelNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seenModels[name]; ok {
+			continue
+		}
+		seenModels[name] = struct{}{}
+		models = append(models, name)
+	}
+	if len(models) == 0 {
+		return nil
+	}
+
+	var channelModels []model.ChannelModel
+	if err := tx.Where("channel_id = ?", channelID).Find(&channelModels).Error; err != nil {
+		return fmt.Errorf("failed to load channel models: %w", err)
+	}
+	modelIDByName := make(map[string]int, len(channelModels))
+	for _, channelModel := range channelModels {
+		modelIDByName[channelModel.Name] = channelModel.ID
+	}
+	modelIDs := make([]int, 0, len(channelModels))
+	for _, channelModel := range channelModels {
+		modelIDs = append(modelIDs, channelModel.ID)
+	}
+	var grants []model.ChannelGrant
+	if len(modelIDs) > 0 {
+		if err := tx.Where("channel_model_id IN ?", modelIDs).Find(&grants).Error; err != nil {
+			return fmt.Errorf("failed to load channel grants: %w", err)
+		}
+	}
+	grantIDsByModel := make(map[int][]int, len(channelModels))
+	for _, grant := range grants {
+		grantIDsByModel[grant.ChannelModelID] = append(grantIDsByModel[grant.ChannelModelID], grant.ID)
+	}
+
+	mode, relayConfig := autoGroupConfig()
+	for _, modelName := range models {
+		modelID, ok := modelIDByName[modelName]
+		if !ok {
+			continue
+		}
+		grantIDs := grantIDsByModel[modelID]
+		if len(grantIDs) == 0 {
+			continue
+		}
+		sort.Ints(grantIDs)
+		groupName, err := AutoGroupName(channelName, modelName)
+		if err != nil {
+			return err
+		}
+		var group model.Group
+		if err := tx.Where("name = ?", groupName).First(&group).Error; err != nil {
+			if err != gorm.ErrRecordNotFound {
+				return fmt.Errorf("failed to load auto group %q: %w", groupName, err)
+			}
+			group = model.Group{Name: groupName, Mode: mode, RelayConfig: relayConfig}
+			if err := tx.Create(&group).Error; err != nil {
+				return fmt.Errorf("failed to create auto group %q: %w", groupName, err)
+			}
+		}
+		var items []model.GroupItem
+		if err := tx.Where("group_id = ?", group.ID).Find(&items).Error; err != nil {
+			return fmt.Errorf("failed to load auto group items %q: %w", groupName, err)
+		}
+		grantSet := make(map[int]struct{}, len(items))
+		maxPriority := 0
+		for _, item := range items {
+			grantSet[item.ChannelGrantID] = struct{}{}
+			if item.Priority > maxPriority {
+				maxPriority = item.Priority
+			}
+		}
+		for _, grantID := range grantIDs {
+			if _, ok := grantSet[grantID]; ok {
+				continue
+			}
+			maxPriority++
+			if err := tx.Create(&model.GroupItem{GroupID: group.ID, ChannelGrantID: grantID, Priority: maxPriority}).Error; err != nil {
+				return fmt.Errorf("failed to append auto group item %q: %w", groupName, err)
+			}
+		}
+	}
+	return nil
+}
+
 // GroupCreate 创建分组及其成员并刷新缓存, 返回创建后的分组。
 // 成员的提交顺序即优先级顺序。
 func GroupCreate(req *model.GroupCreateRequest, ctx context.Context) (*model.Group, error) {

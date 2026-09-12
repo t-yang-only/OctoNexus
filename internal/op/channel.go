@@ -63,6 +63,7 @@ func ChannelStatsList() []model.ChannelStats {
 // ChannelCreate 创建渠道及其凭据, 模型与授权, 返回创建后的完整配置。
 // 三者在同一事务内落库: 授权按名称引用两侧, 待凭据与模型拿到主键后由 syncChannelGrants 解析,
 // 由此建一个带授权的渠道只需一趟请求。
+// 模型落库后同事务内为其补齐 渠道名/模型名 自动分组, 已存在同名分组只补成员不覆盖。
 func ChannelCreate(detail *model.ChannelDetail, ctx context.Context) (*model.ChannelDetail, error) {
 	if err := normalizeChannelDetail(detail); err != nil {
 		return nil, err
@@ -73,7 +74,10 @@ func ChannelCreate(detail *model.ChannelDetail, ctx context.Context) (*model.Cha
 		if err := tx.Create(&channel).Error; err != nil {
 			return fmt.Errorf("failed to create channel: %w", err)
 		}
-		return syncChannelChildren(tx, channel.ID, detail)
+		if err := syncChannelChildren(tx, channel.ID, detail); err != nil {
+			return err
+		}
+		return ensureAutoGroupsLocked(tx, channel.ID, channel.Name, detail.Models)
 	}); err != nil {
 		return nil, err
 	}
@@ -82,6 +86,10 @@ func ChannelCreate(detail *model.ChannelDetail, ctx context.Context) (*model.Cha
 	// 凭据, 模型与授权的主键都在事务内分配, 此刻只在库里; 重载子表缓存以让授权候选与转发都能查到。
 	if err := reloadChannelChildren(ctx, channel.ID); err != nil {
 		return nil, err
+	}
+	// 自动分组在事务内新建或补了成员, 分组缓存需一并刷新才能被 /v1/models 与转发看到。
+	if err := groupRefreshCache(ctx); err != nil {
+		return nil, fmt.Errorf("failed to refresh groups: %w", err)
 	}
 	created := channelDetail(channel)
 	return &created, nil
@@ -108,7 +116,11 @@ func ChannelUpdate(detail *model.ChannelDetail, ctx context.Context) (*model.Cha
 			Updates(&model.Channel{ChannelConfig: detail.ChannelConfig}).Error; err != nil {
 			return fmt.Errorf("failed to update channel: %w", err)
 		}
-		return syncChannelChildren(tx, detail.ID, detail)
+		if err := syncChannelChildren(tx, detail.ID, detail); err != nil {
+			return err
+		}
+		// 渠道改名或新增模型后同事务内补齐对应的自动分组; 模型与授权已被 syncChannelChildren 更新。
+		return ensureAutoGroupsLocked(tx, detail.ID, detail.Name, detail.Models)
 	}); err != nil {
 		return nil, err
 	}

@@ -470,6 +470,7 @@
             "modelRefresh": "拉取",
             "modelNoSelected": "暫無模型",
             "modelRefreshSuccess": "已拉取 {count} 個模型",
+            "modelRefreshProbed": "已拉取 {count} 個模型，協議按實測結論啟用",
             "modelRefreshFailed": "拉取失敗",
             "modelRefreshEmpty": "未取得模型",
             "channelProxy": "通道代理",

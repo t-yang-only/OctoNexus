@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="web/public/logo.svg" alt="Octopus Logo" width="120" height="120">
+<img src="web/public/logo.svg" alt="OctoNexus Logo" width="120" height="120">
 
-### Octopus
+### OctoNexus
 
 **A Simple, Beautiful, and Elegant LLM API Aggregation Service for Individuals**
 
@@ -10,6 +10,9 @@
 
 </div>
 
+> **OctoNexus** = **Octo** (from [Octopus](https://github.com/bestruirui/octopus)) + **Nexus** (hub).
+> Many tentacles (channels), one traffic hub — an extended fork of `bestruirui/octopus`.
+> 本仓库基于 [bestruirui/octopus](https://github.com/bestruirui/octopus) 二次开发（GPL-3.0），改动范围见 [docs/worklog](docs/worklog/README.md)。
 
 ## ✨ Features
 
