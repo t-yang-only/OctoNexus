@@ -12,19 +12,19 @@
 | T-research-002 | api-monitor connectors 精读：余额/公告接口与指纹 diff 移植清单 | research | done | cursor-local | 2026-09-13 | 报告 docs/research/2026-09-13-T-research-002-api-monitor移植清单.md（P1–P8）；claim 见 claims/2026-09-13-cursor-local-T-research-002.md |
 | T-research-003 | litellm router_strategy/cooldown 精读：pickGroupItem 扩展设计稿 | research | done | cursor-local | 2026-09-13 | 报告 docs/research/2026-09-13-T-research-003-路由策略设计稿.md；claim 见 claims/2026-09-13-cursor-local-T-research-003.md |
 | T-research-004 | 告警通知设计稿：事件源盘点+渠道抽象+规则 schema | research | done | cursor-local | 2026-09-13 | 报告 docs/research/2026-09-13-T-research-004-告警通知设计稿.md；claim 见 claims/2026-09-13-cursor-local-T-research-004.md |
-| T-pool-001 | 号池管理选型：ChatGPT/Gemini 账号池开源候选+并入 octopus 方案（供用户选择） | pool | todo | cursor-local | 2026-09-13 | NM-CUR-075 认领：承接 068/070 started 行；claim 见 claims/2026-09-13-cursor-local-T-pool-001.md；只出候选清单+方案，不做共享账号池实施 |
-| T-quota-001 | 余额/额度采集与阈值告警：上游余额接口定时采集落库，低于阈值告警 | quota | doing | cursor-local | 2026-09-13 | NM-CUR-117 认领：只做采集+告警，不含停用；claim 见 claims/2026-09-13-cursor-local-T-quota-001.md |
-| T-quota-002 | 余额归零自动停模型：归零停用对应模型授权/成员，手动恢复+审计 | quota | todo | - | 2026-09-13 | NM-CUR-107 拆分登记：承接 R-quota-002（用户原话）；依赖 T-quota-001 的余额数据；停用粒度与恢复口径待认领时定 |
-| T-group-001 | 分组嵌套数据模型：GroupItem 支持引用子分组，防循环+级联语义+迁移 | group | review | cursor-local | 2026-09-13 | NM-CUR-113 完成模型层：ChildGroupID/ChildGroupName+互斥校验+防循环+013迁移+3单测全过；实现记录见 worklog/2026-09-13-T-group-001分组嵌套数据模型.md；待验收（选路T-group-002/前端T-group-003未动） |
-| T-group-002 | 分组嵌套选路递归展开：relay 按树形递归解析，亲和/冷却/上限语义 | group | todo | - | 2026-09-13 | NM-CUR-119 曾认领但前置T-group-001产物灭失未实施，认领回滚待重领；见 worklog/2026-09-13-巡检119抢险与构建链全绿.md |
-| T-group-003 | 分组嵌套前端：树形展示/子分组选择器+三语 i18n | group | doing | cursor-local | 2026-09-13 | NM-CUR-120 认领：只做 UI，不改选路；claim 见 claims/2026-09-13-cursor-local-T-group-003.md |
-| T-acct-001 | 官方账号授权接入：OpenAI/Gemini/Claude 官方授权扫码+套餐/健康/5H7D窗口读取 | account | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-acct-001；OAuth/扫码凭据加密存，刷新续期；只做接入+读取 |
-| T-acct-002 | 中转站用户登录：NA 用户登录+自查；S2 用户登录+Keys/订阅/quotas读取 | account | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-acct-002；普通用户凭证加密存，落库口径待认领时定 |
-| T-acct-003 | Token/Key 健康监控：NA-Token/S2-Token/Admin-costs/OpenAI-Key/Anthropic-Key 五类探测 | account | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-acct-003；复用 probeModels 实测链路；Admin costs 需官方管理权限单独门 |
-| T-acct-004 | 手动订阅+通用 HTTP 余额：无接口套餐手工录入；自定义 JSON 余额接口适配 | account | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-acct-004；字段 schema 待认领时定 |
-| T-acct-005 | 手动登录跳转页：NA/S2 生成一次性跳转页防验证码拦截 | account | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-login-001；一次性 token+过期+审计；防滥用门待认领时定 |
-| T-pool-002 | 官方账号号池转发：Google/ChatGPT 官方账号当渠道做轮询转发 | pool | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-pool-002；账号→渠道建模，凭据复用 T-acct-001；依赖 T-route-002 均衡 |
-| T-route-002 | 均衡请求：号池内轮询/加权/最低延迟，老 068/070 选型链收敛到此 | route | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-pool-002；068/070/075等37占位行全部收敛关闭；算法口径待认领时定 |
-| T-proto-001 | 连接协议转化：官方账号↔OpenAI/Anthropic/Gemini 协议互转验证 | relay | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-pool-002；复用现有 transformer 链；矩阵待认领时定 |
-| T-test-001 | 本地备份隔离测试：导入数据备份到隔离库验证登录/渠道/分组/协议转化 | test | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-test-001；备份在仓外不入库，隔离端口+测后删库；分配待用户指派 |
-| T-log-002 | 本地日志错误分析：读 7 份日志包定位历史错误并修复 | log | todo | - | 2026-09-13 | NM-CUR-123 拆分登记：承接 R-log-002；只读分析，修错另立项；分配待用户指派 |
+| T-pool-001 | 号池管理选型：ChatGPT/Gemini 账号池开源候选+并入 octopus 方案（供用户选择） | pool | done | cursor-local | 2026-09-13 | 按137线路收口：E 车道 135 会话产出一份候选清单并入 T-pool-002 设计稿；登记台 068–136 号池占位行全部标"已收敛"；后续实体工作在 T-pool-002/T-route-002，不再新增选型行 |
+| T-quota-001 | 余额/额度采集与阈值告警：上游余额接口定时采集落库，低于阈值告警 | quota | doing | cursor-local | 2026-09-13 | B 车道/117：W1#1。W0 余额链已过门（解析/指纹/采集/事件在仓）；剩 task 5min 调度+channel→监控凭证映射+QuotaZeroStop 集成测试 1 例；过门才开 W2 |
+| T-quota-002 | 余额归零自动停模型：归零停用对应模型授权/成员，手动恢复+审计 | quota | done | cursor-local | 2026-09-13 | NM-CUR-124 实施：凭据级停用幂等+手动恢复+QuotaAction审计+2单测；链路验收随 B 车道 W1 集成测试一并确认 |
+| T-group-001 | 分组嵌套数据模型：GroupItem 支持引用子分组，防循环+级联语义+迁移 | group | review | cursor-local | 2026-09-13 | A 车道/134：W0#1。以当前树文件+迁移+非缓存测试实证复核，结论写本表；过门放行 T-group-002/003，不过门打回重建 |
+| T-group-002 | 分组嵌套选路递归展开：relay 按树形递归解析，亲和/冷却/上限语义 | group | todo | - | 2026-09-13 | A 车道：W1#2，前置 W0#1 过门。展平/防循环/深度截断/空树四单测+语义冻结口径（亲和/冷却/上限按顶层） |
+| T-group-003 | 分组嵌套前端：树形展示/子分组选择器+三语 i18n | group | doing | cursor-local | 2026-09-13 | F 车道/120：W2#1，前置 W1#2 过门；门过前只做三语 i18n 骨架，禁写 child_group_id 字段 |
+| T-acct-001 | 官方账号授权接入：OpenAI/Gemini/Claude 官方授权扫码+套餐/健康/5H7D窗口读取 | account | doing | cursor-local | 2026-09-13 | C 车道/128：W1#3。authorize/callback/读取三接口+PKCE state+密文落库+state 过期/一次性 code 单测；合法官方授权，禁验证码绕过 |
+| T-acct-002 | 中转站用户登录：NA 用户登录+自查；S2 用户登录+Keys/订阅/quotas读取 | account | done | cursor-local | 2026-09-13 | NM-CUR-129 完成：读侧客户端 health/relay_account*.go（NA cookie 会话+S2 bearer，两形状宽容解析）+httptest 单测；落库/UI/定时属后续任务；报告见 worklog/2026-09-13-T-acct-002中转站登录129.md |
+| T-acct-003 | Token/Key 健康监控：NA-Token/S2-Token/Admin-costs/OpenAI-Key/Anthropic-Key 五类探测 | account | todo | - | 2026-09-13 | D 车道/129 转：W1#4。四类 httptest 先行；Admin-costs 留权限门不实现 |
+| T-acct-004 | 手动订阅+通用 HTTP 余额：无接口套餐手工录入；自定义 JSON 余额接口适配 | account | todo | - | 2026-09-13 | D 车道：W2#3。schema+校验+超时+1MB 上限+JSON path 错误单测 |
+| T-acct-005 | 手动登录跳转页：NA/S2 生成一次性跳转页防验证码拦截 | account | todo | - | 2026-09-13 | C 车道：W2#4，前置 W1#3 过门。一次性 token+过期+重复消费拒绝+审计+管理员权限门 |
+| T-pool-002 | 官方账号号池转发：Google/ChatGPT 官方账号当渠道做轮询转发 | pool | todo | - | 2026-09-13 | E 车道：W3#1，前置 W1#3+W2#2+T-proto-001 矩阵过门；OpenAI/Gemini 先行，Claude 后续 |
+| T-route-002 | 均衡请求：号池内轮询/加权/最低延迟，老 068/070 选型链收敛到此 | route | todo | - | 2026-09-13 | A 车道：W2#2，前置 W1#1 过门。加权轮询第一版+健康/冷却/归零剔除+最低延迟可插拔接口 |
+| T-proto-001 | 连接协议转化：官方账号↔OpenAI/Anthropic/Gemini 协议互转验证 | relay | todo | - | 2026-09-13 | G 车道：W3#2，前置 W1 全过。OpenAI Chat↔Anthropic Messages 五类用例矩阵（非流式/流式/usage/错误/tool call） |
+| T-test-001 | isolated backup acceptance: import local backup to separate DB and verify auth/channels/groups/protocols | test | doing | cursor-local | 2026-09-13 | H 车道/136：W1#5。备份副本→隔离库→双端口→验证→删库留报告；不改备份源文件 |
+| T-log-002 | 本地日志错误分析：读 7 份日志包定位历史错误并修复 | log | todo | - | 2026-09-13 | I 车道/133：W0#3。只读分析报告（证据行+分类+修复优先级）；修错另立项 |
