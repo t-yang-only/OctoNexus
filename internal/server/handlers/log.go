@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/relay"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
@@ -37,6 +39,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/clear", http.MethodDelete).
 				Handle(clearLog),
+		).
+		AddRoute(
+			router.NewRoute("/history", http.MethodGet).
+				Handle(listHistory),
 		)
 }
 
@@ -81,6 +87,23 @@ func getResponseBody(c *gin.Context) {
 		return
 	}
 	resp.Success(c, relay.ResponseBody(id))
+}
+
+// listHistory 按状态/模型/渠道/Key/关键字倒序分页查询历史日志。
+// 查询参数: status/model/channel/apikey/q/limit/offset, 全部可选。
+func listHistory(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	logs, total := op.RelayLogList(model.RelayLogFilter{
+		Status:  c.Query("status"),
+		Model:   c.Query("model"),
+		Channel: c.Query("channel"),
+		APIKey:  c.Query("apikey"),
+		Q:       c.Query("q"),
+		Limit:   limit,
+		Offset:  offset,
+	})
+	resp.Success(c, gin.H{"items": logs, "total": total})
 }
 
 // streamOverview 逐条发送建立连接时的概览及后续请求更新。

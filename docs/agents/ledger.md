@@ -12,3 +12,4 @@
 | T-research-002 | api-monitor connectors 精读：余额/公告接口与指纹 diff 移植清单 | research | done | cursor-local | 2026-09-13 | 报告 docs/research/2026-09-13-T-research-002-api-monitor移植清单.md（P1–P8）；claim 见 claims/2026-09-13-cursor-local-T-research-002.md |
 | T-research-003 | litellm router_strategy/cooldown 精读：pickGroupItem 扩展设计稿 | research | done | cursor-local | 2026-09-13 | 报告 docs/research/2026-09-13-T-research-003-路由策略设计稿.md；claim 见 claims/2026-09-13-cursor-local-T-research-003.md |
 | T-research-004 | 告警通知设计稿：事件源盘点+渠道抽象+规则 schema | research | done | cursor-local | 2026-09-13 | 报告 docs/research/2026-09-13-T-research-004-告警通知设计稿.md；claim 见 claims/2026-09-13-cursor-local-T-research-004.md |
+| T-pool-001 | 号池管理选型：ChatGPT/Gemini 账号池开源候选+并入 octopus 方案（供用户选择） | pool | todo | cursor-local | 2026-09-13 | NM-CUR-075 认领：承接 068/070 started 行；claim 见 claims/2026-09-13-cursor-local-T-pool-001.md；只出候选清单+方案，不做共享账号池实施 |

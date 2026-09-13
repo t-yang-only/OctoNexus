@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, Clock, Cpu, Database, DollarSign, KeyRound, Loader2, Square } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, Clock, Cpu, Database, DollarSign, Gauge, KeyRound, Loader2, Percent, Square, Zap } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
@@ -12,6 +12,8 @@ import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import { formatCacheHitRate, formatCNYCost, formatFirstByteMs, formatTPS } from '@/lib/log-metrics';
+import { useLogFieldVisibility } from './store';
 import { CopyIconButton } from '@/components/common/CopyButton';
 import { toast } from 'sonner';
 import { MemberStatus } from '@/components/modules/group/MemberStatus';
@@ -66,24 +68,39 @@ const PROTOCOL_LABELS: Record<number, string> = {
 };
 
 // LogMetrics 渲染时间、API Key、耗时、费用和 Token 指标; card 变体用于卡片栅格, footer 变体用于弹窗底部。
+// 首字时间/TPS/缓存命中率三项按字段可见性开关渲染, 公式见 @/lib/log-metrics（语义借鉴 fork 卡片, 实现重写）。
 function LogMetrics({ log, now, brandColor, variant }: { log: RelayLogOverview; now: number; brandColor: string; variant: 'card' | 'footer' }) {
+    const visibility = useLogFieldVisibility();
     const cachedTokens = log.usage.prompt_tokens_details?.cached_tokens ?? 0;
     // 进行中的请求按共享时钟推算耗时, 结束后改用后端记录的最终耗时。
     const duration = log.status === 'running' || log.status === 'committed'
         ? formatMilliseconds(now - new Date(log.started_at).getTime())
         : formatMilliseconds(log.duration / 1_000_000);
+    // 首字时间: 已提交后用首字节时间减请求到达; 未提交显示占位。
+    const firstByteMs = log.first_byte_at
+        ? new Date(log.first_byte_at).getTime() - new Date(log.started_at).getTime()
+        : -1;
+    // TPS 按输出 token 与总耗时计算; 缓存命中率按缓存读取占输入总量。
+    const elapsedMs = log.status === 'running' || log.status === 'committed'
+        ? now - new Date(log.started_at).getTime()
+        : log.duration / 1_000_000;
+    const tps = formatTPS(log.usage.completion_tokens, elapsedMs);
+    const hitRate = formatCacheHitRate(cachedTokens, log.usage.prompt_tokens);
     const metrics = [
-        { key: 'time', Icon: Clock, iconClassName: 'size-3.5 shrink-0', iconStyle: { color: brandColor } as CSSProperties, value: formatTime(log.started_at), valueClassName: 'tabular-nums', cellClassName: 'col-span-4 whitespace-nowrap md:col-span-1' },
-        { key: 'apiKey', Icon: KeyRound, iconClassName: 'size-3.5 shrink-0 text-orange-500', value: log.api_key_name || '-', valueClassName: 'truncate', cellClassName: 'col-span-4 md:col-span-1' },
-        { key: 'duration', Icon: Cpu, iconClassName: 'size-3.5 shrink-0 text-blue-500', value: duration, cellClassName: 'col-span-4 md:col-span-1' },
-        { key: 'cost', Icon: DollarSign, iconClassName: 'size-3.5 shrink-0 text-emerald-500', value: log.cost.toFixed(6), valueClassName: 'font-medium text-emerald-600 dark:text-emerald-400', cellClassName: 'col-span-4 md:col-span-1' },
-        { key: 'prompt', Icon: ArrowDownToLine, iconClassName: 'size-3.5 shrink-0 text-green-500', value: (log.usage.prompt_tokens - cachedTokens).toLocaleString(), cellClassName: 'col-span-3 md:col-span-1' },
-        { key: 'cached', Icon: Database, iconClassName: 'size-3.5 shrink-0 text-cyan-500', value: cachedTokens.toLocaleString(), cellClassName: 'col-span-3 md:col-span-1' },
-        { key: 'completion', Icon: ArrowUpFromLine, iconClassName: 'size-3.5 shrink-0 text-purple-500', value: log.usage.completion_tokens.toLocaleString(), cellClassName: 'col-span-3 md:col-span-1' },
-        { key: 'cacheWrite', Icon: Database, iconClassName: 'size-3.5 shrink-0 text-orange-500', value: (log.usage.prompt_tokens_details?.write_cached_tokens ?? 0).toLocaleString(), cellClassName: 'col-span-3 md:col-span-1' },
+        { key: 'time', Icon: Clock, iconClassName: 'size-3.5 shrink-0', iconStyle: { color: brandColor } as CSSProperties, value: formatTime(log.started_at), valueClassName: 'tabular-nums', cellClassName: 'col-span-4 whitespace-nowrap md:col-span-1', visible: visibility.time },
+        { key: 'apiKey', Icon: KeyRound, iconClassName: 'size-3.5 shrink-0 text-orange-500', value: log.api_key_name || '-', valueClassName: 'truncate', cellClassName: 'col-span-4 md:col-span-1', visible: visibility.apiKey },
+        { key: 'duration', Icon: Cpu, iconClassName: 'size-3.5 shrink-0 text-blue-500', value: duration, cellClassName: 'col-span-4 md:col-span-1', visible: visibility.duration },
+        { key: 'firstByte', Icon: Zap, iconClassName: 'size-3.5 shrink-0 text-amber-500', value: formatFirstByteMs(firstByteMs), cellClassName: 'col-span-4 md:col-span-1', visible: visibility.firstByte },
+        { key: 'cost', Icon: DollarSign, iconClassName: 'size-3.5 shrink-0 text-emerald-500', value: formatCNYCost(log.cost), valueClassName: 'font-medium text-emerald-600 dark:text-emerald-400', cellClassName: 'col-span-4 md:col-span-1', visible: visibility.cost },
+        { key: 'tps', Icon: Gauge, iconClassName: 'size-3.5 shrink-0 text-lime-500', value: tps, cellClassName: 'col-span-4 md:col-span-1', visible: visibility.tps },
+        { key: 'cacheHitRate', Icon: Percent, iconClassName: 'size-3.5 shrink-0 text-teal-500', value: hitRate, cellClassName: 'col-span-4 md:col-span-1', visible: visibility.cacheHitRate },
+        { key: 'prompt', Icon: ArrowDownToLine, iconClassName: 'size-3.5 shrink-0 text-green-500', value: (log.usage.prompt_tokens - cachedTokens).toLocaleString(), cellClassName: 'col-span-3 md:col-span-1', visible: visibility.prompt },
+        { key: 'cached', Icon: Database, iconClassName: 'size-3.5 shrink-0 text-cyan-500', value: cachedTokens.toLocaleString(), cellClassName: 'col-span-3 md:col-span-1', visible: visibility.cached },
+        { key: 'completion', Icon: ArrowUpFromLine, iconClassName: 'size-3.5 shrink-0 text-purple-500', value: log.usage.completion_tokens.toLocaleString(), cellClassName: 'col-span-3 md:col-span-1', visible: visibility.completion },
+        { key: 'cacheWrite', Icon: Database, iconClassName: 'size-3.5 shrink-0 text-orange-500', value: (log.usage.prompt_tokens_details?.write_cached_tokens ?? 0).toLocaleString(), cellClassName: 'col-span-3 md:col-span-1', visible: false },
     ];
 
-    return metrics.map((metric) => (
+    return metrics.filter((metric) => metric.visible).map((metric) => (
         <div
             key={metric.key}
             title={metric.key === 'apiKey' ? log.api_key_name : undefined}

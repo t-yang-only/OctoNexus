@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	TaskPriceUpdate = "price_update"
-	TaskStatsSave   = "stats_save"
-	TaskCleanLLM    = "clean_llm"
+	TaskPriceUpdate  = "price_update"
+	TaskStatsSave    = "stats_save"
+	TaskRelayLogClean = "relay_log_clean"
+	TaskCleanLLM     = "clean_llm"
 )
 
 func Init() {
@@ -38,4 +39,9 @@ func Init() {
 	}
 	statsSaveInterval := time.Duration(statsSaveIntervalMinutes) * time.Minute
 	Register(TaskStatsSave, statsSaveInterval, false, op.StatsSaveDBTask)
+
+	// 注册历史日志清理任务: 与统计落库同周期, 按保留期删除过期 relay_logs。
+	Register(TaskRelayLogClean, statsSaveInterval, false, func() {
+		op.RelayLogClean(model.RelayLogRetentionDays)
+	})
 }

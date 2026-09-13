@@ -16,11 +16,60 @@ export interface RelayUsage {
     } | null;
 }
 
+// RelayHistoryItem 是历史日志接口返回的单条持久化快照。
+export interface RelayHistoryItem {
+    id: number;
+    request_id: number;
+    status: string;
+    model: string;
+    group_id: number;
+    api_key_name: string;
+    target_channel: string;
+    target_model: string;
+    target_protocol: number;
+    started_at: string;
+    first_byte_ms: number;
+    duration_ms: number;
+    prompt_tokens: number;
+    cached_tokens: number;
+    completion_tokens: number;
+    cost: number;
+    error: string;
+}
+
+// RelayHistoryFilter 是历史查询的筛选条件, 空串表示不过滤。
+export interface RelayHistoryFilter {
+    status?: string;
+    model?: string;
+    channel?: string;
+    apikey?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+}
+
+// useRelayHistory 按筛选条件查询持久化历史日志（分页）。
+export function useRelayHistory(filter: RelayHistoryFilter) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+        if (value !== undefined && value !== '') params.set(key, String(value));
+    }
+    const queryKey = ['logs', 'history', params.toString()];
+    return useQuery({
+        queryKey,
+        queryFn: () =>
+            apiRequest<{ items: RelayHistoryItem[]; total: number }>(
+                `/api/v1/log/history?${params.toString()}`
+            ),
+    });
+}
+
 // RelayLogOverview 是请求状态流发送的完整进程内请求状态。
 export interface RelayLogOverview {
     id: number;
     status: RequestState;
     started_at: string;
+    first_byte_at?: string; // 首字节写出时间, 未提交时为空; 供卡片派生"首字时间"。
     duration: number;
     model: string;
     protocol: number;
@@ -53,10 +102,14 @@ export function useStopRound() {
 }
 
 // useLogs 订阅进程内日志概览，并按 RequestID 更新同一条记录。
+// refresh 供自动刷新偏好调用: 通过 bump 连接键重建 SSE 兜底断线/空闲, SSE 正常时仅重建连接。
 export function useLogs() {
     const [logs, setLogs] = useState<RelayLogOverview[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
+    const [connectKey, setConnectKey] = useState(0);
+
+    const refresh = () => setConnectKey((key) => key + 1);
 
     useEffect(() => {
         const source = new EventSource('/api/v1/log/overview/stream', { withCredentials: true });
@@ -97,9 +150,9 @@ export function useLogs() {
         return () => {
             source.close();
         };
-    }, []);
+    }, [connectKey]);
 
-    return { logs, isLoading, error };
+    return { logs, isLoading, error, refresh };
 }
 
 // useLogRequestBody 在调用方启用时按需获取指定日志的请求体。

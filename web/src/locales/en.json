@@ -419,7 +419,12 @@
     "log": {
         "list": {
             "empty": "No logs yet",
-            "disconnected": "Log stream disconnected, reconnecting"
+            "disconnected": "Log stream disconnected, reconnecting",
+            "filtered": "Filtered {shown}/{total}",
+            "search": "Search logs",
+            "searchPlaceholder": "Model/Channel/Key/Error",
+            "clearSearch": "Clear search",
+            "options": "Log options"
         },
         "status": {
             "committed": "Responding"
@@ -446,6 +451,24 @@
             "waitingChannelSelection": "Waiting for channel selection",
             "waitingResponse": "Waiting for upstream response",
             "responseStreaming": "Upstream responded; streaming is in progress"
+        },
+        "filter": {
+            "status": "Status",
+            "all": "All",
+            "fields": "Card fields",
+            "reset": "Reset",
+            "autoRefresh": "Auto refresh",
+            "off": "Off",
+            "time": "Time",
+            "apiKey": "API Key",
+            "duration": "Duration",
+            "firstByte": "First byte",
+            "cost": "Cost",
+            "tps": "TPS",
+            "cacheHitRate": "Cache hit rate",
+            "prompt": "Input",
+            "cached": "Cached",
+            "completion": "Output"
         }
     },
     "channel": {
