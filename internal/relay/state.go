@@ -38,6 +38,7 @@ type RequestState struct {
 
 	Round          int            `json:"round"`            // 最新一轮循环的递增序号, 人工中止按此匹配以免误杀下一轮。
 	RoundStartedAt time.Time      `json:"round_started_at"` // 最新一轮上游请求的开始时间。
+	FirstByteAt    time.Time      `json:"first_byte_at"`    // 首字节写出客户端的时间, 未提交时为零值; 富化卡片的首字耗时即 FirstByteAt-StartedAt。
 	TargetChannel  string         `json:"target_channel"`   // 最新一轮选中的渠道名称。
 	TargetModel    string         `json:"target_model"`     // 最新一轮实际请求上游的模型名称。
 	TargetProtocol model.Protocol `json:"target_protocol"`  // 最新一轮实际请求上游的协议, 与 Protocol 不同即本轮做了跨协议转换; 0 表示尚未选出。
@@ -139,11 +140,15 @@ func (r *RequestState) wait(ctx context.Context, seconds int) bool {
 }
 
 // markCommitted 标记响应已提交; 流式响应在此之后仍会持续转发, 故必须先于提交动作调用。
+// 首字节时间只记录第一次提交: 非流式一次写完, 流式首帧写出, 后续帧不再覆盖。
 func (r *RequestState) markCommitted() {
 	mu.Lock()
 	defer mu.Unlock()
 
 	r.Status = StatusCommitted
+	if r.FirstByteAt.IsZero() {
+		r.FirstByteAt = time.Now()
+	}
 	publishRequestLocked(r)
 }
 
@@ -184,7 +189,7 @@ func (r *RequestState) markCanceled(err error, responseBody string, usage *llm.U
 	r.finishLocked(usage)
 }
 
-// finishLocked 写入用量和费用, 发布终态, 更新请求级统计并裁剪历史; 调用方必须持有锁。
+// finishLocked 写入用量和费用, 发布终态, 更新请求级统计, 落库历史快照并裁剪内存历史; 调用方必须持有锁。
 func (r *RequestState) finishLocked(usage *llm.Usage) {
 	r.Sending = false
 	r.cancel = nil
@@ -206,6 +211,33 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 	if r.apiKeyID > 0 {
 		_ = op.StatsAPIKeyUpdate(r.apiKeyID, metrics)
 	}
+	// 终态落库历史快照: 首字节毫秒未提交记 -1, 供日志页历史筛选与卡片"首字时间"回退。
+	firstByteMs := int64(-1)
+	if !r.FirstByteAt.IsZero() {
+		firstByteMs = r.FirstByteAt.Sub(r.StartedAt).Milliseconds()
+	}
+	cachedTokens := int64(0)
+	if r.Usage.PromptTokensDetails != nil {
+		cachedTokens = r.Usage.PromptTokensDetails.CachedTokens
+	}
+	op.RelayLogSave(model.RelayLog{
+		RequestID:      r.ID,
+		Status:         string(r.Status),
+		Model:          r.Model,
+		GroupID:        r.GroupID,
+		APIKeyName:     r.APIKeyName,
+		TargetChannel:  r.TargetChannel,
+		TargetModel:    r.TargetModel,
+		TargetProtocol: int(r.TargetProtocol),
+		StartedAt:      r.StartedAt,
+		FirstByteMs:    firstByteMs,
+		DurationMs:     r.Duration.Milliseconds(),
+		PromptTokens:   r.Usage.PromptTokens,
+		CachedTokens:   cachedTokens,
+		CompletionToks: r.Usage.CompletionTokens,
+		Cost:           r.Cost,
+		Error:          r.Error,
+	})
 	publishRequestLocked(r)
 
 	finished := 0

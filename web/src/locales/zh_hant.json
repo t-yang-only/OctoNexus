@@ -419,7 +419,12 @@
     "log": {
         "list": {
             "empty": "暫無日誌",
-            "disconnected": "日誌連線已中斷，正在重新連線"
+            "disconnected": "日誌連線已中斷，正在重新連線",
+            "filtered": "已篩選 {shown}/{total}",
+            "search": "搜尋日誌",
+            "searchPlaceholder": "模型/供應源/Key/錯誤",
+            "clearSearch": "清除搜尋",
+            "options": "日誌選項"
         },
         "status": {
             "committed": "回應中"
@@ -446,6 +451,24 @@
             "waitingChannelSelection": "正在等待選擇供應源",
             "waitingResponse": "正在等待上游回應",
             "responseStreaming": "上游已回應，串流傳輸正在進行"
+        },
+        "filter": {
+            "status": "狀態",
+            "all": "全部",
+            "fields": "卡片欄位",
+            "reset": "重設",
+            "autoRefresh": "自動重新整理",
+            "off": "關",
+            "time": "時間",
+            "apiKey": "API Key",
+            "duration": "耗時",
+            "firstByte": "首字時間",
+            "cost": "費用",
+            "tps": "TPS",
+            "cacheHitRate": "快取命中率",
+            "prompt": "輸入",
+            "cached": "快取",
+            "completion": "輸出"
         }
     },
     "channel": {
