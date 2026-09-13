@@ -20,11 +20,12 @@
 | T-group-003 | 分组嵌套前端：树形展示/子分组选择器+三语 i18n | group | doing | cursor-local | 2026-09-13 | F 车道/120：W2#1，前置 W1#2 过门；门过前只做三语 i18n 骨架，禁写 child_group_id 字段 |
 | T-acct-001 | 官方账号授权接入：OpenAI/Gemini/Claude 官方授权扫码+套餐/健康/5H7D窗口读取 | account | doing | cursor-local | 2026-09-13 | C 车道/128：W1#3。authorize/callback/读取三接口+PKCE state+密文落库+state 过期/一次性 code 单测；合法官方授权，禁验证码绕过 |
 | T-acct-002 | 中转站用户登录：NA 用户登录+自查；S2 用户登录+Keys/订阅/quotas读取 | account | done | cursor-local | 2026-09-13 | NM-CUR-129 完成：读侧客户端 health/relay_account*.go（NA cookie 会话+S2 bearer，两形状宽容解析）+httptest 单测；落库/UI/定时属后续任务；报告见 worklog/2026-09-13-T-acct-002中转站登录129.md |
-| T-acct-003 | Token/Key 健康监控：NA-Token/S2-Token/Admin-costs/OpenAI-Key/Anthropic-Key 五类探测 | account | todo | - | 2026-09-13 | D 车道/129 转：W1#4。四类 httptest 先行；Admin-costs 留权限门不实现 |
-| T-acct-004 | 手动订阅+通用 HTTP 余额：无接口套餐手工录入；自定义 JSON 余额接口适配 | account | todo | - | 2026-09-13 | D 车道：W2#3。schema+校验+超时+1MB 上限+JSON path 错误单测 |
+| T-acct-003 | Token/Key 健康监控：NA-Token/S2-Token/Admin-costs/OpenAI-Key/Anthropic-Key 五类探测 | account | review | cursor-local | 2026-09-13 | NM-CUR-139 已完成；NM-CUR-146 审计复核中：鉴权头/状态码/超时/1MiB上限/Admin-costs权限门/回归测试；报告待补 |
+| T-acct-004 | 手动订阅+通用 HTTP 余额：无接口套餐手工录入；自定义 JSON 余额接口适配 | account | blocked | - | 2026-09-13 | W2#3 锁定；NM-CUR-140 曾从 T-group-002 改领但 claim/worklog 为空，未视为执行；待 W0/W1 放行后重新认领 |
 | T-acct-005 | 手动登录跳转页：NA/S2 生成一次性跳转页防验证码拦截 | account | todo | - | 2026-09-13 | C 车道：W2#4，前置 W1#3 过门。一次性 token+过期+重复消费拒绝+审计+管理员权限门 |
 | T-pool-002 | 官方账号号池转发：Google/ChatGPT 官方账号当渠道做轮询转发 | pool | todo | - | 2026-09-13 | E 车道：W3#1，前置 W1#3+W2#2+T-proto-001 矩阵过门；OpenAI/Gemini 先行，Claude 后续 |
 | T-route-002 | 均衡请求：号池内轮询/加权/最低延迟，老 068/070 选型链收敛到此 | route | todo | - | 2026-09-13 | A 车道：W2#2，前置 W1#1 过门。加权轮询第一版+健康/冷却/归零剔除+最低延迟可插拔接口 |
 | T-proto-001 | 连接协议转化：官方账号↔OpenAI/Anthropic/Gemini 协议互转验证 | relay | todo | - | 2026-09-13 | G 车道：W3#2，前置 W1 全过。OpenAI Chat↔Anthropic Messages 五类用例矩阵（非流式/流式/usage/错误/tool call） |
-| T-test-001 | isolated backup acceptance: import local backup to separate DB and verify auth/channels/groups/protocols | test | doing | cursor-local | 2026-09-13 | H 车道/136：W1#5。备份副本→隔离库→双端口→验证→删库留报告；不改备份源文件 |
-| T-log-002 | 本地日志错误分析：读 7 份日志包定位历史错误并修复 | log | todo | - | 2026-09-13 | I 车道/133：W0#3。只读分析报告（证据行+分类+修复优先级）；修错另立项 |
+| T-test-001 | isolated backup acceptance: import local backup to separate DB and verify auth/channels/groups/protocols | test | done | cursor-local | 2026-09-13 | NM-CUR-136 passed: import rows match 067 baseline, group/proto counts match, relay 3-protocol+streaming 200 on isolated ports; Auto-Model responses-timeout suspicion filed; temp dir wiped |
+| T-log-002 | 本地日志错误分析：读 7 份日志包定位历史错误并修复 | log | done | cursor-local | 2026-09-13 | W0#3 过门/NM-CUR-143 完成：P0 无崩溃；P1 代理缺失致模型下载失败+探针把 HTTP400 计入假死降级+Caddy 251 条取消噪音；P2 上游慢+历史失败率缺时间窗；报告 docs/worklog/2026-09-13-T-log-002日志分析143.md；修复拆 T-probe-4xx-001/T-probe-cancel-001/T-model-refresh-001/T-health-window-001 待立项 |
+| T-audit-001 | T-acct-003 健康探测复核：鉴权头/超时/上限/权限门/测试覆盖审计 | audit | doing | cursor-local | 2026-09-13 | 复核 NM-CUR-139 产物（health/probe_token*.go），只读审计，发现问题才修；claim 见 claims/2026-09-13-cursor-local-T-audit-001.md |
