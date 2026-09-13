@@ -13,3 +13,8 @@
 | T-research-003 | litellm router_strategy/cooldown 精读：pickGroupItem 扩展设计稿 | research | done | cursor-local | 2026-09-13 | 报告 docs/research/2026-09-13-T-research-003-路由策略设计稿.md；claim 见 claims/2026-09-13-cursor-local-T-research-003.md |
 | T-research-004 | 告警通知设计稿：事件源盘点+渠道抽象+规则 schema | research | done | cursor-local | 2026-09-13 | 报告 docs/research/2026-09-13-T-research-004-告警通知设计稿.md；claim 见 claims/2026-09-13-cursor-local-T-research-004.md |
 | T-pool-001 | 号池管理选型：ChatGPT/Gemini 账号池开源候选+并入 octopus 方案（供用户选择） | pool | todo | cursor-local | 2026-09-13 | NM-CUR-075 认领：承接 068/070 started 行；claim 见 claims/2026-09-13-cursor-local-T-pool-001.md；只出候选清单+方案，不做共享账号池实施 |
+| T-quota-001 | 余额/额度采集与阈值告警：上游余额接口定时采集落库，低于阈值告警 | quota | todo | - | 2026-09-13 | NM-CUR-107 拆分登记：承接 R-quota-001；只做采集+告警，不含自动停用（停用见 T-quota-002） |
+| T-quota-002 | 余额归零自动停模型：归零停用对应模型授权/成员，手动恢复+审计 | quota | todo | - | 2026-09-13 | NM-CUR-107 拆分登记：承接 R-quota-002（用户原话）；依赖 T-quota-001 的余额数据；停用粒度与恢复口径待认领时定 |
+| T-group-001 | 分组嵌套数据模型：GroupItem 支持引用子分组，防循环+级联语义+迁移 | group | todo | - | 2026-09-13 | NM-CUR-107 拆分登记：承接 R-group-001（用户原话）；只做模型层，不碰选路/UI |
+| T-group-002 | 分组嵌套选路递归展开：relay 按树形递归解析，亲和/冷却/上限语义 | group | todo | - | 2026-09-13 | NM-CUR-107 拆分登记：承接 R-group-001；依赖 T-group-001；防循环+深度上限待认领时定 |
+| T-group-003 | 分组嵌套前端：树形展示/子分组选择器+三语 i18n | group | todo | - | 2026-09-13 | NM-CUR-107 拆分登记：承接 R-group-001；依赖 T-group-001；只做 UI，不改选路 |
