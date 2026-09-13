@@ -28,27 +28,6 @@ const LOG_FIELD_LABEL_KEYS: Array<{ field: LogFieldName; labelKey: string }> = [
     { field: 'completion', labelKey: 'completion' },
 ];
 
-// matchLogMemoryFilter 判断单条日志是否通过内存筛选。
-export function matchLogMemoryFilter(log: RelayLogOverview, filter: LogMemoryFilter): boolean {
-    if (filter.status !== 'all' && log.status !== filter.status) return false;
-    const query = filter.query.trim().toLowerCase();
-    if (!query) return true;
-    return (
-        log.model.toLowerCase().includes(query) ||
-        log.target_channel.toLowerCase().includes(query) ||
-        log.api_key_name.toLowerCase().includes(query) ||
-        (log.error ?? '').toLowerCase().includes(query)
-    );
-}
-
-// useFilteredLogs 对 SSE 内存列表做本地过滤, 输入引用不变时返回同一数组引用以跳过重渲染。
-export function useFilteredLogs(logs: RelayLogOverview[], filter: LogMemoryFilter): RelayLogOverview[] {
-    return useMemo(() => {
-        if (filter.status === 'all' && !filter.query.trim()) return logs;
-        return logs.filter((log) => matchLogMemoryFilter(log, filter));
-    }, [logs, filter]);
-}
-
 interface LogToolbarProps {
     filter: LogMemoryFilter; // 当前内存筛选条件。
     onFilterChange: (filter: LogMemoryFilter) => void; // 更新内存筛选条件。
