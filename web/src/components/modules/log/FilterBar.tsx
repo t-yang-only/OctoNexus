@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useTranslations } from 'use-intl';
-import type { RequestState } from '@/api/log';
+import type { RelayLogOverview, RequestState } from '@/api/log';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { buttonVariants } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import type { LogMemoryFilter } from './filter';
+import { matchLogMemoryFilter, type LogMemoryFilter } from './filter';
+export type { LogMemoryFilter };
 import {
     LOG_AUTO_REFRESH_OPTIONS,
     useLogAutoRefreshStore,
@@ -31,6 +32,14 @@ const LOG_FIELD_LABEL_KEYS: Array<{ field: LogFieldName; labelKey: string }> = [
 interface LogToolbarProps {
     filter: LogMemoryFilter; // 当前内存筛选条件。
     onFilterChange: (filter: LogMemoryFilter) => void; // 更新内存筛选条件。
+}
+
+// useFilteredLogs 对 SSE 内存列表做本地过滤, 输入引用不变时返回同一数组引用以跳过重渲染。
+export function useFilteredLogs(logs: RelayLogOverview[], filter: LogMemoryFilter): RelayLogOverview[] {
+    return useMemo(() => {
+        if (filter.status === 'all' && !filter.query.trim()) return logs;
+        return logs.filter((log) => matchLogMemoryFilter(log, filter));
+    }, [logs, filter]);
 }
 
 // LogToolbar 渲染日志页的内存筛选栏与字段可见性/自动刷新偏好弹窗。
