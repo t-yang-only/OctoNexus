@@ -94,7 +94,7 @@ func groupItemsGrantIDs(t *testing.T, conn *gorm.DB, groupName string) []int {
 	}
 	ids := make([]int, 0, len(items))
 	for _, item := range items {
-		ids = append(ids, item.ChannelGrantID)
+		ids = append(ids, item.GrantRef())
 	}
 	return ids
 }
@@ -200,7 +200,7 @@ func TestEnsureAutoGroupsLocked_PreservesExisting(t *testing.T) {
 	if err := conn.Order("id ASC").First(&firstGrant).Error; err != nil {
 		t.Fatalf("load first grant: %v", err)
 	}
-	if err := conn.Create(&model.GroupItem{GroupID: pre.ID, ChannelGrantID: firstGrant.ID, Priority: 1}).Error; err != nil {
+	if err := conn.Create(&model.GroupItem{GroupID: pre.ID, ChannelGrantID: &firstGrant.ID, Priority: 1}).Error; err != nil {
 		t.Fatalf("create pre item: %v", err)
 	}
 
