@@ -91,7 +91,7 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 	res := &model.DBImportResult{RowsAffected: map[string]int64{}}
 	err := conn.Transaction(func(tx *gorm.DB) error {
 		// base tables
-		if n, err := createDoNothing(tx, dump.Channels); err != nil {
+		if n, err := createRowsRaw(tx, dump.Channels, nil, true); err != nil {
 			return fmt.Errorf("import channels: %w", err)
 		} else {
 			res.RowsAffected["channels"] = n
@@ -105,37 +105,37 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 				return fmt.Errorf("import channel stats: %w", err)
 			}
 		}
-		if n, err := createDoNothing(tx, dump.Groups); err != nil {
+		if n, err := createRowsRaw(tx, dump.Groups, nil, true); err != nil {
 			return fmt.Errorf("import groups: %w", err)
 		} else {
 			res.RowsAffected["groups"] = n
 		}
-		if n, err := createUpsertAll(tx, dump.ChannelKeys, []clause.Column{{Name: "id"}}); err != nil {
+		if n, err := createRowsRaw(tx, dump.ChannelKeys, []clause.Column{{Name: "id"}}, false); err != nil {
 			return fmt.Errorf("import channel_keys: %w", err)
 		} else {
 			res.RowsAffected["channel_keys"] = n
 		}
-		if n, err := createUpsertAll(tx, dump.ChannelModels, []clause.Column{{Name: "id"}}); err != nil {
+		if n, err := createRowsRaw(tx, dump.ChannelModels, []clause.Column{{Name: "id"}}, false); err != nil {
 			return fmt.Errorf("import channel_models: %w", err)
 		} else {
 			res.RowsAffected["channel_models"] = n
 		}
-		if n, err := createUpsertAll(tx, dump.ChannelGrants, []clause.Column{{Name: "id"}}); err != nil {
+		if n, err := createRowsRaw(tx, dump.ChannelGrants, []clause.Column{{Name: "id"}}, false); err != nil {
 			return fmt.Errorf("import channel_grants: %w", err)
 		} else {
 			res.RowsAffected["channel_grants"] = n
 		}
-		if n, err := createDoNothing(tx, dump.GroupItems); err != nil {
+		if n, err := createRowsRaw(tx, dump.GroupItems, nil, true); err != nil {
 			return fmt.Errorf("import group_items: %w", err)
 		} else {
 			res.RowsAffected["group_items"] = n
 		}
-		if n, err := createUpsertAll(tx, dump.LLMInfos, []clause.Column{{Name: "name"}}); err != nil {
+		if n, err := createRowsRaw(tx, dump.LLMInfos, []clause.Column{{Name: "name"}}, false); err != nil {
 			return fmt.Errorf("import llm_infos: %w", err)
 		} else {
 			res.RowsAffected["llm_infos"] = n
 		}
-		if n, err := createDoNothing(tx, dump.APIKeys); err != nil {
+		if n, err := createRowsRaw(tx, dump.APIKeys, nil, true); err != nil {
 			return fmt.Errorf("import api_keys: %w", err)
 		} else {
 			res.RowsAffected["api_keys"] = n
@@ -178,6 +178,76 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 // batchSize 控制每次 INSERT 的最大行数。
 // 单行字段数较多（如 stats_hourly 含 9 个字段），若一次插入过多行会超过数据库绑定参数上限（SQLite/PostgreSQL 为 65535），按行数分批写入可规避该限制。
 const batchSize = 2000
+
+// createRowsRaw 以"原始行"语义整批写入转储数据: 绕开 GORM Create 的关联自动展开。
+// 备份里的 ChannelGrant / GroupItem 等模型都声明了关联字段 (如 GroupItem.ChannelGrant 的级联外键声明),
+// Create 会尝试按关联回填而非整行插入: 关联为空的对象被静默跳过 (RowsAffected 归零、表却是空表),
+// 于是后续外键引用整链崩塌 (导入 group_items 时 FOREIGN KEY constraint failed)。
+// 转储本就是带主键的平表快照, 按表名直插即可, 无需任何关联语义。
+func createRowsRaw(tx *gorm.DB, rows any, columns []clause.Column, doNothing bool) (int64, error) {
+	switch v := rows.(type) {
+	case []model.Channel:
+		return rawCreate(tx, v, "channels", columns, doNothing)
+	case []model.Group:
+		return rawCreate(tx, v, "groups", columns, doNothing)
+	case []model.ChannelKey:
+		return rawCreate(tx, v, "channel_keys", columns, doNothing)
+	case []model.ChannelModel:
+		return rawCreate(tx, v, "channel_models", columns, doNothing)
+	case []model.ChannelGrant:
+		return rawCreate(tx, v, "channel_grants", columns, doNothing)
+	case []model.GroupItem:
+		return rawCreate(tx, v, "group_items", columns, doNothing)
+	case []model.LLMInfo:
+		return rawCreate(tx, v, "llm_infos", columns, doNothing)
+	case []model.APIKey:
+		return rawCreate(tx, v, "api_keys", columns, doNothing)
+	case []model.StatsTotal:
+		return rawCreate(tx, v, "stats_total", columns, doNothing)
+	case []model.StatsDaily:
+		return rawCreate(tx, v, "stats_daily", columns, doNothing)
+	case []model.StatsHourly:
+		return rawCreate(tx, v, "stats_hourly", columns, doNothing)
+	case []model.StatsAPIKey:
+		return rawCreate(tx, v, "stats_api_key", columns, doNothing)
+	default:
+		return 0, fmt.Errorf("unsupported dump row type %T", rows)
+	}
+}
+
+// rawCreate 把一批转储行按主键逐条直接插入物理表: 语义与 createDoNothing (冲突跳过) /
+// createUpsertAll (整行覆盖) 一致, 但不触发关联自动保存。返回实际写入/更新行数。
+func rawCreate[T any](tx *gorm.DB, rows []T, table string, columns []clause.Column, doNothing bool) (int64, error) {
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	var before, after int64
+	if doNothing {
+		// 逐条 Create 的 RowsAffected 在冲突跳过时为 0, 但与事务前计数差值口径一致即可。
+		if err := tx.Table(table).Count(&before).Error; err != nil {
+			return 0, err
+		}
+	}
+	for _, row := range rows {
+		q := tx.Omit(clause.Associations).Table(table)
+		if doNothing {
+			q = q.Clauses(clause.OnConflict{DoNothing: true})
+		} else {
+			q = q.Clauses(clause.OnConflict{Columns: columns, UpdateAll: true})
+		}
+		rowCopy := row
+		if err := q.Create(&rowCopy).Error; err != nil {
+			return 0, err
+		}
+	}
+	if doNothing {
+		if err := tx.Table(table).Count(&after).Error; err != nil {
+			return 0, err
+		}
+		return after - before, nil
+	}
+	return int64(len(rows)), nil
+}
 
 func createDoNothing[T any](tx *gorm.DB, rows []T) (int64, error) {
 	if len(rows) == 0 {
