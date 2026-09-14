@@ -67,6 +67,36 @@ func APIKeyAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		// Key 级限流 (litellm G5 对标): RPM 预检查 + TPM 窗口判额, 超限 429 并带 Retry-After。
+		// 限流只该发生在转发面; 本中间件同时挂在 admin 端口的 /apikey/stats|login,
+		// 以路径前缀区分, 管理查询不限流。
+		if !strings.HasPrefix(c.Request.URL.Path, "/api/v1/apikey/") {
+			if !op.AllowKeyRPM(apiKeyObj.ID, apiKeyObj.RPM) {
+				c.Header("Retry-After", "60")
+				resp.Error(c, http.StatusTooManyRequests, "API key RPM limit exceeded")
+				c.Abort()
+				return
+			}
+			if !op.AllowKeyTPM(apiKeyObj.ID, apiKeyObj.TPM) {
+				c.Header("Retry-After", "60")
+				resp.Error(c, http.StatusTooManyRequests, "API key TPM limit exceeded")
+				c.Abort()
+				return
+			}
+			// 记账回调: 转发终态处 (relay.FinishKeyUsage) 携带实际词元调用, 请求未走到终态则按 0 记。
+			recorded := false
+			c.Set("key_usage_recorder", func(tokens int64) {
+				if !recorded {
+					recorded = true
+					op.RecordKeyUsage(apiKeyObj.ID, tokens)
+				}
+			})
+			defer func() {
+				if !recorded {
+					op.RecordKeyUsage(apiKeyObj.ID, 0)
+				}
+			}()
+		}
 		c.Set("supported_models", apiKeyObj.SupportedModels)
 		c.Set("api_key_id", apiKeyObj.ID)
 		c.Next()

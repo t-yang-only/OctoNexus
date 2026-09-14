@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'use-intl';
-import { Monitor, Globe, Clock, Shield, Filter, HelpCircle, X } from 'lucide-react';
+import { Monitor, Globe, Clock, Shield, Filter, HelpCircle, X, Gauge, BellRing, Scale } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useSettingList, useSetSetting, SettingKey } from '@/api/setting';
 import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Switch } from '@/components/ui/switch';
 
 export function SettingSystem() {
     const t = useTranslations('setting');
@@ -17,11 +18,19 @@ export function SettingSystem() {
     const [corsAllowOrigins, setCorsAllowOrigins] = useState('');
     const [corsInputValue, setCorsInputValue] = useState('');
     const [modelFilter, setModelFilter] = useState('');
+    const [quotaScanInterval, setQuotaScanInterval] = useState('');
+    const [quotaAlertThreshold, setQuotaAlertThreshold] = useState('');
+    const [alertWebhookUrl, setAlertWebhookUrl] = useState('');
+    const [routeBalanceEnabled, setRouteBalanceEnabled] = useState(false);
 
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
     const initialModelFilter = useRef('');
+    const initialQuotaScanInterval = useRef('');
+    const initialQuotaAlertThreshold = useRef('');
+    const initialAlertWebhookUrl = useRef('');
+    const initialRouteBalanceEnabled = useRef(false);
 
     useEffect(() => {
         if (settings) {
@@ -29,6 +38,10 @@ export function SettingSystem() {
             const interval = settings.find(s => s.key === SettingKey.StatsSaveInterval);
             const cors = settings.find(s => s.key === SettingKey.CORSAllowOrigins);
             const modelFilterSetting = settings.find(s => s.key === SettingKey.ModelFilter);
+            const quotaInterval = settings.find(s => s.key === SettingKey.QuotaScanInterval);
+            const quotaThreshold = settings.find(s => s.key === SettingKey.QuotaAlertThreshold);
+            const webhook = settings.find(s => s.key === SettingKey.AlertWebhookURL);
+            const balance = settings.find(s => s.key === SettingKey.RouteBalanceEnabled);
             if (proxy) {
                 queueMicrotask(() => setProxyUrl(proxy.value));
                 initialProxyUrl.current = proxy.value;
@@ -45,6 +58,10 @@ export function SettingSystem() {
                 queueMicrotask(() => setModelFilter(modelFilterSetting.value));
                 initialModelFilter.current = modelFilterSetting.value;
             }
+            if (quotaInterval) { queueMicrotask(() => setQuotaScanInterval(quotaInterval.value)); initialQuotaScanInterval.current = quotaInterval.value; }
+            if (quotaThreshold) { queueMicrotask(() => setQuotaAlertThreshold(quotaThreshold.value)); initialQuotaAlertThreshold.current = quotaThreshold.value; }
+            if (webhook) { queueMicrotask(() => setAlertWebhookUrl(webhook.value)); initialAlertWebhookUrl.current = webhook.value; }
+            if (balance) { const enabled = balance.value === 'true'; queueMicrotask(() => setRouteBalanceEnabled(enabled)); initialRouteBalanceEnabled.current = enabled; }
         }
     }, [settings]);
 
@@ -62,6 +79,14 @@ export function SettingSystem() {
                     initialCorsAllowOrigins.current = value;
                 } else if (key === SettingKey.ModelFilter) {
                     initialModelFilter.current = value;
+                } else if (key === SettingKey.QuotaScanInterval) {
+                    initialQuotaScanInterval.current = value;
+                } else if (key === SettingKey.QuotaAlertThreshold) {
+                    initialQuotaAlertThreshold.current = value;
+                } else if (key === SettingKey.AlertWebhookURL) {
+                    initialAlertWebhookUrl.current = value;
+                } else if (key === SettingKey.RouteBalanceEnabled) {
+                    initialRouteBalanceEnabled.current = value === 'true';
                 }
             }
         });
@@ -180,6 +205,21 @@ export function SettingSystem() {
                     placeholder={t('modelFilter.placeholder')}
                     className="w-48 rounded-xl"
                 />
+            </div>
+
+            {/* 余额扫描与告警 */}
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-muted/20 p-3">
+                <div className="flex items-center gap-2 text-sm font-semibold"><Gauge className="size-4 text-primary" />{t('quota.title')}</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('quota.scanInterval')}<Input type="number" min="0" value={quotaScanInterval} onChange={(e) => setQuotaScanInterval(e.target.value)} onBlur={() => handleSave(SettingKey.QuotaScanInterval, quotaScanInterval, initialQuotaScanInterval.current)} className="rounded-xl" /></label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('quota.alertThreshold')}<Input type="number" min="0" step="any" value={quotaAlertThreshold} onChange={(e) => setQuotaAlertThreshold(e.target.value)} onBlur={() => handleSave(SettingKey.QuotaAlertThreshold, quotaAlertThreshold, initialQuotaAlertThreshold.current)} placeholder={t('quota.unlimited')} className="rounded-xl" /></label>
+                </div>
+            </div>
+            {/* 均衡开关与 webhook 告警 */}
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-muted/20 p-3">
+                <div className="flex items-center gap-2 text-sm font-semibold"><Scale className="size-4 text-primary" />{t('routing.title')}</div>
+                <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium">{t('routing.balance')}</p><p className="text-xs text-muted-foreground">{t('routing.balanceHint')}</p></div><Switch checked={routeBalanceEnabled} onCheckedChange={(checked) => { setRouteBalanceEnabled(checked); handleSave(SettingKey.RouteBalanceEnabled, String(checked), String(initialRouteBalanceEnabled.current)); }} /></div>
+                <label className="grid gap-1 text-xs text-muted-foreground"><span className="flex items-center gap-1"><BellRing className="size-3.5" />{t('alerts.webhook')}</span><Input value={alertWebhookUrl} onChange={(e) => setAlertWebhookUrl(e.target.value)} onBlur={() => handleSave(SettingKey.AlertWebhookURL, alertWebhookUrl, initialAlertWebhookUrl.current)} placeholder="https://..." type="url" className="rounded-xl" /></label>
             </div>
 
             {/* CORS 跨域白名单 */}

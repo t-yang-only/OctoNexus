@@ -41,6 +41,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/apikey", http.MethodGet).
 				Handle(getStatsAPIKey),
+		).
+		AddRoute(
+			router.NewRoute("/usage", http.MethodGet).
+				Handle(getStatsUsage),
 		)
 }
 
@@ -84,4 +88,14 @@ func getStatsTotal(c *gin.Context) {
 
 func getStatsAPIKey(c *gin.Context) {
 	resp.Success(c, op.StatsAPIKeyList())
+}
+
+// getStatsUsage 返回时间窗内分模型×小时的用量明细 (NM-CUR-025 监控约束的 API 面)。
+func getStatsUsage(c *gin.Context) {
+	r := model.UsageRange(c.DefaultQuery("range", string(model.UsageRange24h)))
+	if !model.ValidUsageRange(r) {
+		resp.Error(c, http.StatusBadRequest, "range must be 24h, 7d or 30d")
+		return
+	}
+	resp.Success(c, gin.H{"items": op.UsageQuery(c.Request.Context(), r), "range": r})
 }

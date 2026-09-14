@@ -15,6 +15,8 @@ export interface APIKey {
     enabled: boolean;
     expire_at?: number; // Unix 时间戳（秒），不传表示永不过期
     max_cost?: number; // 不传表示无限制
+    rpm?: number; // 每分钟请求数, 0 表示不限
+    tpm?: number; // 每分钟词元数, 0 表示不限
     supported_models: string[]; // 允许访问的分组名称，空数组表示不限制
 }
 

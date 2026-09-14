@@ -3,6 +3,7 @@ import { Activity, Bot, CircleDollarSign, HeartPulse, Timer } from 'lucide-react
 import { useTranslations } from 'use-intl';
 import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from 'recharts';
 import { useModelMonitor } from '@/api/monitor';
+import { useUsageHourly, type UsageRange } from '@/api/stats';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { AnimatedNumber } from '@/components/common/AnimatedNumber';
 import { formatCount, formatMoney, formatTime } from '@/lib/utils';
@@ -23,10 +24,32 @@ export function ModelMonitor() {
     const t = useTranslations('home.monitor');
     const { rows, summary } = useModelMonitor();
     useTheme(); // 订阅主题：--chart-* 取色随主题切换重渲染，与趋势图同机制。
+    const monitorRange = useHomeViewStore((state) => state.monitorRange);
+    const setMonitorRange = useHomeViewStore((state) => state.setMonitorRange);
+    const usageQuery = useUsageHourly(monitorRange);
+    const usageRows = usageQuery.data?.items ?? [];
+    useTheme(); // 订阅主题：--chart-* 取色随主题切换重渲染，与趋势图同机制。
     const isChannelNameHidden = useHomeViewStore((state) => state.isChannelNameHidden);
 
     // 明细按调用量倒序，取 Top 8：与模型榜默认排序一致，表格只放得下头部。
     const topRows = useMemo(() => [...rows].sort((a, b) => b.count - a.count).slice(0, 8), [rows]);
+    const rangeRows = usageRows.length > 0 ? usageRows : [];
+    const rangeModels = useMemo(() => {
+        const aggregate = new Map<string, { modelName: string; count: number; success: number; failed: number; wait: number; tokens: number; cost: number }>();
+        for (const row of rangeRows) {
+            const current = aggregate.get(row.model_name) ?? { modelName: row.model_name, count: 0, success: 0, failed: 0, wait: 0, tokens: 0, cost: 0 };
+            current.success += row.request_success;
+            current.failed += row.request_failed;
+            current.count += row.request_success + row.request_failed;
+            current.wait += row.wait_time;
+            current.tokens += row.input_token + row.output_token;
+            current.cost += row.input_cost + row.output_cost;
+            aggregate.set(row.model_name, current);
+        }
+        return [...aggregate.values()].map((row) => ({ ...row, successRate: row.count > 0 ? row.success / row.count * 100 : 0, avgWait: row.count > 0 ? row.wait / row.count : 0 })).sort((a, b) => b.count - a.count).slice(0, 8);
+    }, [rangeRows]);
+    const monitorRows = rangeRows.length > 0 ? rangeModels : topRows;
+
     // 消耗分布按费用倒序取 Top 8 堆叠：与趋势图同色系（--chart-1..8 循环），复用 recharts 栈。
     const distribution = useMemo(() => [...rows].sort((a, b) => b.totalCost - a.totalCost).slice(0, 8), [rows]);
     const chartColors = useMemo(() => {
@@ -82,21 +105,19 @@ export function ModelMonitor() {
                 ))}
             </div>
 
-            {/* 模型健康行：成功率着色徽标，语义照 new-api 截图，样式用本仓文字色。 */}
             <div>
-                <h4 className="mb-2 text-sm font-medium">{t('health')}</h4>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                    <h4 className="text-sm font-medium">{t('health')}</h4>
+                    <div className="flex gap-1 rounded-xl bg-muted/50 p-1">
+                        {(['24h', '7d', '30d'] as UsageRange[]).map((value) => <button key={value} type="button" onClick={() => setMonitorRange(value)} className={`rounded-lg px-2 py-1 text-[11px] transition-colors ${monitorRange === value ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{t(`range.${value === '24h' ? 'day' : value === '7d' ? 'week' : 'month'}`)}</button>)}
+                    </div>
+                </div>
                 <div className="flex flex-wrap gap-2">
-                    {topRows.map((row) => (
-                        <span
-                            key={row.id}
-                            title={`${row.modelName} · ${row.successRate.toFixed(1)}%`}
-                            className="inline-flex max-w-55 items-center gap-1.5 truncate rounded-full border border-border/60 px-2.5 py-1 text-xs"
-                        >
+                    {monitorRows.map((row) => (
+                        <span key={row.modelName} title={`${row.modelName} · ${row.successRate.toFixed(1)}%`} className="inline-flex max-w-55 items-center gap-1.5 truncate rounded-full border border-border/60 px-2.5 py-1 text-xs">
                             <span className={`size-1.5 shrink-0 rounded-full ${row.successRate >= 95 ? 'bg-emerald-500' : row.successRate >= 80 ? 'bg-amber-500' : 'bg-rose-500'}`} />
                             <span className="truncate">{row.modelName}</span>
-                            <span className={`font-medium tabular-nums ${successTone(row.successRate)}`}>
-                                {row.successRate.toFixed(1)}%
-                            </span>
+                            <span className={`font-medium tabular-nums ${successTone(row.successRate)}`}>{row.successRate.toFixed(1)}%</span>
                         </span>
                     ))}
                 </div>

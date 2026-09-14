@@ -45,23 +45,25 @@ type RequestState struct {
 	Sending        bool           `json:"sending"`          // 最新一轮是否仍在等待上游响应。
 	Error          string         `json:"error,omitempty"`  // 最新一轮的失败原因, 请求结束后即为最终错误。
 
-	body         string             // 客户端原始请求体, 体积大故不进状态流, 由独立接口按需拉取。
-	responseBody string             // 聚合后的完整最终响应体, 同样按需拉取。
-	apiKeyID     int                // 发起请求的 API Key ID, 用于请求完成后的归属统计。
-	cancel       context.CancelFunc // 中止最新一轮上游请求, 仅在该轮等待响应期间非空。
+	body          string                                     // 客户端原始请求体, 体积大故不进状态流, 由独立接口按需拉取。
+	responseBody  string                                     // 聚合后的完整最终响应体, 同样按需拉取。
+	apiKeyID      int                                        // 发起请求的 API Key ID, 用于请求完成后的归属统计。
+	usageRecorder func(promptTokens, completionTokens int64) // Key 级 TPM 记账回调, 鉴权层注入, 终态时调用一次。
+	cancel        context.CancelFunc                         // 中止最新一轮上游请求, 仅在该轮等待响应期间非空。
 }
 
 const streamBuffer = 16 // 单个状态流连接的非阻塞消息缓冲容量。
 const maxFinished = 50  // 进程内最多保留的已结束请求数量。
 
 var (
-	idSeq    atomic.Uint64                     // 进程内严格递增的请求 ID。
-	mu       sync.Mutex                        // 全部共享状态的互斥锁。
+	idSeq    atomic.Uint64                          // 进程内严格递增的请求 ID。
+	mu       sync.Mutex                             // 全部共享状态的互斥锁。
 	requests = make(map[uint64]*RequestState)       // 按请求 ID 保存的全部请求状态。
 	watchers = make(map[chan RequestState]struct{}) // 全部状态流 SSE 连接。
 )
 
 // newRequestState 分配请求 ID 并登记初始运行状态; 返回的记录是本请求后续全部状态写入的入口。
+// usageRecorder 由鉴权层经 AttachUsageRecorder 注入, 终态时把实际词元量交给 Key 级 TPM 记账。
 func newRequestState(ctx context.Context, modelName string, groupID int, protocol model.Protocol, body string, apiKeyID int) *RequestState {
 	mu.Lock()
 	defer mu.Unlock()
@@ -83,6 +85,19 @@ func newRequestState(ctx context.Context, modelName string, groupID int, protoco
 	requests[request.ID] = request
 	publishRequestLocked(request)
 	return request
+}
+
+// AttachUsageRecorder 给指定请求挂上 Key 级限流的记账回调 (鉴权中间件注入)。
+// 请求记录不存在或回调为空时静默跳过, 同一请求重复注入以最后一次为准。
+func AttachUsageRecorder(ctx context.Context, requestID uint64, recorder func(promptTokens, completionTokens int64)) {
+	if recorder == nil {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if request := requests[requestID]; request != nil {
+		request.usageRecorder = recorder
+	}
 }
 
 // startRound 记录本轮选中的目标并进入上游请求, cancel 供人工中止本轮, 返回递增的轮次序号。
@@ -196,6 +211,9 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 	if usage != nil {
 		r.Usage = *usage
 	}
+	if r.usageRecorder != nil && usage != nil {
+		r.usageRecorder(usage.PromptTokens, usage.CompletionTokens)
+	}
 	metrics := usageMetrics(r.TargetModel, usage)
 	r.Cost = metrics.InputCost + metrics.OutputCost
 	r.Duration = time.Since(r.StartedAt)
@@ -208,6 +226,8 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 	_ = op.StatsTotalUpdate(metrics)
 	_ = op.StatsHourlyUpdate(metrics)
 	_ = op.StatsDailyUpdate(context.Background(), metrics)
+	// 分模型×小时用量明细 (NM-CUR-025): 渠道维度取本轮实际目标, 未选出目标即结束的请求无归属不记。
+	op.LogUsageHourly(r.TargetModel, r.TargetChannel, metrics)
 	if r.apiKeyID > 0 {
 		_ = op.StatsAPIKeyUpdate(r.apiKeyID, metrics)
 	}
