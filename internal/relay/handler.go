@@ -96,7 +96,12 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 
 			// 手动模式取人工指定的成员, 故障转移模式按优先级选择未禁用且不在冷却中的成员。
 			// 没有目标时等待重新选择, 期间人工切换渠道, 补齐成员或成员冷却到期即可让请求继续。
-			item := pickGroupItem(group)
+			// 子分组按树形递归解析: 亲和/冷却/上限等路由状态按顶层分组持有,
+			// 冷却与亲和的键是展平后具体成员行 ID (跨树唯一)。
+			// 同包内直接调用, 不经导出外壳 (外壳专供单测与外部消费)。
+			// 加权轮询 flag (T-route-002) 默认关: 关时行为与原路径完全一致;
+			// 开时仅改 failover 候选定序, 冷却/探测/亲和仍归顶层 RouteState。
+			item := pickGroupItemHot(group.WithItems(op.FlattenGroupItems(group)))
 			if item.ID == 0 {
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
 					return
@@ -106,7 +111,8 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 
 			// 成员指向的授权缺失, 凭据被停用或两侧已被删除时等待, 该成员可能很快被改回可用配置。
 			// ChannelGrantGet 一次校验齐这几种情况, 取到的授权必然可直接转发, 无需再逐项检查。
-			grant, err := op.ChannelGrantGet(item.ChannelGrantID)
+			// 子分组成员 (未引用授权) 不在此展开: GrantRef 返回 0 走同一等待分支, 展平语义归 T-group-002。
+			grant, err := op.ChannelGrantGet(item.GrantRef())
 			if err != nil {
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
 					return
