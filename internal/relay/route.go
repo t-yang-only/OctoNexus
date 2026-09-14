@@ -3,6 +3,7 @@ package relay
 import (
 	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -20,10 +21,18 @@ type RouteState struct {
 	AffinityUntil int64         `json:"affinity_until"`  // 当前路由的亲和截止 Unix 毫秒时间, 0 表示无亲和; 手动模式恒为 0。
 	Cooldowns     map[int]int64 `json:"cooldowns"`       // 失败成员 ID 对应的冷却截止 Unix 毫秒时间, 已到期的条目由前端按当前时间忽略。
 
-	affinityArmed bool // 当前路由下一次成功后是否开始亲和, 仅故障切换后为真。
+	affinityArmed bool     // 当前路由下一次成功后是否开始亲和, 仅故障切换后为真。
+	balanceRound  uint64   // 加权轮询 (T-route-002 L5) 的当选者轮转计数, 仅在 flag 开启时推进, 随状态重置归零。
 }
 
 const routeStreamBuffer = 16 // 单个路由流连接的非阻塞消息缓冲容量。
+
+// routeBalanceEnabled 是加权轮询热路径 (T-route-002 L5) 的进程内功能开关, 默认关闭。
+// 关时 pickGroupItemHot 行为与原 pickGroupItem 完全一致; 开时仅改 failover 候选定序。
+// 锁在 relay 包内 (201 锁表 L5 只拥有 relay/handler+route+balance), 故用本包原子量承载,
+// 不读 op 设置缓存: 避免越界改 model/op 的 setting.go (221 划归 L4 占用)。
+// 由装配层 (server 启动 / 设置变更) 经 SetRouteBalanceEnabled 注入, relay 自身不耦合配置源。
+var routeBalanceEnabled atomic.Bool
 
 var (
 	routeMu      sync.Mutex                           // routeMu 保护全部分组路由状态。
@@ -236,6 +245,74 @@ func itemOf(group model.Group, itemID int) model.GroupItem {
 		}
 	}
 	return model.GroupItem{}
+}
+
+// PickGroupItem 是 pickGroupItem 的可测外壳: 传入顶层分组配置与已展平的授权
+// 成员平面表 (op.FlattenGroupItems), 手动与故障转移双分支统一走展平语义。
+// 路由状态仍按顶层 group.ID 清理与持有, 冷却/亲和/上限键均为展平后具体成员行 ID。
+// 平面表为空时返回零值, 调用方按无目标等待。
+func PickGroupItem(group model.Group, flat []model.GroupItem) model.GroupItem {
+	return pickGroupItem(group.WithItems(flat))
+}
+
+// pickGroupItemHot 是转发热循环的唯一选路入口: flag 关走原路径, flag 开走加权轮询定序。
+// 开关判定只在 failover 分支内生效, manual 两条路径同归 pickGroupItem 原语义。
+func pickGroupItemHot(group model.Group) model.GroupItem {
+	if RouteBalanceEnabled() {
+		return pickGroupItemBalanced(group)
+	}
+	return pickGroupItem(group)
+}
+
+// RouteBalanceEnabled 报告加权轮询热路径 (T-route-002 L5) 是否开启; 默认关闭,
+// 关时转发行为与既有 pickGroupItem 路径完全一致。开关由装配层经 SetRouteBalanceEnabled 注入。
+func RouteBalanceEnabled() bool { return routeBalanceEnabled.Load() }
+
+// SetRouteBalanceEnabled 设置加权轮询热路径开关, 供 server 启动或设置变更时调用;
+// 变更后清掉各分组轮次, 避免开关翻转沿用旧轮转计数 (flag 关时本不推进轮次, 这里防御性复位)。
+func SetRouteBalanceEnabled(enabled bool) {
+	routeBalanceEnabled.Store(enabled)
+	if !enabled {
+		routeMu.Lock()
+		for _, route := range routes {
+			route.balanceRound = 0
+		}
+		routeMu.Unlock()
+	}
+}
+
+// pickGroupItemBalanced 在加权轮询定序下选出本轮目标: 只改"候选谁先被尝试"的顺序,
+// 亲和/冷却/探测/上限语义仍归 pickGroupItem 既有链路——先按 rankCandidates 定序,
+// 再用重排后的成员表走原选路函数, 首选即加权轮询当选者。
+// 定序失败 (候选全部被剔除) 时回退零值, 调用方按无目标等待, 与空表语义一致。
+// 轮转计数挂在顶层 RouteState 上随状态重置归零; 仅 failover 模式参与, manual 恒走原路径。
+func pickGroupItemBalanced(group model.Group) model.GroupItem {
+	if group.Mode != model.GroupModeFailover {
+		return pickGroupItem(group)
+	}
+
+	routeMu.Lock()
+	route := routes[group.ID]
+	if route == nil {
+		route = &RouteState{GroupID: group.ID, Cooldowns: make(map[int]int64)}
+		routes[group.ID] = route
+	}
+	// 先取本轮 round 再自增: 首轮恒为 round0 (复位后同理), 使 SWRR 周期从当选序列首位起算。
+	round := route.balanceRound
+	route.balanceRound++
+	cooldowns := maps.Clone(route.Cooldowns)
+	routeMu.Unlock()
+
+	ranked, err := rankCandidates(group.Items, cooldowns, time.Now().UnixMilli(), nil, nil, round)
+	if err != nil || len(ranked) == 0 {
+		return model.GroupItem{}
+	}
+	return pickGroupItem(group.WithItems(ranked))
+}
+
+// PickGroupItemBalanced 是 pickGroupItemBalanced 的可测外壳, 形状与 PickGroupItem 一致。
+func PickGroupItemBalanced(group model.Group, flat []model.GroupItem) model.GroupItem {
+	return pickGroupItemBalanced(group.WithItems(flat))
 }
 
 // publishRouteLocked 非阻塞发布路由状态, 连接拥塞时关闭它并交给客户端重连获取全量快照; 冷却表按值复制以免前端读到后续变更; 调用方必须持有锁。
