@@ -1,6 +1,8 @@
 package op
 
 import (
+	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -9,10 +11,17 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// openBackupTestDB ???????????????????NM-CUR-042 count-safe ??????
+var backupTestDBSeq int64
+
+// openBackupTestDB 独立内存库; 每次打开带 atomic 序号, 与仓库既有 count-safe 约定一致
+// (参照 openJumpTokenTestDB / openOfficialFlowTestDB)。共享缓存按名寻址, -count>1 时若仅用
+// t.Name() 会命中上一轮同名库的残留行: rawCreate 的 OnConflict DoNothing 会把重复行整批跳过,
+// 导致 TestRawCreateSkipsAssociations 第二轮起 rows=0。序号保证每轮是全新空库。
 func openBackupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	conn, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Discard})
+	seq := atomic.AddInt64(&backupTestDBSeq, 1)
+	dsn := fmt.Sprintf("file:%s-%d?mode=memory&cache=shared", t.Name(), seq)
+	conn, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}

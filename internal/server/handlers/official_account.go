@@ -26,19 +26,19 @@ func init() {
 				Use(middleware.RequireJSON()).
 				Handle(officialAccountAuthorize),
 		).
-	AddRoute(
-		router.NewRoute("/callback", http.MethodPost).
-			Use(middleware.RequireJSON()).
-			Handle(officialAccountCallback),
-	).
-	AddRoute(
-		router.NewRoute("/list", http.MethodGet).
-			Handle(officialAccountList),
-	).
-	AddRoute(
-		router.NewRoute("/usage/:id", http.MethodPost).
-			Handle(officialAccountUsage),
-	)
+		AddRoute(
+			router.NewRoute("/callback", http.MethodPost).
+				Use(middleware.RequireJSON()).
+				Handle(officialAccountCallback),
+		).
+		AddRoute(
+			router.NewRoute("/list", http.MethodGet).
+				Handle(officialAccountList),
+		).
+		AddRoute(
+			router.NewRoute("/usage/:id", http.MethodPost).
+				Handle(officialAccountUsage),
+		)
 }
 
 func officialAccountAuthorize(c *gin.Context) {
