@@ -15,7 +15,10 @@ const (
 	SettingKeyStatsSaveInterval       SettingKey = "stats_save_interval"        // 将统计信息写入数据库的周期(分钟)
 	SettingKeyModelInfoUpdateInterval SettingKey = "model_info_update_interval" // 模型信息更新间隔(小时)
 	SettingKeyCORSAllowOrigins        SettingKey = "cors_allow_origins"         // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
-	SettingKeyModelFilter             SettingKey = "model_filter"              // 渠道获取模型时的全局过滤表达式; 留空表示不过滤
+	SettingKeyModelFilter             SettingKey = "model_filter"               // 渠道获取模型时的全局过滤表达式; 留空表示不过滤
+	SettingKeyQuotaScanInterval       SettingKey = "quota_scan_interval"        // 余额采集扫描周期(分钟), T-quota-001; 0 表示停用扫描任务
+	SettingKeyQuotaAlertThreshold     SettingKey = "quota_alert_threshold"      // 余额告警阈值(额度点), 剩余额度低于该值记告警事件; 留空或<=0 表示不告警 (归零停用不受其影响, 恒按 remaining<=0 判定)
+	SettingKeyRouteBalanceEnabled     SettingKey = "route_balance_enabled"      // 故障转移分组是否用加权轮询定序候选 (T-route-002); 默认关闭, 走原有优先级选路
 )
 
 type Setting struct {
@@ -30,6 +33,9 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyCORSAllowOrigins, Value: ""},          // CORS 默认不允许跨域，设置为 "*" 才允许所有来源
 		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"}, // 默认24小时更新一次模型信息
 		{Key: SettingKeyModelFilter, Value: ""},               // 默认不过滤模型
+		{Key: SettingKeyQuotaScanInterval, Value: "5"},        // 余额扫描默认 5 分钟一轮 (P5 低频口径)
+		{Key: SettingKeyQuotaAlertThreshold, Value: ""},       // 默认不设告警阈值; 归零停用恒生效, 不经该阈值
+		{Key: SettingKeyRouteBalanceEnabled, Value: "false"},  // 加权轮询热路径默认关闭, 行为与既有优先级选路一致
 	}
 }
 
@@ -69,6 +75,21 @@ func (s *Setting) Validate() error {
 		}
 		if parsedURL.Host == "" {
 			return fmt.Errorf("proxy URL must have a host")
+		}
+		return nil
+	case SettingKeyQuotaScanInterval:
+		minutes, err := strconv.Atoi(s.Value)
+		if err != nil || minutes < 0 {
+			return fmt.Errorf("quota scan interval must be a non-negative integer (minutes)")
+		}
+		return nil
+	case SettingKeyQuotaAlertThreshold:
+		if s.Value == "" {
+			return nil
+		}
+		threshold, err := strconv.ParseFloat(s.Value, 64)
+		if err != nil || threshold < 0 {
+			return fmt.Errorf("quota alert threshold must be empty or a non-negative number")
 		}
 		return nil
 	}

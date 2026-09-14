@@ -66,6 +66,16 @@ func SettingGetBool(key model.SettingKey) (bool, error) {
 	return strconv.ParseBool(setting)
 }
 
+// SettingSetStringForTest replaces a cached setting without touching the database.
+// It is intentionally test-only API exposed to sibling packages.
+func SettingSetStringForTest(key model.SettingKey, value string, present bool) {
+	if present {
+		settingCache.Set(key, value)
+		return
+	}
+	settingCache.Del(key)
+}
+
 func SettingSetInt(key model.SettingKey, value int) error {
 	valueCache, ok := settingCache.Get(key)
 	if !ok {

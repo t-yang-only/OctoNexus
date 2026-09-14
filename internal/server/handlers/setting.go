@@ -10,6 +10,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/relay"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
@@ -71,6 +72,19 @@ func setSetting(c *gin.Context) {
 			return
 		}
 		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
+	case model.SettingKeyRouteBalanceEnabled:
+		// 加权轮询热路径开关即时生效: relay 不耦合配置源, 由装配层在此注入。
+		enabled, err := strconv.ParseBool(setting.Value)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		relay.SetRouteBalanceEnabled(enabled)
+	case model.SettingKeyQuotaScanInterval:
+		// 余额扫描周期热更新: 与注册同口径 (0 停用, task.Update 自会摘任务), 解析失败不拦保存。
+		if minutes, err := strconv.Atoi(setting.Value); err == nil {
+			task.Update(task.TaskQuotaScan, time.Duration(minutes)*time.Minute)
+		}
 	}
 	resp.Success(c, setting)
 }
