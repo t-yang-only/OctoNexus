@@ -19,6 +19,11 @@ func withOfficialKey(t *testing.T, value string) {
 	orig := officialHTTPClient
 	t.Cleanup(func() { officialHTTPClient = orig })
 	t.Setenv("OCTOPUS_OFFICIAL_KEY", value)
+	// 并行车道 (NM-CUR-231) 给 authorize/exchange 加了 client id 必填校验；
+	// 流程测试走桩换码器，补齐环境变量让校验放行。
+	for _, p := range []string{"OPENAI", "GEMINI", "CLAUDE"} {
+		t.Setenv("OCTOPUS_OFFICIAL_CLIENT_ID_"+p, "test-client-id")
+	}
 }
 
 var officialFlowDBSeq int64

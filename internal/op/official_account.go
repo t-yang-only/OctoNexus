@@ -237,6 +237,10 @@ func OfficialAccountAuthorize(conn *gorm.DB, provider model.OfficialAccountProvi
 	if _, keyErr := officialCipherKey(); keyErr != nil {
 		return account, "", "", keyErr
 	}
+	clientID := strings.TrimSpace(os.Getenv("OCTOPUS_OFFICIAL_CLIENT_ID_" + strings.ToUpper(string(provider))))
+	if clientID == "" {
+		return account, "", "", fmt.Errorf("official OAuth client id not configured for %s (set OCTOPUS_OFFICIAL_CLIENT_ID_%s)", provider, strings.ToUpper(string(provider)))
+	}
 	endpoints, ok := OfficialEndpoints[provider]
 	if !ok {
 		return account, "", "", fmt.Errorf("no oauth endpoints for provider %q", provider)
@@ -394,6 +398,13 @@ func officialRedirectURI() string {
 type httpTokenExchanger struct{}
 
 func (h *httpTokenExchanger) Exchange(provider model.OfficialAccountProvider, code, verifier string) (OfficialTokenBundle, error) {
+	if strings.TrimSpace(code) == "" {
+		return OfficialTokenBundle{}, fmt.Errorf("authorization code is empty")
+	}
+	clientID := os.Getenv("OCTOPUS_OFFICIAL_CLIENT_ID_" + strings.ToUpper(string(provider)))
+	if strings.TrimSpace(clientID) == "" {
+		return OfficialTokenBundle{}, fmt.Errorf("official OAuth client id not configured for %s (set OCTOPUS_OFFICIAL_CLIENT_ID_%s)", provider, strings.ToUpper(string(provider)))
+	}
 	endpoints, ok := OfficialEndpoints[provider]
 	if !ok {
 		return OfficialTokenBundle{}, fmt.Errorf("no token endpoint for %q", provider)
@@ -401,7 +412,7 @@ func (h *httpTokenExchanger) Exchange(provider model.OfficialAccountProvider, co
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
-		"client_id":     {os.Getenv("OCTOPUS_OFFICIAL_CLIENT_ID_" + strings.ToUpper(string(provider)))},
+		"client_id":     {clientID},
 		"redirect_uri":  {officialRedirectURI()},
 		"code_verifier": {verifier},
 	}
