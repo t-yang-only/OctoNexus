@@ -379,7 +379,13 @@
             "items": "Member Order",
             "addItem": "Add Model",
             "autoAdd": "Auto Add",
-            "clear": "Clear"
+            "clear": "Clear",
+            "nestedHint": "Nested groups are flattened into their members at routing time; cooldown and affinity stay on the top-level group. A child group shows available when at least one of its members can forward",
+            "addChild": "Add Child Group",
+            "childBadge": "Child",
+            "childHint": "Child groups flatten into their members at routing time; self-reference and cycles are rejected by the backend",
+            "childGroupFallback": "Child group",
+            "noChildCandidate": "No child group available"
         }
     },
     "model": {

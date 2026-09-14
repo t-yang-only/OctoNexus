@@ -26,7 +26,9 @@ export function CreateDialogContent() {
                                 name,
                                 mode,
                                 relay_config,
-                                items: members.map((member) => ({ channel_grant_id: member.channel_grant_id })),
+                                items: members.map((member) => member.kind === 'child'
+                                    ? { channel_grant_id: 0, child_group_id: member.child_group_id }
+                                    : { channel_grant_id: member.channel_grant_id, child_group_id: 0 }),
                             },
                             {
                                 onSuccess: () => setIsOpen(false),

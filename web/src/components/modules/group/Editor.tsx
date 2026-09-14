@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type FormEvent } from 'react';
-import { Check, ChevronDownIcon, HelpCircle, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
+import { Check, ChevronDownIcon, HelpCircle, Plus, Search, Sparkles, Trash2, FolderGit2 } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { Protocol, useChannelGrantList } from '@/api/channel';
@@ -13,6 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { getModelIcon } from '@/lib/model-icons';
 import type { GroupMode, GroupRelayConfig } from '@/api/group';
+import { useGroupList } from '@/api/group';
 import type { SelectedMember } from './ItemList';
 import { MemberList } from './ItemList';
 import { matchesGroupName, memberKey, normalizeKey } from './utils';
@@ -150,8 +151,7 @@ function ModelPickerSection({
 
             <div className="flex-1 min-h-0 overflow-y-auto p-2">
                 <Accordion type="multiple" className="w-full space-y-2">
-                    {filteredChannels.map((channel) => {
-                        // 计数按授权算而非按模型: 展开后每份凭据都是一个可选项。
+                    {filteredChannels.map((channel) => {                        // 计数按授权算而非按模型: 展开后每份凭据都是一个可选项。
                         const grants = channel.models.flatMap((model) => model.grants);
                         const total = grants.length;
                         const selectedCount = grants.reduce(
@@ -298,6 +298,98 @@ function SortSection({
     );
 }
 
+// ChildPickerSection 是子分组选择区：从全部分组（除自身）里按名称选取作为成员。
+// 防自引由后端校验（自引用直接 500），成环/超深同样后端拒绝；前端只给提示，不替后端判树。
+function ChildPickerSection({
+    groups,
+    excludeGroupId,
+    selectedMembers,
+    onAdd,
+}: {
+    groups: { id: number; name: string }[];
+    excludeGroupId?: number;
+    selectedMembers: SelectedMember[];
+    onAdd: (member: SelectedMember) => void;
+}) {
+    const t = useTranslations('group');
+    const [keyword, setKeyword] = useState('');
+    const selectedChildIDs = useMemo(
+        () => new Set(selectedMembers.filter((m) => m.kind === 'child').map((m) => m.child_group_id)),
+        [selectedMembers]
+    );
+    const normalized = keyword.trim().toLowerCase();
+    const candidates = useMemo(() => {
+        return groups
+            .filter((g) => g.id !== excludeGroupId)
+            .filter((g) => !normalized || g.name.toLowerCase().includes(normalized))
+            .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    }, [groups, excludeGroupId, normalized]);
+
+    return (
+        <div className="mt-4 rounded-xl border border-border/50 bg-muted/30 flex flex-col min-h-0">
+            <div className="grid grid-cols-[1fr_auto] items-center gap-2 px-3 py-2 border-b border-border/30 bg-muted/50">
+                <span className="min-w-0 flex items-center gap-1.5 text-sm font-medium text-foreground">
+                    <FolderGit2 className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                    {t('form.addChild')}
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <HelpCircle className="size-4 cursor-help text-muted-foreground" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={10} align="center">
+                            {t('form.childHint')}
+                        </TooltipContent>
+                    </Tooltip>
+                </span>
+                <div className="relative w-30">
+                    <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                        value={keyword}
+                        onChange={(event) => setKeyword(event.target.value)}
+                        className="h-6 rounded-lg border-border/60 bg-background/70 pl-7 pr-2 text-xs shadow-none focus-visible:border-border/60 focus-visible:ring-0"
+                        aria-label="search-child-group"
+                    />
+                </div>
+            </div>
+            <div className="flex max-h-44 flex-col gap-1 overflow-y-auto p-2">
+                {candidates.length === 0 && (
+                    <span className="px-2 py-1 text-xs text-muted-foreground">{t('form.noChildCandidate')}</span>
+                )}
+                {candidates.map((g) => {
+                    const isSelected = selectedChildIDs.has(g.id);
+                    return (
+                        <button
+                            key={g.id}
+                            type="button"
+                            onClick={() => !isSelected && onAdd({
+                                id: `c:${g.id}`,
+                                kind: 'child',
+                                channel_grant_id: 0,
+                                child_group_id: g.id,
+                                name: g.name,
+                                enabled: true,
+                                channel_id: 0,
+                                channel_name: '',
+                                key_name: '',
+                                protocols: 0,
+                            })}
+                            disabled={isSelected}
+                            className={cn(
+                                'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors',
+                                isSelected ? 'opacity-60 cursor-not-allowed' : 'hover:bg-muted'
+                            )}
+                        >
+                            <span className="truncate">{g.name}</span>
+                            <span className="shrink-0 text-muted-foreground">
+                                {isSelected ? <Check className="size-4 text-primary" /> : <Plus className="size-4" />}
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 export function GroupEditor({
     initial,
     submitText,
@@ -307,6 +399,7 @@ export function GroupEditor({
     onCancel,
 }: {
     initial?: {
+        groupId?: number;
         name?: string;
         mode?: GroupMode;
         relay_config?: Partial<GroupRelayConfig>;
@@ -320,9 +413,14 @@ export function GroupEditor({
 }) {
     const t = useTranslations('group');
     const { data: grantCandidates = [] } = useChannelGrantList();
+    // 子分组选择器的数据源：全部分组（编辑自身除外），与授权候选相互独立。
+    // 后续按当前编辑分组过滤自身在 ChildPickerSection 内完成，此处保留全量以便创建分组时可选任意分组。
+    const { data: allGroups = [] } = useGroupList(true, false);
     const grantMembers = useMemo<SelectedMember[]>(() => grantCandidates.map((grant) => ({
-        id: String(grant.id),
+        id: `g:${grant.id}`,
+        kind: 'grant' as const,
         channel_grant_id: grant.id,
+        child_group_id: 0,
         name: grant.model_name,
         enabled: grant.available,
         channel_id: grant.channel_id,
@@ -439,8 +537,8 @@ export function GroupEditor({
                             <TabsTrigger value="relay">{t('form.relay')}</TabsTrigger>
                         </TabsList>
 
-                        <TabsContent value="members" className="min-h-0 overflow-hidden">
-                            <div className="grid h-full min-h-0 grid-cols-1 gap-4 md:grid-cols-2">
+                        <TabsContent value="members" className="flex min-h-0 flex-col overflow-y-auto">
+                            <div className="grid min-h-0 grid-cols-1 gap-4 md:grid-cols-2">
                                 <ModelPickerSection
                                     grantMembers={grantMembers}
                                     selectedMembers={selectedMembers}
@@ -456,6 +554,13 @@ export function GroupEditor({
                                     onClear={handleClearMembers}
                                 />
                             </div>
+                            <ChildPickerSection
+                                groups={allGroups}
+                                excludeGroupId={initial?.groupId}
+                                selectedMembers={selectedMembers}
+                                onAdd={handleAddMember}
+                            />
+                            <p className="mt-2 shrink-0 px-1 text-xs text-muted-foreground">{t('form.nestedHint')}</p>
                         </TabsContent>
 
                         <TabsContent value="relay" className="min-h-0 overflow-y-auto px-1">
