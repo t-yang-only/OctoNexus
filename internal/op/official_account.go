@@ -62,16 +62,16 @@ type OfficialOAuthEndpoints struct {
 }
 
 var OfficialEndpoints = map[model.OfficialAccountProvider]OfficialOAuthEndpoints{
-	model.OfficialAccountProviderOpenAI:  {Authorize: "https://auth.openai.com/oauth/authorize", Token: "https://auth.openai.com/oauth/token", Meta: "https://chatgpt.com/backend-api/"},
-	model.OfficialAccountProviderGemini:  {Authorize: "https://accounts.google.com/o/oauth2/v2/auth", Token: "https://oauth2.googleapis.com/token", Meta: "https://generativelanguage.googleapis.com/"},
-	model.OfficialAccountProviderClaude:  {Authorize: "https://claude.ai/oauth/authorize", Token: "https://console.anthropic.com/v1/oauth/token", Meta: "https://claude.ai/"},
+	model.OfficialAccountProviderOpenAI: {Authorize: "https://auth.openai.com/oauth/authorize", Token: "https://auth.openai.com/oauth/token", Meta: "https://chatgpt.com/backend-api/"},
+	model.OfficialAccountProviderGemini: {Authorize: "https://accounts.google.com/o/oauth2/v2/auth", Token: "https://oauth2.googleapis.com/token", Meta: "https://generativelanguage.googleapis.com/"},
+	model.OfficialAccountProviderClaude: {Authorize: "https://claude.ai/oauth/authorize", Token: "https://console.anthropic.com/v1/oauth/token", Meta: "https://claude.ai/"},
 }
 
 // OfficialTokenBundle 是换码结果：明文只在内存中短暂存在，加密后即丢弃。
 type OfficialTokenBundle struct {
 	AccessToken  string
 	RefreshToken string
-	ExpiresIn    int64 // 秒；<=0 表示无过期机制。
+	ExpiresIn    int64  // 秒；<=0 表示无过期机制。
 	ExternalName string // 官方侧账号标识（邮箱/组织名），空则由调用方兜底。
 }
 
@@ -82,10 +82,10 @@ type TokenExchanger interface {
 
 // UsageSnapshot 是套餐/健康/窗口读取结果。
 type UsageSnapshot struct {
-	PlanTier  string
-	Window5H  string
-	Window7D  string
-	Healthy   bool
+	PlanTier string
+	Window5H string
+	Window7D string
+	Healthy  bool
 }
 
 // UsageReader 读取官方侧元数据快照；可注入桩实现供单测。

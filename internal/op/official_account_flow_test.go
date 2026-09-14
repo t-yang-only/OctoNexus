@@ -80,6 +80,7 @@ func TestOfficialAccountAuthorizeRejectsWithoutKey(t *testing.T) {
 		t.Fatalf("authorize without key: err = %v, want cipher key error", err)
 	}
 }
+
 // TestOfficialAccountStateExpiry 过期 state 条件消费必须回 Expired 且被删除。
 func TestOfficialAccountStateExpiry(t *testing.T) {
 	state := "expire-state-" + nextOfficialName(t)
