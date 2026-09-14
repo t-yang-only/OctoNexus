@@ -379,7 +379,13 @@
             "items": "成員順序",
             "addItem": "新增模型",
             "autoAdd": "自動新增",
-            "clear": "清空"
+            "clear": "清空",
+            "nestedHint": "子分組說明：選路時子分組將展平為其成員，冷卻與親和按頂層分組持有；子分組可用表示其下至少一個成員可轉發",
+            "addChild": "新增子分組",
+            "childBadge": "子分組",
+            "childHint": "子分組在選路時展平為其成員；自引用與成環由後端拒絕",
+            "childGroupFallback": "子分組",
+            "noChildCandidate": "暫無可選子分組"
         }
     },
     "model": {

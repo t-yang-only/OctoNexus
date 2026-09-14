@@ -34,6 +34,7 @@ function EditDialogContent({ group, displayMembers, isSubmitting, onSubmit }: Ed
             <GroupEditor
                 key={`edit-group-${group.id}`}
                 initial={{
+                    groupId: group.id,
                     name: group.name,
                     mode: group.mode,
                     relay_config: group.relay_config,
@@ -61,18 +62,35 @@ export const GroupCard = memo(function GroupCard({ group, now }: { group: Group;
 
     // 成员的名称, 所属渠道与可用性由后端随分组给出, 此处只做展示形状的转换。
     // 不可用的成员同样列出: 否则用户看不到它的存在也就无法移除。
+    // 子分组成员走 child 引用：名称取目标分组名，图标走默认，徽标与副标题由 ItemList 按 kind 渲染。
     const displayMembers = useMemo((): SelectedMember[] =>
-        (group.items || []).map((item) => ({
-            id: String(item.channel_grant_id),
-            channel_grant_id: item.channel_grant_id,
-            name: item.model_name,
-            enabled: item.available,
-            channel_id: item.channel_id,
-            channel_name: item.channel_name,
-            key_name: item.key_name,
-            protocols: item.protocols,
-            item_id: item.id,
-        })),
+        (group.items || []).map((item) => item.child_group_id
+            ? {
+                id: `c:${item.child_group_id}`,
+                kind: 'child' as const,
+                channel_grant_id: 0,
+                child_group_id: item.child_group_id,
+                name: item.child_group_name || item.model_name,
+                enabled: item.available,
+                channel_id: item.channel_id,
+                channel_name: item.channel_name,
+                key_name: '',
+                protocols: 0,
+                item_id: item.id,
+            }
+            : {
+                id: `g:${item.channel_grant_id}`,
+                kind: 'grant' as const,
+                channel_grant_id: item.channel_grant_id ?? 0,
+                child_group_id: 0,
+                name: item.model_name,
+                enabled: item.available,
+                channel_id: item.channel_id,
+                channel_name: item.channel_name,
+                key_name: item.key_name,
+                protocols: item.protocols,
+                item_id: item.id,
+            }),
         [group.items]
     );
 
@@ -87,9 +105,15 @@ export const GroupCard = memo(function GroupCard({ group, now }: { group: Group;
     const handleDragFinish = useCallback(() => { isDragging.current = false; }, []);
 
     // 成员为整体替换, 拖拽与移除都直接提交当前排列, 优先级由提交顺序决定。
+    // 双引用载荷：授权成员给 channel_grant_id，子分组成员给 child_group_id，另一侧填 0。
     const submitMembers = useCallback((next: SelectedMember[]) => {
         updateGroup.mutate(
-            { id: group.id, items: next.map((m) => ({ channel_grant_id: m.channel_grant_id })) },
+            {
+                id: group.id,
+                items: next.map((m) => m.kind === 'child'
+                    ? { channel_grant_id: 0, child_group_id: m.child_group_id }
+                    : { channel_grant_id: m.channel_grant_id, child_group_id: 0 }),
+            },
             { onSuccess, onError },
         );
     }, [group.id, updateGroup, onSuccess, onError]);
@@ -120,11 +144,18 @@ export const GroupCard = memo(function GroupCard({ group, now }: { group: Group;
             values.relay_config.member_cooldown_seconds !== group.relay_config.member_cooldown_seconds ||
             values.relay_config.member_affinity_seconds !== group.relay_config.member_affinity_seconds
         ) payload.relay_config = values.relay_config;
-        // 成员集合与顺序有任一处不同就整体提交; 后端按授权主键匹配, 已有成员保留其主键与统计。
-        const nextGrantIDs = values.members.map((m) => m.channel_grant_id);
-        const currentGrantIDs = (group.items || []).map((item) => item.channel_grant_id);
-        if (nextGrantIDs.length !== currentGrantIDs.length || nextGrantIDs.some((id, i) => id !== currentGrantIDs[i])) {
-            payload.items = nextGrantIDs.map((channel_grant_id) => ({ channel_grant_id }));
+        // 成员集合与顺序有任一处不同就整体提交; 后端按引用（授权/子分组）匹配, 已有成员保留其主键与统计。
+        const refKey = (m: { channel_grant_id: number; child_group_id: number }) =>
+            m.child_group_id ? `c:${m.child_group_id}` : `g:${m.channel_grant_id}`;
+        const nextRefs = values.members.map((m) => refKey(m));
+        const currentRefs = (group.items || []).map((item) => refKey({
+            channel_grant_id: item.channel_grant_id ?? 0,
+            child_group_id: item.child_group_id ?? 0,
+        }));
+        if (nextRefs.length !== currentRefs.length || nextRefs.some((id, i) => id !== currentRefs[i])) {
+            payload.items = values.members.map((m) => m.kind === 'child'
+                ? { channel_grant_id: 0, child_group_id: m.child_group_id }
+                : { channel_grant_id: m.channel_grant_id, child_group_id: 0 });
         }
 
         if (Object.keys(payload).length === 1) {

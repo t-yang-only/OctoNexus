@@ -17,7 +17,9 @@ import { MemberStatus } from './MemberStatus';
 
 export interface SelectedMember {
     id: string;
+    kind: 'grant' | 'child';
     channel_grant_id: number;
+    child_group_id: number;
     name: string;
     enabled: boolean;
     channel_id: number;
@@ -69,6 +71,7 @@ function MemberItem({
     const { Icon, className: iconClassName } = getModelIcon(member.name);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const isDisabled = member.enabled === false;
+    const isChild = member.kind === 'child';
 
     return (
         <div
@@ -135,9 +138,18 @@ function MemberItem({
                         </TooltipContent>
                     </Tooltip>
                     <span className="text-[10px] text-muted-foreground truncate leading-tight">
-                        {member.key_name ? `${member.channel_name} · ${member.key_name}` : member.channel_name}
+                        {isChild
+                            ? member.channel_name || t('form.childGroupFallback')
+                            : member.key_name ? `${member.channel_name} · ${member.key_name}` : member.channel_name}
                     </span>
                 </div>
+
+                {/* 子分组成员挂分组徽标，与授权成员的协议展示区分：子分组本身不讲协议，展平后才有。 */}
+                {isChild && (
+                    <span className="shrink-0 inline-flex items-center gap-1 rounded border border-border/60 px-1 text-[10px] leading-4 text-muted-foreground">
+                        {t('form.childBadge')}
+                    </span>
+                )}
 
                 {group && <MemberStatus group={group} itemId={member.item_id} now={now} active={isActive} activeClassName="p-1" />}
 

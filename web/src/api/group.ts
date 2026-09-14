@@ -17,18 +17,21 @@ export interface GroupRelayConfig {
     member_affinity_seconds: number;
 }
 
-// GroupItem 是分组内一条可路由的成员，对应一条渠道授权。
-// 名称、所属渠道与可用性由后端补齐：授权是 (模型, 凭据) 的组合，界面只需展示与排序，无需再按主键回查。
+// GroupItem 是分组内一条可路由的成员：或引用一条渠道授权，或引用一个子分组，二者互斥。
+// 名称、所属渠道与可用性由后端补齐：授权成员是 (模型, 凭据) 的组合，界面只需展示与排序，无需再按主键回查。
+// 嵌套口径（T-group-002）：子分组成员在选路时展平，available 为真表示其下至少一个成员可转发。
 export interface GroupItem {
     id: number;
     group_id: number;
-    channel_grant_id: number;
+    channel_grant_id?: number; // 引用的渠道授权 ID；子分组成员缺省。
+    child_group_id?: number; // 引用的子分组 ID；授权成员缺省。
     priority: number;
     channel_id: number;
     channel_name: string;
     model_name: string;
     key_name: string;
     protocols: number; // 该授权支持的 Protocol 位掩码。
+    child_group_name: string; // 子分组成员的目标分组名称；授权成员为空。
     available: boolean; // 为假表示该成员当前无法转发，但仍会列出以便移除。
 }
 
@@ -52,9 +55,10 @@ export interface Group {
     runtime: GroupRuntime; // 随分组一并返回；当前成员一律读 runtime.current_item_id。
 }
 
-// GroupItemInput 是提交的成员，按渠道授权主键引用；提交顺序即优先级顺序。
+// GroupItemInput 是提交的成员，按渠道授权主键或子分组主键引用，二者互斥由后端校验；提交顺序即优先级顺序。
 export interface GroupItemInput {
-    channel_grant_id: number;
+    channel_grant_id: number; // 待引用的渠道授权 ID；引用子分组时为 0。
+    child_group_id: number; // 待引用的子分组 ID；引用渠道授权时为 0。
 }
 
 // GroupCreateRequest 是创建分组的请求。
