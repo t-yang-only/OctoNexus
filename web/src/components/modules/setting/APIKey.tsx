@@ -76,6 +76,8 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
         enabled: apiKey?.enabled ?? true,
         expire_at: apiKey?.expire_at,
         max_cost: apiKey?.max_cost,
+        rpm: apiKey?.rpm ?? 0,
+        tpm: apiKey?.tpm ?? 0,
         supported_models: apiKey?.supported_models ?? [],
     }));
     const [maxCostInput, setMaxCostInput] = useState(() =>
@@ -209,6 +211,11 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
                         {t('apiKey.form.unlimited')}
                     </button>
                 </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+                <label className="grid gap-1 text-xs text-muted-foreground">{t('apiKey.form.rpm')}<Input type="number" min="0" value={form.rpm ?? 0} onChange={(e) => updateForm({ rpm: Math.max(0, Number(e.target.value) || 0) })} className="h-9 rounded-xl" disabled={isPending} /></label>
+                <label className="grid gap-1 text-xs text-muted-foreground">{t('apiKey.form.tpm')}<Input type="number" min="0" value={form.tpm ?? 0} onChange={(e) => updateForm({ tpm: Math.max(0, Number(e.target.value) || 0) })} className="h-9 rounded-xl" disabled={isPending} /></label>
             </div>
 
             <div className="grid gap-1 text-xs text-muted-foreground">

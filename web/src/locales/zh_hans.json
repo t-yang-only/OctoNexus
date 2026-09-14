@@ -245,6 +245,20 @@
             "placeholder": "请输入过滤表达式",
             "hint": "渠道获取模型时与渠道自身的过滤表达式同时生效（AND），留空不过滤"
         },
+        "quota": {
+            "title": "余额扫描与告警",
+            "scanInterval": "扫描周期（分钟，0 停用）",
+            "alertThreshold": "告警阈值",
+            "unlimited": "不设置阈值"
+        },
+        "routing": {
+            "title": "路由策略",
+            "balance": "加权轮询",
+            "balanceHint": "故障转移分组启用后按权重轮换候选，默认关闭"
+        },
+        "alerts": {
+            "webhook": "告警 Webhook（可选）"
+        },
         "saved": "已保存",
         "backup": {
             "title": "备份 / 恢复",
@@ -274,6 +288,8 @@
                 "valuePlaceholder": "留空自动生成",
                 "maxCost": "最大金额",
                 "maxCostPlaceholder": "请输入金额",
+                "rpm": "RPM 限制（每分钟请求数，0 不限）",
+                "tpm": "TPM 限制（每分钟词元数，0 不限）",
                 "unlimited": "无限制",
                 "expireAt": "过期日期",
                 "selectDate": "选择日期",

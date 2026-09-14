@@ -13,11 +13,13 @@ interface HomeViewState {
     modelRankSortMode: MetricKey; // 模型排行榜的排序维度。
     chartMetricType: MetricKey; // 趋势图展示的指标。
     chartPeriod: ChartPeriod; // 趋势图的时间周期。
-    isChannelNameHidden: boolean; // 是否模糊渠道名称, 分享图跟随此状态, 不持久化。
+    monitorRange: '24h' | '7d' | '30d'; // 模型监控明细时间窗。
+    isChannelNameHidden: boolean;
     setChannelRankSortMode: (value: MetricKey) => void;
     setModelRankSortMode: (value: MetricKey) => void;
     setChartMetricType: (value: MetricKey) => void;
     setChartPeriod: (value: ChartPeriod) => void;
+    setMonitorRange: (value: '24h' | '7d' | '30d') => void;
     setChannelNameHidden: (value: boolean) => void;
 }
 
@@ -28,11 +30,13 @@ export const useHomeViewStore = create<HomeViewState>()(
             modelRankSortMode: 'cost',
             chartMetricType: 'cost',
             chartPeriod: '1',
+            monitorRange: '24h',
             isChannelNameHidden: false,
             setChannelRankSortMode: (value) => set({ channelRankSortMode: value }),
             setModelRankSortMode: (value) => set({ modelRankSortMode: value }),
             setChartMetricType: (value) => set({ chartMetricType: value }),
             setChartPeriod: (value) => set({ chartPeriod: value }),
+            setMonitorRange: (value) => set({ monitorRange: value }),
             setChannelNameHidden: (value) => set({ isChannelNameHidden: value }),
         }),
         {
@@ -43,6 +47,7 @@ export const useHomeViewStore = create<HomeViewState>()(
                 modelRankSortMode: state.modelRankSortMode,
                 chartMetricType: state.chartMetricType,
                 chartPeriod: state.chartPeriod,
+                monitorRange: state.monitorRange,
             }),
         }
     )

@@ -71,6 +71,28 @@ export interface StatsHourly extends StatsMetrics {
     hour: number;
     date: string;
 }
+
+export type UsageRange = '24h' | '7d' | '30d';
+
+export interface UsageHourlyRow extends StatsMetrics {
+    hour: string;
+    model_name: string;
+    channel_name: string;
+}
+
+export interface UsageHourlyResponse {
+    items: UsageHourlyRow[];
+    range: UsageRange;
+}
+
+export function useUsageHourly(range: UsageRange) {
+    return useQuery({
+        queryKey: ['stats', 'usage', range],
+        queryFn: () => apiRequest<UsageHourlyResponse>(`/api/v1/stats/usage?range=${range}`),
+        refetchInterval: 30000,
+        refetchOnMount: 'always',
+    });
+}
 interface StatsHourlyFormatted extends StatsMetricsFormatted {
     hour: number;
     date: string;

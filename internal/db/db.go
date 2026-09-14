@@ -71,6 +71,7 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.QuotaAction{},
 		&model.OfficialAccount{},
 		&model.JumpToken{},
+		&model.UsageHourly{},
 		&migrate.MigrationRecord{},
 	); err != nil {
 		return err

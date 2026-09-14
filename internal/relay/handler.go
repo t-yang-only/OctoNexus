@@ -75,6 +75,14 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 
 		// 登记进程内请求状态, 返回的记录是后续全部状态写入和前端可视化推送的入口。
 		request := newRequestState(c.Request.Context(), metadata.Model, group.ID, requestProtocol, string(raw.Body), c.GetInt("api_key_id"))
+		// Key 级 TPM 记账: 终态时把实际词元量交给鉴权层注册的回调 (未限流 key 回调缺省, 跳过)。
+		AttachUsageRecorder(c.Request.Context(), request.ID, func(promptTokens, completionTokens int64) {
+			if recorderAny, ok := c.Get("key_usage_recorder"); ok {
+				if recorder, ok := recorderAny.(func(int64)); ok {
+					recorder(promptTokens + completionTokens)
+				}
+			}
+		})
 		ctx := c.Request.Context()
 		failedItemID := 0 // 当前累计连续失败次数的成员 ID。
 		failures := 0     // 该成员包含首次请求的连续失败次数。

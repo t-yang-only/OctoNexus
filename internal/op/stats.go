@@ -47,8 +47,9 @@ func StatsSaveDBTask() {
 	}()
 	if err := StatsSaveDB(ctx); err != nil {
 		log.Errorf("stats save db error: %v", err)
-		return
 	}
+	// 用量小时桶与统计同周期落库（NM-CUR-025 裁决: 搭车清理, 无新任务/新配置）。
+	UsageSaveDB(ctx)
 }
 
 func StatsSaveDB(ctx context.Context) error {

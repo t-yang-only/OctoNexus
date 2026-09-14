@@ -15,6 +15,10 @@ export const SettingKey = {
     ModelInfoUpdateInterval: 'model_info_update_interval',
     CORSAllowOrigins: 'cors_allow_origins',
     ModelFilter: 'model_filter',
+    QuotaScanInterval: 'quota_scan_interval',
+    QuotaAlertThreshold: 'quota_alert_threshold',
+    RouteBalanceEnabled: 'route_balance_enabled',
+    AlertWebhookURL: 'alert_webhook_url',
 } as const;
 
 /**

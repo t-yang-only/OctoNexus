@@ -4,6 +4,7 @@ import (
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/notify"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/relay"
 	"github.com/bestruirui/octopus/internal/server"
@@ -44,6 +45,9 @@ var startCmd = &cobra.Command{
 		if enabled, err := op.SettingGetBool(model.SettingKeyRouteBalanceEnabled); err == nil && enabled {
 			relay.SetRouteBalanceEnabled(true)
 		}
+
+		// 告警 webhook 的设置读取源注入 notify 包 (避免 notify→op 导入环)。
+		notify.SetSettingSource(op.SettingGetString)
 
 		if err := op.UserInit(); err != nil {
 			log.Errorf("user init error: %v", err)

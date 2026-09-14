@@ -245,6 +245,18 @@
             "placeholder": "Enter filter regex",
             "hint": "Applied along with the channel's own filter when fetching models (AND); empty means no filter"
         },
+        "quota": {
+            "title": "Balance scan & alerts",
+            "scanInterval": "Scan interval (minutes, 0 disables)",
+            "alertThreshold": "Alert threshold",
+            "unlimited": "No threshold"
+        },
+        "routing": {
+            "title": "Routing strategy",
+            "balance": "Weighted round-robin",
+            "balanceHint": "Rotate failover candidates by weight when enabled; off by default"
+        },
+        "alerts": { "webhook": "Alert Webhook (optional)" },
         "saved": "Saved",
         "backup": {
             "title": "Backup / Restore",
@@ -274,6 +286,10 @@
                 "valuePlaceholder": "Leave empty to generate",
                 "maxCost": "Max Cost",
                 "maxCostPlaceholder": "Enter amount",
+                "rpm": "RPM limit (requests/min, 0 unlimited)",
+                "tpm": "TPM limit (tokens/min, 0 unlimited)",
+                "rpm": "RPM limit (requests/min, 0 unlimited)",
+                "tpm": "TPM limit (tokens/min, 0 unlimited)",
                 "unlimited": "Unlimited",
                 "expireAt": "Expire Date",
                 "selectDate": "Select date",
