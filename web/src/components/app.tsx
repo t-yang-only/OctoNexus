@@ -25,6 +25,7 @@ const Group = lazy(() => pageImports.group().then((module) => ({ default: module
 const Model = lazy(() => pageImports.model().then((module) => ({ default: module.Model })));
 const Log = lazy(() => pageImports.log().then((module) => ({ default: module.Log })));
 const Setting = lazy(() => pageImports.setting().then((module) => ({ default: module.Setting })));
+const Account = lazy(() => pageImports.account().then((module) => ({ default: module.Account })));
 const HomeActions = lazy(() => pageImports.home().then((module) => ({ default: module.HomeActions })));
 const ChannelActions = lazy(() => pageImports.channel().then((module) => ({ default: module.ChannelActions })));
 const GroupActions = lazy(() => pageImports.group().then((module) => ({ default: module.GroupActions })));
@@ -148,6 +149,7 @@ export function AppContainer() {
                             {visibleItem === 'channel' && <Channel />}
                             {visibleItem === 'group' && <Group />}
                             {visibleItem === 'model' && <Model />}
+                            {visibleItem === 'account' && <Account />}
                             {visibleItem === 'log' && <Log />}
                             {visibleItem === 'setting' && <Setting />}
                         </motion.div>
