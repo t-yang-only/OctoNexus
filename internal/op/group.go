@@ -172,7 +172,7 @@ func ensureAutoGroupsLocked(tx *gorm.DB, channelID int, channelName string, mode
 		grantSet := make(map[int]struct{}, len(items))
 		maxPriority := 0
 		for _, item := range items {
-			grantSet[item.ChannelGrantID] = struct{}{}
+			grantSet[item.GrantRef()] = struct{}{}
 			if item.Priority > maxPriority {
 				maxPriority = item.Priority
 			}
@@ -182,7 +182,8 @@ func ensureAutoGroupsLocked(tx *gorm.DB, channelID int, channelName string, mode
 				continue
 			}
 			maxPriority++
-			if err := tx.Create(&model.GroupItem{GroupID: group.ID, ChannelGrantID: grantID, Priority: maxPriority}).Error; err != nil {
+			grantRef := grantID
+			if err := tx.Create(&model.GroupItem{GroupID: group.ID, ChannelGrantID: &grantRef, Priority: maxPriority}).Error; err != nil {
 				return fmt.Errorf("failed to append auto group item %q: %w", groupName, err)
 			}
 		}
@@ -208,7 +209,14 @@ func GroupCreate(req *model.GroupCreateRequest, ctx context.Context) (*model.Gro
 	}
 	model.NormalizeGroupRelayConfig(&group.RelayConfig)
 	for i, item := range req.Items {
-		group.Items[i] = model.GroupItem{ChannelGrantID: item.ChannelGrantID, Priority: i + 1}
+		if err := model.ValidateGroupItemRef(item.ChannelGrantID, item.ChildGroupID); err != nil {
+			return nil, err
+		}
+		group.Items[i] = model.GroupItem{ChannelGrantID: item.GrantRefPtr(), ChildGroupID: item.ChildRefPtr(), Priority: i + 1}
+	}
+	// 子分组引用在落库前校验: 引用存在性可查, 自引用因新分组还没有主键而无法表达。
+	if err := validateGroupTreeRefs(db.GetDB(), group.Items); err != nil {
+		return nil, err
 	}
 	if err := db.GetDB().WithContext(ctx).Create(&group).Error; err != nil {
 		return nil, err
@@ -291,23 +299,34 @@ func GroupUpdate(id int, req *model.GroupUpdateRequest, ctx context.Context) (*m
 }
 
 // syncGroupItems 按提交的成员集合新增, 重排与删除分组成员。
-// 成员在分组内按渠道授权唯一, 该授权作为匹配依据, 由此已有成员保留其主键:
+// 成员按引用键 (渠道授权或子分组) 在分组内唯一, 该键作为匹配依据, 由此已有成员保留其主键:
 // 主键被分组的当前成员和 Relay 的路由状态引用, 换主键会让人工选择与冷却记录失效。
 // 优先级一律按提交顺序重写, 前端只需提交当前排列, 无需自行算出哪些成员的顺序发生了变化。
+// 子分组引用在此做事务内校验: 引用存在、非本分组自引用、不成环且深度不超上限。
 func syncGroupItems(tx *gorm.DB, groupID int, requested []model.GroupItemInput) error {
+	for _, item := range requested {
+		if err := model.ValidateGroupItemRef(item.ChannelGrantID, item.ChildGroupID); err != nil {
+			return err
+		}
+	}
+	if err := validateChildGroupRefs(tx, groupID, requested); err != nil {
+		return err
+	}
+
 	var existing []model.GroupItem
 	if err := tx.Where("group_id = ?", groupID).Find(&existing).Error; err != nil {
 		return fmt.Errorf("failed to load group items: %w", err)
 	}
-	existingByGrant := make(map[int]model.GroupItem, len(existing))
+	existingByRef := make(map[[2]int]model.GroupItem, len(existing))
 	for _, item := range existing {
-		existingByGrant[item.ChannelGrantID] = item
+		existingByRef[[2]int{item.GrantRef(), item.ChildRef()}] = item
 	}
 
 	for priority, requestedItem := range requested {
-		current, ok := existingByGrant[requestedItem.ChannelGrantID]
+		ref := [2]int{requestedItem.ChannelGrantID, requestedItem.ChildGroupID}
+		current, ok := existingByRef[ref]
 		if !ok {
-			newItem := model.GroupItem{GroupID: groupID, ChannelGrantID: requestedItem.ChannelGrantID, Priority: priority + 1}
+			newItem := model.GroupItem{GroupID: groupID, ChannelGrantID: requestedItem.GrantRefPtr(), ChildGroupID: requestedItem.ChildRefPtr(), Priority: priority + 1}
 			if err := tx.Create(&newItem).Error; err != nil {
 				return fmt.Errorf("failed to create group item: %w", err)
 			}
@@ -319,11 +338,11 @@ func syncGroupItems(tx *gorm.DB, groupID int, requested []model.GroupItemInput) 
 				return fmt.Errorf("failed to update group item: %w", err)
 			}
 		}
-		delete(existingByGrant, requestedItem.ChannelGrantID)
+		delete(existingByRef, ref)
 	}
 
-	deletedIDs := make([]int, 0, len(existingByGrant))
-	for _, item := range existingByGrant {
+	deletedIDs := make([]int, 0, len(existingByRef))
+	for _, item := range existingByRef {
 		deletedIDs = append(deletedIDs, item.ID)
 	}
 	if len(deletedIDs) == 0 {
@@ -341,18 +360,124 @@ func syncGroupItems(tx *gorm.DB, groupID int, requested []model.GroupItemInput) 
 	return nil
 }
 
-// GroupDel 删除分组及其成员，成员删除不会影响被其他分组引用的渠道授权。
+// validateChildGroupRefs 校验一批待写入的子分组引用: 目标存在、非自引用, 且连同库内既有子分组链
+// 不成环、深度不超上限。校验按"提交后的最终形状"进行: 以 requested 视为本分组的全部成员,
+// 既覆盖增量改动也覆盖整体替换, 避免只校验新增行而漏掉既有行构成的环。
+func validateChildGroupRefs(tx *gorm.DB, groupID int, requested []model.GroupItemInput) error {
+	// 引用存在性 + 非自引用: 子分组是另一条分组行, 指向自己会立即成环。
+	for _, item := range requested {
+		if item.ChildGroupID == 0 {
+			continue
+		}
+		if item.ChildGroupID == groupID {
+			return fmt.Errorf("group cannot reference itself as a child")
+		}
+		var count int64
+		if err := tx.Model(&model.Group{}).Where("id = ?", item.ChildGroupID).Count(&count).Error; err != nil {
+			return fmt.Errorf("failed to load child group %d: %w", item.ChildGroupID, err)
+		}
+		if count == 0 {
+			return fmt.Errorf("child group %d not found", item.ChildGroupID)
+		}
+	}
+
+	// 从每个被引用的子分组出发沿库内边走链, 出现回边到 groupID 即成环;
+	// 深度按模型层上限截断, 超限同样拒绝。库内其余分组未受本次提交影响, 是校验的既有底座。
+	depthByGroup := make(map[int]int)
+	var walk func(childID, depth int) error
+	walk = func(childID, depth int) error {
+		if depth > model.GroupItemMaxDepth {
+			return fmt.Errorf("group nesting exceeds max depth %d", model.GroupItemMaxDepth)
+		}
+		if childID == groupID {
+			return fmt.Errorf("group nesting must not form a cycle")
+		}
+		// 剪枝只在"该节点此前已从更深 (或同深) 起点完整走过"时成立: 那次无错说明子树高度受
+		// 更严的预算约束, 本次更浅的起点更不可能越限。反向剪枝 (浅起点先走、深起点后到)
+		// 会把深链第二次到达时的超限判成"已验证", 恰好漏判菱形共享子树的超限链。
+		// 记录取最深起点, 同一节点的记录深度单调加深且上界为 MaxDepth, 终止性不受影响。
+		if seen, ok := depthByGroup[childID]; ok && seen >= depth {
+			return nil
+		}
+		depthByGroup[childID] = depth
+		var edges []model.GroupItem
+		if err := tx.Where("group_id = ? AND child_group_id IS NOT NULL", childID).Find(&edges).Error; err != nil {
+			return fmt.Errorf("failed to load child edges of group %d: %w", childID, err)
+		}
+		for _, edge := range edges {
+			if err := walk(edge.ChildRef(), depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, item := range requested {
+		if item.ChildGroupID != 0 {
+			if err := walk(item.ChildGroupID, 1); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateGroupTreeRefs 是新建分组场景的子分组引用校验: 分组行尚未落库, 事务校验退化为
+// 引用存在性 (目标分组此刻不可能回指本分组, 自引用因无主键而无法表达)。
+// conn 注入库句柄 (生产传全局库, 测试传直连内存库), 与 syncGroupItems 同款可测口径。
+func validateGroupTreeRefs(conn *gorm.DB, items []model.GroupItem) error {
+	requested := make([]model.GroupItemInput, len(items))
+	for i, item := range items {
+		requested[i] = model.GroupItemInput{ChannelGrantID: item.GrantRef(), ChildGroupID: item.ChildRef()}
+	}
+	return conn.Transaction(func(tx *gorm.DB) error {
+		return validateChildGroupRefs(tx, 0, requested)
+	})
+}
+
+// GroupDel 删除分组及其成员; 其他分组指向本分组的子分组成员一并移除,
+// 它们随目标消失而失去语义, 留着只会让快照按悬空引用渲染。成员删除不会影响被其他分组引用的渠道授权。
 func GroupDel(id int, ctx context.Context) error {
 	group, ok := groupCache.Get(id)
 	if !ok {
 		return fmt.Errorf("group not found")
 	}
-	if err := db.GetDB().WithContext(ctx).Delete(&model.Group{}, id).Error; err != nil {
-		return fmt.Errorf("failed to delete group: %w", err)
+	if err := groupDelOn(db.GetDB().WithContext(ctx), id); err != nil {
+		return err
 	}
 	groupCache.Del(id)
 	groupNameIndex.Del(group.Name)
+	// 其他分组的成员集合因级联清理而变化, 整体刷新以让快照与库内一致。
+	if err := groupRefreshCache(ctx); err != nil {
+		return fmt.Errorf("failed to refresh groups: %w", err)
+	}
 	return nil
+}
+
+// groupDelOn 是 GroupDel 的事务本体, 收库句柄 (生产全局库 / 测试直连内存库),
+// 与 quota 族同款可测口径: 级联清理悬空子分组引用的语义在此落库, 缓存处置由调用方负责。
+func groupDelOn(conn *gorm.DB, id int) error {
+	return conn.Transaction(func(tx *gorm.DB) error {
+		// 先收集引用本分组的成员行, 清掉其所在分组的当前成员后一并删除。
+		var refItemIDs []int
+		if err := tx.Model(&model.GroupItem{}).Select("id").
+			Where("child_group_id = ?", id).Pluck("id", &refItemIDs).Error; err != nil {
+			return fmt.Errorf("failed to load child references of group %d: %w", id, err)
+		}
+		if len(refItemIDs) > 0 {
+			if err := tx.Model(&model.Group{}).
+				Where("active_item_id IN ?", refItemIDs).
+				Update("active_item_id", 0).Error; err != nil {
+				return fmt.Errorf("failed to clear active items referencing group %d: %w", id, err)
+			}
+			if err := tx.Delete(&model.GroupItem{}, refItemIDs).Error; err != nil {
+				return fmt.Errorf("failed to delete child references of group %d: %w", id, err)
+			}
+		}
+		if err := tx.Delete(&model.Group{}, id).Error; err != nil {
+			return fmt.Errorf("failed to delete group: %w", err)
+		}
+		return nil
+	})
 }
 
 // groupRefreshCache 从数据库刷新完整分组缓存和名称索引。
@@ -375,6 +500,45 @@ func groupRefreshCache(ctx context.Context) error {
 	return nil
 }
 
+// FlattenGroupItems 把分组的嵌套成员深度优先展平为可转发的授权成员平面表,
+// 子组成员按引用行位置 splice 进来, 引用行本身不进入结果。
+// 读侧三线防御与写侧校验 (validateChildGroupRefs) 同口径: 路径回边剪除
+// (覆盖脏缓存/手改库在写侧之后引入的环)、超过 GroupItemMaxDepth 截断、
+// 同一成员行按 ID 去重 (菱形共享子组只并一次)。
+// 冷却/探测/亲和的键是展平后具体成员行 ID (跨树唯一), 子分组不持有独立路由状态;
+// 缺失的子分组引用直接跳过 (GroupDel 已在写侧级联, 残留只是脏缓存的瞬态)。
+func FlattenGroupItems(group model.Group) []model.GroupItem {
+	seen := make(map[int]struct{})
+	out := make([]model.GroupItem, 0, len(group.Items))
+	flattenInto(group, 0, []int{group.ID}, seen, &out)
+	return out
+}
+
+func flattenInto(group model.Group, depth int, path []int, seen map[int]struct{}, out *[]model.GroupItem) {
+	if depth > model.GroupItemMaxDepth {
+		return
+	}
+	for _, item := range group.Items {
+		childID := item.ChildRef()
+		if childID == 0 {
+			if _, dup := seen[item.ID]; dup {
+				continue
+			}
+			seen[item.ID] = struct{}{}
+			*out = append(*out, item)
+			continue
+		}
+		child, ok := groupCache.Get(childID)
+		if !ok {
+			continue
+		}
+		if slices.Contains(path, childID) {
+			continue
+		}
+		flattenInto(child, depth+1, append(path, childID), seen, out)
+	}
+}
+
 // sortGroupItems 按优先级和主键生成稳定的成员顺序。
 func sortGroupItems(items []model.GroupItem) {
 	sort.Slice(items, func(i, j int) bool {
@@ -388,11 +552,42 @@ func sortGroupItems(items []model.GroupItem) {
 // groupSnapshot 为成员补齐授权两侧的名称, 所属渠道与可用性。
 // 可用性在此一次定稿: 渠道与凭据均启用且模型, 凭据均存在时可转发, 否则仍列出该成员但标记不可用,
 // 由此界面无需再按渠道列表回查, 也不会出现前后端各判一套的分歧。
+//
+// 子分组成员的 Available 由展平后代回填 (T-group-002): 子树里只要还有一个可转发授权,
+// 该引用行即视为可用——选路展开后它能产生目标; 空树/全禁用的子树恒为假, 与"悬空引用
+// 跳过"的转发语义对称 (GroupDel 已在写侧级联, 残留只剩脏缓存/手改库)。
 func groupSnapshot(group model.Group) model.Group {
 	// 成员恒为数组: 读取侧承诺该字段不为 null, 空分组也要给出空数组。
 	group.Items = append(make([]model.GroupItem, 0, len(group.Items)), group.Items...)
 	for i := range group.Items {
-		grant, ok := channelGrantCache.Get(group.Items[i].ChannelGrantID)
+		if group.Items[i].ChildRef() != 0 {
+			// 子分组成员: 名称取目标分组名。可用性按展平后代回填:
+			// 读的是与转发同一份缓存底座, 与选路行为同一口径。
+			if child, ok := groupCache.Get(group.Items[i].ChildRef()); ok {
+				group.Items[i].ChildGroupName = child.Name
+				for _, leaf := range FlattenGroupItems(child) {
+					grant, ok := channelGrantCache.Get(leaf.GrantRef())
+					if !ok {
+						continue
+					}
+					channelModel, modelOK := channelModelCache.Get(grant.ChannelModelID)
+					channelKey, keyOK := channelKeyCache.Get(grant.ChannelKeyID)
+					if !modelOK || !keyOK {
+						continue
+					}
+					channel, channelOK := channelCache.Get(channelModel.ChannelID)
+					if !channelOK {
+						continue
+					}
+					if channel.Enabled && channelKey.Enabled {
+						group.Items[i].Available = true
+						break
+					}
+				}
+			}
+			continue
+		}
+		grant, ok := channelGrantCache.Get(group.Items[i].GrantRef())
 		if !ok {
 			continue
 		}
