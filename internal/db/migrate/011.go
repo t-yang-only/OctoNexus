@@ -229,11 +229,10 @@ func migrateGroupItemsToGrants(db *gorm.DB, grantIDByModel map[int]int) error {
 			continue
 		}
 		seen[itemKey] = struct{}{}
-		grantIDCopy := grantID
 		items = append(items, model.GroupItem{
 			ID:             item.ID,
 			GroupID:        item.GroupID,
-			ChannelGrantID: &grantIDCopy,
+			ChannelGrantID: &grantID,
 			Priority:       item.Priority,
 		})
 	}
