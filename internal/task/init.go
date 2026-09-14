@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	TaskPriceUpdate  = "price_update"
-	TaskStatsSave    = "stats_save"
+	TaskPriceUpdate   = "price_update"
+	TaskStatsSave     = "stats_save"
 	TaskRelayLogClean = "relay_log_clean"
-	TaskCleanLLM     = "clean_llm"
+	TaskCleanLLM      = "clean_llm"
+	TaskQuotaScan     = "quota_scan"
 )
 
 func Init() {
@@ -44,4 +45,7 @@ func Init() {
 	Register(TaskRelayLogClean, statsSaveInterval, false, func() {
 		op.RelayLogClean(model.RelayLogRetentionDays)
 	})
+
+	// 注册余额采集扫描任务 (T-quota-001): 默认 5 分钟, quota_scan_interval 可配, 0 表示停用 (Register 自动跳过)。
+	Register(TaskQuotaScan, op.QuotaScanInterval(), false, quotaScanOnce)
 }
