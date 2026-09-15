@@ -67,3 +67,6 @@
 
 | T-weight-002 | 加权综合第二阶段：倍率 / 按次单价 / 余额 / 包月余量 接入加权选路（R-weight-001）| route | done |
 | | 备注：渠道新增 5 个可空字段（billing_mode/multiplier/per_call_price/monthly_quota/monthly_used，GORM 启动自动加列，纯增量）；余额不靠用户填 —— 配额扫描本来就取到 remaining，这次把它存进内存快照（op.RecordChannelBalance/ChannelBalance）供选路读；包月用尽的处置做成设置项 route_monthly_exhausted_action（demote 默认 / exclude），即用户点名的第三个取舍点；新增 4 个权重键 route_weight_multiplier/per_call/balance/monthly（默认 15/10/15/10）。**过程中发现并修掉一个真实接线缺陷**：pickGroupItemHot 自己抄了一份 routeDeps 字面量，没带 billing，导致「模式支持、单测全绿、生产该维度静默失效」——热路径改为统一走 hotRouteDeps()，并加守卫测试 TestHotRouteDepsCoversEveryDimension（任一 provider 为空即红）。单测 14/14；活体套件 run_weighted_test.py 6/6（T5 计费字段写入读回、T6 倍率权重拉满改选倍率 1 的渠道）；全量矩阵通过。未做：渠道编辑面板的计费字段输入框、权重设置界面（纯前端，下一轮）。已提交。 | 2026-09-16 06:12:17 |
+
+| T-weight-003 | 面板收尾：渠道计费字段 + 加权权重设置界面（R-weight-001 的可用性收口）| frontend | done |
+| | 备注：渠道编辑对话框「高级配置」新增计费方式下拉 + 倍率/按次单价/包月额度/包月已用四个输入与说明；设置页「系统-路由参数」新增加权权重区块（9 个维度权重 + 包月用尽处置下拉，失焦即保存）；api/channel.ts 与 channel state 同步字段、SettingKey 枚举补 10 个键、三语文案补齐；实现用自包含 WeightSettingField 小组件避免抄 10 份 state/ref 样板。验证：pnpm build 通过, 产物分块含 billingHint/routing.weights/weightMultiplier/monthlyExclude；全量矩阵 21 套件通过。诚实说明：未做人工视觉验收（浏览器工具那一步被拒）, 只验证到编译+产物+接口层；繁体 locale 因插入处理失当被重排（98 增 45 删）, 内容经解析与构建双重校验。已提交。 | 2026-09-16 06:39:56 |

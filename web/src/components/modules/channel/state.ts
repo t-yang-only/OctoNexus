@@ -18,6 +18,12 @@ export type ChannelFormState = {
     channel_proxy: string;
     param_override: string;
     match_regex: string;
+    // 计费事实: 数字字段留 0 表示未知（后端同样按零值=未知处理）。
+    billing_mode: string;
+    multiplier: number;
+    per_call_price: number;
+    monthly_quota: number;
+    monthly_used: number;
 };
 
 // grantKey 生成授权在状态里的键; 分隔符取 \0, 模型名与凭据名都不会含它。
@@ -41,6 +47,11 @@ export const emptyFormState: ChannelFormState = {
     channel_proxy: '',
     param_override: '',
     match_regex: '',
+    billing_mode: '',
+    multiplier: 0,
+    per_call_price: 0,
+    monthly_quota: 0,
+    monthly_used: 0,
 };
 
 // fromChannel 把渠道完整配置还原为表单状态; 授权读写都按名称, 直接建索引即可。
@@ -61,6 +72,11 @@ export function fromChannel(channel: ChannelDetail): ChannelFormState {
         channel_proxy: channel.channel_proxy,
         param_override: channel.param_override,
         match_regex: channel.match_regex,
+        billing_mode: channel.billing_mode ?? '',
+        multiplier: channel.multiplier ?? 0,
+        per_call_price: channel.per_call_price ?? 0,
+        monthly_quota: channel.monthly_quota ?? 0,
+        monthly_used: channel.monthly_used ?? 0,
     };
 }
 
@@ -80,6 +96,11 @@ export function toChannelConfig(state: ChannelFormState) {
         channel_proxy: state.channel_proxy.trim(),
         param_override: state.param_override.trim(),
         match_regex: state.match_regex.trim(),
+        billing_mode: state.billing_mode,
+        multiplier: state.multiplier,
+        per_call_price: state.per_call_price,
+        monthly_quota: state.monthly_quota,
+        monthly_used: state.monthly_used,
     };
 }
 

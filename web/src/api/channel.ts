@@ -73,6 +73,12 @@ export type ChannelDetail = {
     param_override: string;
     channel_proxy: string;
     match_regex: string;
+    // 计费事实（R-weight-001 第二阶段）: 供加权综合选路折算「实际有多贵」; 留空/0 表示未知。
+    billing_mode: string;
+    multiplier: number;
+    per_call_price: number;
+    monthly_quota: number;
+    monthly_used: number;
 };
 
 // ChannelModelStats 是单个渠道模型的累计统计，自带名称。
