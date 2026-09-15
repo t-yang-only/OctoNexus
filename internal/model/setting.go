@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/dlclark/regexp2"
 )
@@ -22,6 +23,19 @@ const (
 	SettingKeyAlertWebhookURL         SettingKey = "alert_webhook_url"            // 告警事件 webhook 地址, 留空不推送; 余额告警/归零停用等事件 POST JSON 到该地址
 	SettingKeyRouteProbeEnabled       SettingKey = "route_probe_enabled"          // 冷却成员主动探活开关 (R-probe-001); 默认关闭: 每次探测都是一次真实计费请求
 	SettingKeyRouteProbeInterval      SettingKey = "route_probe_interval_seconds" // 主动探活周期(秒), 0 表示停用探活任务; 默认 300
+
+	// 通知渠道 (R-alert-001 余项): 一个事件同时投递到全部启用渠道。
+	// 密钥口径: 三个群机器人的 webhook 地址本身即凭据(与既有 alert_webhook_url 同性质, 面板可见可编辑);
+	// SMTP 密码不进设置表, 只从环境变量 OCTOPUS_SMTP_PASSWORD 读——避免把邮箱密码写进库与备份转储。
+	SettingKeyAlertChannels        SettingKey = "alert_channels"         // 启用的通知渠道, 逗号分隔: webhook,feishu,dingtalk,wecom,smtp; 默认 webhook
+	SettingKeyAlertFeishuWebhook   SettingKey = "alert_feishu_webhook"   // 飞书群机器人 webhook 地址
+	SettingKeyAlertDingTalkWebhook SettingKey = "alert_dingtalk_webhook" // 钉钉群机器人 webhook 地址
+	SettingKeyAlertWeComWebhook    SettingKey = "alert_wecom_webhook"    // 企业微信群机器人 webhook 地址
+	SettingKeyAlertSMTPHost        SettingKey = "alert_smtp_host"        // SMTP 服务器地址 (不含端口)
+	SettingKeyAlertSMTPPort        SettingKey = "alert_smtp_port"        // SMTP 端口: 465 走隐式 TLS, 其余走 STARTTLS/明文
+	SettingKeyAlertSMTPUser        SettingKey = "alert_smtp_user"        // SMTP 登录用户; 留空表示不做认证
+	SettingKeyAlertSMTPFrom        SettingKey = "alert_smtp_from"        // 发件人地址
+	SettingKeyAlertSMTPTo          SettingKey = "alert_smtp_to"          // 收件人地址, 多个用逗号分隔
 )
 
 type Setting struct {
@@ -42,6 +56,15 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyAlertWebhookURL, Value: ""},           // 告警 webhook 默认不推送
 		{Key: SettingKeyRouteProbeEnabled, Value: "false"},    // 主动探活默认关闭: 探测是真实计费请求, 开不开由用户决定
 		{Key: SettingKeyRouteProbeInterval, Value: "300"},     // 探活默认 5 分钟一轮 (低频, 冷却期通常远大于它)
+		{Key: SettingKeyAlertChannels, Value: "webhook"},      // 默认只发通用 webhook: 与改造前行为一致
+		{Key: SettingKeyAlertFeishuWebhook, Value: ""},
+		{Key: SettingKeyAlertDingTalkWebhook, Value: ""},
+		{Key: SettingKeyAlertWeComWebhook, Value: ""},
+		{Key: SettingKeyAlertSMTPHost, Value: ""},
+		{Key: SettingKeyAlertSMTPPort, Value: "587"}, // 587 是 STARTTLS 的通行端口; 465 会走隐式 TLS
+		{Key: SettingKeyAlertSMTPUser, Value: ""},
+		{Key: SettingKeyAlertSMTPFrom, Value: ""},
+		{Key: SettingKeyAlertSMTPTo, Value: ""},
 	}
 }
 
@@ -110,21 +133,91 @@ func (s *Setting) Validate() error {
 		}
 		return nil
 	case SettingKeyAlertWebhookURL:
+		return validateHTTPURL(s.Value, "alert webhook URL")
+	case SettingKeyAlertFeishuWebhook:
+		return validateHTTPURL(s.Value, "feishu webhook URL")
+	case SettingKeyAlertDingTalkWebhook:
+		return validateHTTPURL(s.Value, "dingtalk webhook URL")
+	case SettingKeyAlertWeComWebhook:
+		return validateHTTPURL(s.Value, "wecom webhook URL")
+	case SettingKeyAlertChannels:
+		for _, kind := range splitNotifyChannels(s.Value) {
+			if !isNotifyChannel(kind) {
+				return fmt.Errorf("unknown alert channel %q (want webhook, feishu, dingtalk, wecom or smtp)", kind)
+			}
+		}
+		return nil
+	case SettingKeyAlertSMTPPort:
+		port, err := strconv.Atoi(s.Value)
+		if err != nil || port < 0 || port > 65535 {
+			return fmt.Errorf("smtp port must be an integer between 0 and 65535")
+		}
+		return nil
+	case SettingKeyAlertSMTPHost:
 		if s.Value == "" {
 			return nil
 		}
-		parsedURL, err := url.Parse(s.Value)
-		if err != nil {
-			return fmt.Errorf("alert webhook URL is invalid: %w", err)
-		}
-		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-			return fmt.Errorf("alert webhook URL scheme must be http or https")
-		}
-		if parsedURL.Host == "" {
-			return fmt.Errorf("alert webhook URL must include a host")
+		// SMTP 地址只写主机名: 端口是独立设置, 带上 svc:// 或 :port 会构造出无法拨号的地址。
+		if strings.ContainsAny(s.Value, ":/ ") {
+			return fmt.Errorf("smtp host must be a bare hostname without scheme or port")
 		}
 		return nil
+	case SettingKeyAlertSMTPFrom, SettingKeyAlertSMTPTo:
+		return validateMailboxList(s.Value)
 	}
 
+	return nil
+}
+
+// validateHTTPURL 校验 webhook 类设置: 留空合法(表示未配置), 否则必须是带主机名的 http(s) 地址。
+func validateHTTPURL(value, name string) error {
+	if value == "" {
+		return nil
+	}
+	parsedURL, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("%s is invalid: %w", name, err)
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("%s scheme must be http or https", name)
+	}
+	if parsedURL.Host == "" {
+		return fmt.Errorf("%s must include a host", name)
+	}
+	return nil
+}
+
+// splitNotifyChannels 切分渠道设置并去空白; 空串切成空表(表示一个渠道都不发)。
+func splitNotifyChannels(value string) []string {
+	parts := strings.Split(value, ",")
+	kinds := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			kinds = append(kinds, trimmed)
+		}
+	}
+	return kinds
+}
+
+func isNotifyChannel(kind string) bool {
+	switch kind {
+	case "webhook", "feishu", "dingtalk", "wecom", "smtp":
+		return true
+	}
+	return false
+}
+
+// validateMailboxList 校验收件人/发件人: 留空合法, 否则每项都必须是形如 a@b 的地址。
+func validateMailboxList(value string) error {
+	if value == "" {
+		return nil
+	}
+	for _, address := range splitNotifyChannels(value) {
+		at := strings.Index(address, "@")
+		if at <= 0 || at == len(address)-1 || strings.ContainsAny(address, " \t") {
+			return fmt.Errorf("email address %q is invalid", address)
+		}
+	}
 	return nil
 }

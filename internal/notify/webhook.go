@@ -19,7 +19,8 @@ import (
 
 // Event 是推送的告警事件。
 type Event struct {
-	Type      string    `json:"type"`       // 事件类型: quota_alert | quota_zero_stop。
+	Type      string    `json:"type"`       // 事件类型: quota_alert | quota_zero_stop | route_probe_recovered | notify_test。
+	Title     string    `json:"title"`      // 事件标题; 留空时渲染层按 Type 给中文名 (DisplayTitle)。
 	Channel   string    `json:"channel"`    // 渠道名。
 	ChannelID int       `json:"channel_id"` // 渠道主键。
 	Message   string    `json:"message"`    // 人类可读摘要。

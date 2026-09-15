@@ -170,6 +170,7 @@ http://localhost:5173
 | `OCTOPUS_DATABASE_PATH` | `database.path` |
 | `OCTOPUS_LOG_LEVEL` | `log.level` |
 | `OCTOPUS_GITHUB_PAT` | 用于获取最新版本时的速率限制(可选) |
+| `OCTOPUS_SMTP_PASSWORD` | 邮件通知渠道的 SMTP 密码(可选，不落库、不进备份) |
 
 
 ## 📸 界面预览

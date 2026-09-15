@@ -113,7 +113,8 @@ func ProbeCoolingMembers(ctx context.Context) (probed int, recovered int) {
 		recovered++
 		log.Infof("route probe recovered: group=%s(%d) member=%d channel=%s model=%s latency=%dms",
 			target.group.Name, target.group.ID, target.item.ID, result.channelName, target.item.ModelName, result.latencyMs)
-		if err := notify.PostWebhook(ctx, notify.Event{
+		// 恢复事件投递到全部启用渠道 (R-alert-001): 单个渠道失败由 notify 内部记日志并进结果表, 不影响探活主流程。
+		notify.Send(ctx, notify.Event{
 			Type:      "route_probe_recovered",
 			Channel:   result.channelName,
 			ChannelID: result.channelID,
@@ -125,9 +126,7 @@ func ProbeCoolingMembers(ctx context.Context) (probed int, recovered int) {
 				"model":      target.item.ModelName,
 				"latency_ms": result.latencyMs,
 			},
-		}); err != nil {
-			log.Warnf("route probe webhook failed: member=%d: %v", target.item.ID, err)
-		}
+		})
 	}
 	return probed, recovered
 }

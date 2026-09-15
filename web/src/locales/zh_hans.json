@@ -280,6 +280,32 @@
             "probeHint": "对冷却中的成员主动发一次最小真实请求，确认恢复即立即解除冷却；探测按量计费，默认关闭",
             "probeInterval": "探活周期（秒，0 表示停用）"
         },
+        "notify": {
+            "title": "通知渠道",
+            "hint": "一个告警事件会同时投递到上面启用的全部渠道；改完配置点右侧「发送测试」会真的发一条。",
+            "test": "发送测试",
+            "testing": "发送中…",
+            "testDone": "已投递 {sent} 个渠道",
+            "testAllFailed": "所有渠道都投递失败，请看下方原因",
+            "feishu": "飞书群机器人 Webhook",
+            "dingtalk": "钉钉群机器人 Webhook",
+            "wecom": "企业微信群机器人 Webhook",
+            "smtpHost": "SMTP 服务器",
+            "smtpPort": "端口",
+            "smtpUser": "用户名",
+            "smtpFrom": "发件人",
+            "smtpTo": "收件人（逗号分隔）",
+            "smtpPasswordHint": "邮箱密码不存库：请用环境变量 OCTOPUS_SMTP_PASSWORD 提供。端口 465 走隐式 TLS，其余端口走 STARTTLS。",
+            "resultOk": "投递成功",
+            "resultFail": "失败：{reason}",
+            "kind": {
+                "webhook": "通用 Webhook",
+                "feishu": "飞书",
+                "dingtalk": "钉钉",
+                "wecom": "企业微信",
+                "smtp": "邮件"
+            }
+        },
         "alerts": {
             "webhook": "告警 Webhook（可选）"
         },

@@ -18,6 +18,11 @@ failing to healthy while the relay is running):
   GET  /__control -> current overrides
 An override wins over the name-derived behavior for that model.
 
+Notification sinks (drives alert-delivery tests): POST /notify/echo, /notify/feishu,
+/notify/dingtalk, /notify/wecom answer the provider-shaped success payload, and
+/notify/feishu-fail answers the "HTTP 200 + business error code" shape. Every POST
+body is appended to requests.jsonl like any other request.
+
 Every request is appended to requests.jsonl with method/path/model/stream/headers
 so tests can prove what the relay actually sent upstream (including protocol
 conversion: an Anthropic inbound either arrives at /v1/messages or is converted
@@ -147,7 +152,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._responses(model, stream)
         if self.path.endswith("/messages"):
             return self._messages(model, stream)
+        if "/notify/" in self.path:
+            return self._notify_sink()
         self._send_json(404, {"error": {"message": "unknown path " + self.path}})
+
+    # ---- 通知渠道桩 (R-alert-001): 按各家协议返回成功/失败应答, 请求体已由 do_POST 落盘 ----
+    def _notify_sink(self):
+        if self.path.endswith("/notify/feishu"):
+            return self._send_json(200, {"code": 0, "msg": "success"})
+        if self.path.endswith("/notify/feishu-fail"):
+            # 飞书式的"HTTP 200 包业务错误": 发送方必须看响应体里的码, 否则会误报成功。
+            return self._send_json(200, {"code": 19024, "msg": "key not found"})
+        if self.path.endswith("/notify/dingtalk"):
+            return self._send_json(200, {"errcode": 0, "errmsg": "ok"})
+        if self.path.endswith("/notify/wecom"):
+            return self._send_json(200, {"errcode": 0, "errmsg": "ok"})
+        return self._send_json(200, {"ok": True})
 
     # ---- OpenAI Chat Completions ----
     def _chat(self, model, stream):

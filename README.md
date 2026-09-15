@@ -171,6 +171,7 @@ All configuration options can be overridden via environment variables using the 
 | `OCTOPUS_DATABASE_PATH` | `database.path` |
 | `OCTOPUS_LOG_LEVEL` | `log.level` |
 | `OCTOPUS_GITHUB_PAT` | For rate limiting when getting the latest version (optional) |
+| `OCTOPUS_SMTP_PASSWORD` | Password for the SMTP alert channel (optional, never stored in settings/DB) |
 
 ## 📸 Screenshots
 

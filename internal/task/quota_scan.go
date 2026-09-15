@@ -57,18 +57,16 @@ func quotaScanOnce() {
 
 		log.Infof("quota scan: channel=%s(%d) remaining=%.2f", target.ChannelName, target.ChannelID, remaining)
 		if health.BelowThreshold(remaining, threshold) {
-			// 告警事件出口: 落日志 + 推送配置的 webhook (U-alert-001 最小实现)。
+			// 告警事件出口: 落日志 + 投递到全部启用渠道 (R-alert-001: webhook/飞书/钉钉/企微/SMTP)。
 			log.Warnf("quota alert: channel=%s(%d) remaining=%.2f below threshold=%.2f", target.ChannelName, target.ChannelID, remaining, threshold)
-			if err := notify.PostWebhook(ctx, notify.Event{
+			notify.Send(ctx, notify.Event{
 				Type:      "quota_alert",
 				Channel:   target.ChannelName,
 				ChannelID: target.ChannelID,
 				Message:   "channel balance below threshold",
 				Remaining: remaining,
 				Detail:    map[string]float64{"threshold": threshold},
-			}); err != nil {
-				log.Warnf("quota alert webhook failed: channel=%s(%d): %v", target.ChannelName, target.ChannelID, err)
-			}
+			})
 		}
 		if remaining <= model.QuotaZeroThreshold {
 			stopped, err := op.QuotaZeroStop(target.ChannelID, remaining)
@@ -78,16 +76,14 @@ func quotaScanOnce() {
 			}
 			if len(stopped) > 0 {
 				log.Warnf("quota zero-stop: channel=%s(%d) disabled %d keys", target.ChannelName, target.ChannelID, len(stopped))
-				if err := notify.PostWebhook(ctx, notify.Event{
+				notify.Send(ctx, notify.Event{
 					Type:      "quota_zero_stop",
 					Channel:   target.ChannelName,
 					ChannelID: target.ChannelID,
 					Message:   "channel balance exhausted, keys auto disabled",
 					Remaining: remaining,
 					Detail:    map[string]any{"stopped_keys": stopped},
-				}); err != nil {
-					log.Warnf("quota zero-stop webhook failed: channel=%s(%d): %v", target.ChannelName, target.ChannelID, err)
-				}
+				})
 			}
 		}
 	}
