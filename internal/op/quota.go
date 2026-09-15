@@ -3,6 +3,7 @@ package op
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
@@ -232,4 +233,28 @@ func quotaAuditOn(conn quotaDB, channelID, keyID int, action string, remaining f
 // 存活行保留缓存中尚未落库的统计，沿 reloadChannelChildren 同一口径。
 func quotaRefreshChannelKeys(ctx context.Context, channelID int) error {
 	return reloadChannelChildren(ctx, channelID)
+}
+
+// channelBalance 保存各渠道最近一次余额扫描读到的剩余额度。
+//
+// 只放在内存里（不落库）: 余额是"临时事实", 重启后到下一轮扫描之前按「未知」处理,
+// 与加权选路对缺数据的乐观先验一致（不会因为重启就把某成员永久打死）。
+var channelBalance = struct {
+	mu     sync.RWMutex
+	values map[int]float64
+}{values: make(map[int]float64)}
+
+// RecordChannelBalance 由配额扫描在取到余额后调用。
+func RecordChannelBalance(channelID int, remaining float64) {
+	channelBalance.mu.Lock()
+	defer channelBalance.mu.Unlock()
+	channelBalance.values[channelID] = remaining
+}
+
+// ChannelBalance 返回该渠道最近一次已知剩余额度; 未知时 ok=false。
+func ChannelBalance(channelID int) (float64, bool) {
+	channelBalance.mu.RLock()
+	defer channelBalance.mu.RUnlock()
+	value, ok := channelBalance.values[channelID]
+	return value, ok
 }

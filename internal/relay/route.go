@@ -291,6 +291,7 @@ func PickGroupItem(group model.Group, flat []model.GroupItem) model.GroupItem {
 func hotRouteDeps() routeDeps {
 	return routeDeps{
 		cost:    memberUnitPrice,
+		billing: memberBilling,
 		quality: memberSuccessRate,
 		latency: memberLatencyMs,
 		busy:    memberBusyCount,
@@ -299,13 +300,10 @@ func hotRouteDeps() routeDeps {
 }
 
 func pickGroupItemHot(group model.Group) model.GroupItem {
-	return pickGroupItemByMode(group, routeDeps{
-		cost:    memberUnitPrice,
-		quality: memberSuccessRate,
-		latency: memberLatencyMs,
-		busy:    memberBusyCount,
-		load:    memberRecentLoad,
-	}, RouteBalanceEnabled())
+	// 生产热路径统一走 hotRouteDeps(): 以前这里另抄了一份 routeDeps 字面量, 加新维度时漏接线就会出现
+	// 「模式支持、单测通过, 但生产上永远拿不到该维度数据」的静默降级（R-weight-001 第二阶段踩过:
+	// billing 只接进了 hotRouteDeps, 而热路径用的是这份副本, 结果倍率维度在生产上等于没接）。
+	return pickGroupItemByMode(group, hotRouteDeps(), RouteBalanceEnabled())
 }
 
 // pickGroupItemByMode 按分组模式与加权轮询开关分发选路（热路径与单测共用同一入口）:

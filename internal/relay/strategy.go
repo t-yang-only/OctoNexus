@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"github.com/bestruirui/octopus/internal/op"
 	"maps"
 	"sort"
 	"time"
@@ -45,6 +46,37 @@ func unitPriceFromPrice(p *model.LLMPrice) (float64, bool) {
 // memberUnitPrice 是生产用的取价实现：按成员的上游模型名查价表。
 func memberUnitPrice(item model.GroupItem) (float64, bool) {
 	return unitPriceFromPrice(price.GetLLMPrice(item.ModelName))
+}
+
+// memberBilling 是生产用的计费事实实现：由成员的授权解析到渠道, 取渠道上填写的计费字段,
+// 再叠加配额扫描留下的余额快照（内存, 未知则 BalanceKnown=false）。
+//
+// 解析失败（授权不存在/渠道被删）时返回 ok=false —— 打分侧会把该成员按"全部未知"处理,
+// 也就是乐观先验; 真正的可用性判断在别处（授权解析失败本身会被选路前置捕获）。
+func memberBilling(item model.GroupItem) (model.ChannelBilling, bool) {
+	grant, err := op.ChannelGrantGet(item.GrantRef())
+	if err != nil {
+		return model.ChannelBilling{}, false
+	}
+	channelModel, err := op.ChannelModelGet(grant.ChannelModelID)
+	if err != nil {
+		return model.ChannelBilling{}, false
+	}
+	channel, err := op.ChannelGet(channelModel.ChannelID)
+	if err != nil {
+		return model.ChannelBilling{}, false
+	}
+	billing := model.ChannelBilling{
+		Mode:         channel.BillingMode,
+		Multiplier:   channel.Multiplier,
+		PerCallPrice: channel.PerCallPrice,
+		MonthlyQuota: channel.MonthlyQuota,
+		MonthlyUsed:  channel.MonthlyUsed,
+	}
+	if balance, ok := op.ChannelBalance(channelModel.ChannelID); ok {
+		billing.Balance, billing.BalanceKnown = balance, true
+	}
+	return billing, true
 }
 
 // rankByLowestCost 对候选做最低成本定序：首个即"当前最省的成员"。
@@ -107,6 +139,8 @@ type routeDeps struct {
 	latency LatencyProvider
 	busy    BusyProvider
 	load    LoadProvider
+	// billing 提供成员的渠道计费事实（倍率 / 按次单价 / 包月额度 / 余额）, R-weight-001 第二阶段。
+	billing func(item model.GroupItem) (model.ChannelBilling, bool)
 }
 
 // NM-DS-004 迭代：质量优先（quality_first）选路定序。

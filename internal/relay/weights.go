@@ -29,18 +29,32 @@ const (
 	defaultRouteWeightLatency = 15 // 延迟: 成员最近一次尝试耗时
 	defaultRouteWeightBusy    = 15 // 在途: 该成员此刻并发数
 	defaultRouteWeightLoad    = 10 // 近期消耗: 60s 窗口内的 token/请求量
+
+	// 计费类维度（R-weight-001 第二阶段）: 价表只反映模型基准价, 这四项补上"实际有多贵"。
+	defaultRouteWeightMultiplier = 15 // 倍率: 渠道计价倍率, 越低越好
+	defaultRouteWeightPerCall    = 10 // 按次单价: 每请求成本, 越低越好
+	defaultRouteWeightBalance    = 15 // 余额: 最近一次扫描的剩余额度, 越多越好
+	defaultRouteWeightMonthly    = 10 // 包月余量: 剩余比例, 越多越好
 )
 
 type weightSettings struct {
-	cost    int
-	quality int
-	latency int
-	busy    int
-	load    int
+	cost       int
+	quality    int
+	latency    int
+	busy       int
+	load       int
+	multiplier int
+	perCall    int
+	balance    int
+	monthly    int
+	// monthlyAction 决定包月额度用尽时的处置: "demote"（降权, 默认, 还能被选到）或 "exclude"（剔除）。
+	// 这是用户点名的取舍点之一, 所以做成设置项而不是写死。
+	monthlyAction string
 }
 
 func (settings weightSettings) total() int {
-	return settings.cost + settings.quality + settings.latency + settings.busy + settings.load
+	return settings.cost + settings.quality + settings.latency + settings.busy + settings.load +
+		settings.multiplier + settings.perCall + settings.balance + settings.monthly
 }
 
 // weightSettingsOf 读取权重设置; 缺省或非法值回落到上面的保守默认值, 并夹到 0..100。
@@ -55,12 +69,21 @@ func weightSettingsOf() weightSettings {
 		}
 		return value
 	}
+	action, err := op.SettingGetString(model.SettingKeyRouteMonthlyAction)
+	if err != nil || (action != "demote" && action != "exclude") {
+		action = "demote" // 设置缺失/非法一律按"降权不剔除"（保守: 不悄悄让成员彻底不可用）
+	}
 	return weightSettings{
-		cost:    read(model.SettingKeyRouteWeightCost, defaultRouteWeightCost),
-		quality: read(model.SettingKeyRouteWeightQuality, defaultRouteWeightQuality),
-		latency: read(model.SettingKeyRouteWeightLatency, defaultRouteWeightLatency),
-		busy:    read(model.SettingKeyRouteWeightBusy, defaultRouteWeightBusy),
-		load:    read(model.SettingKeyRouteWeightLoad, defaultRouteWeightLoad),
+		cost:          read(model.SettingKeyRouteWeightCost, defaultRouteWeightCost),
+		quality:       read(model.SettingKeyRouteWeightQuality, defaultRouteWeightQuality),
+		latency:       read(model.SettingKeyRouteWeightLatency, defaultRouteWeightLatency),
+		busy:          read(model.SettingKeyRouteWeightBusy, defaultRouteWeightBusy),
+		load:          read(model.SettingKeyRouteWeightLoad, defaultRouteWeightLoad),
+		multiplier:    read(model.SettingKeyRouteWeightMultiplier, defaultRouteWeightMultiplier),
+		perCall:       read(model.SettingKeyRouteWeightPerCall, defaultRouteWeightPerCall),
+		balance:       read(model.SettingKeyRouteWeightBalance, defaultRouteWeightBalance),
+		monthly:       read(model.SettingKeyRouteWeightMonthly, defaultRouteWeightMonthly),
+		monthlyAction: action,
 	}
 }
 
@@ -77,6 +100,19 @@ type weightedSample struct {
 	busyOK  bool
 	load    float64
 	loadOK  bool
+
+	// 计费类维度（第二阶段）。
+	multiplier float64
+	multiOK    bool
+	perCall    float64
+	perCallOK  bool
+	balance    float64
+	balanceOK  bool
+	// monthlyRatio 是包月剩余比例（0..1）; monthlyKnown=false 表示该渠道没填包月额度。
+	monthlyRatio float64
+	monthlyKnown bool
+	// monthlyExhausted 表示包月额度已用尽（比例 <=0）, 由 monthlyAction 决定降权还是剔除。
+	monthlyExhausted bool
 }
 
 // normalizedScore 把五维原始值归一化成 [0,1] 的加权分（越大越好）。
@@ -157,6 +193,16 @@ func (settings weightSettings) normalizedScore(samples []weightedSample, index i
 	score := 0.0
 	score += float64(settings.cost) * lowerBetter(myself.cost, myself.costOK,
 		func(s weightedSample) (float64, bool) { return s.cost, s.costOK })
+	// 倍率与按次单价都是"越低越好", 与成本同向但来源不同（成本来自价表, 倍率来自站点, 按次来自计费方式）。
+	score += float64(settings.multiplier) * lowerBetter(myself.multiplier, myself.multiOK,
+		func(s weightedSample) (float64, bool) { return s.multiplier, s.multiOK })
+	score += float64(settings.perCall) * lowerBetter(myself.perCall, myself.perCallOK,
+		func(s weightedSample) (float64, bool) { return s.perCall, s.perCallOK })
+	// 余额越多越好; 包月余量比例越多越好（用尽时该维度记 0 分 —— 降权, 但不至于选不到）。
+	score += float64(settings.balance) * higherBetter(myself.balance, myself.balanceOK,
+		func(s weightedSample) (float64, bool) { return s.balance, s.balanceOK })
+	score += float64(settings.monthly) * higherBetter(myself.monthlyRatio, myself.monthlyKnown,
+		func(s weightedSample) (float64, bool) { return s.monthlyRatio, s.monthlyKnown })
 	score += float64(settings.quality) * higherBetter(myself.quality, myself.qualOK,
 		func(s weightedSample) (float64, bool) { return s.quality, s.qualOK })
 	score += float64(settings.latency) * lowerBetter(myself.latency, myself.lateOK,
@@ -197,6 +243,28 @@ func rankByWeighted(items []model.GroupItem, cooldowns map[int]int64, nowMs int6
 		if deps.busy != nil {
 			sample.busy, sample.busyOK = float64(deps.busy(item.ID)), true
 		}
+		if deps.billing != nil {
+			if billing, ok := deps.billing(item); ok {
+				if billing.Multiplier > 0 {
+					sample.multiplier, sample.multiOK = billing.Multiplier, true
+				}
+				if billing.PerCallPrice > 0 {
+					sample.perCall, sample.perCallOK = billing.PerCallPrice, true
+				}
+				if billing.BalanceKnown {
+					sample.balance, sample.balanceOK = billing.Balance, true
+				}
+				if billing.MonthlyQuota > 0 {
+					remaining := billing.MonthlyQuota - billing.MonthlyUsed
+					if remaining < 0 {
+						remaining = 0
+					}
+					sample.monthlyRatio = remaining / billing.MonthlyQuota
+					sample.monthlyKnown = true
+					sample.monthlyExhausted = remaining <= 0
+				}
+			}
+		}
 		if deps.load != nil {
 			requests, tokens, ok := deps.load(item.ID)
 			if ok {
@@ -208,6 +276,21 @@ func rankByWeighted(items []model.GroupItem, cooldowns map[int]int64, nowMs int6
 			}
 		}
 		samples = append(samples, sample)
+	}
+
+	if settings.monthlyAction == "exclude" && settings.monthly > 0 {
+		kept := samples[:0]
+		for _, sample := range samples {
+			if sample.monthlyKnown && sample.monthlyExhausted {
+				continue // 用户选择"包月用尽即剔除"
+			}
+			kept = append(kept, sample)
+		}
+		samples = kept
+		if len(samples) == 0 {
+			// 全员包月用尽且要求剔除: 按无人可用处理（外层等冷却/下一轮重试）, 不要悄悄破坏剔除语义。
+			return nil, ErrNoEligibleMember
+		}
 	}
 
 	type scored struct {

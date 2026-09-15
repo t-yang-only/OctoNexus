@@ -297,6 +297,16 @@ func ChannelGet(id int) (model.Channel, error) {
 	return channel, nil
 }
 
+// ChannelModelGet 按 ID 取渠道模型（进程内副本, 与 ChannelGet 同一风格）。
+// 加权选路要用它把「成员」折算到「渠道」上的计费字段（倍率/按次/包月）。
+func ChannelModelGet(id int) (model.ChannelModel, error) {
+	channelModel, ok := channelModelCache.Get(id)
+	if !ok {
+		return model.ChannelModel{}, fmt.Errorf("channel model not found")
+	}
+	return channelModel, nil
+}
+
 // ChannelGrantGet 返回可用于转发的渠道授权, 并补齐其模型与凭据。
 // 凭据被停用, 以及模型, 凭据缺失时一律返回错误, 使调用方拿到的授权必然可直接转发, 无需再逐项检查。
 // 授权本身没有停用状态: 不再授权就删掉该组合, 无需保留一行停用记录。

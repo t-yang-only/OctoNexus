@@ -6,13 +6,15 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 )
 
-// weightedDeps 用桩构造五维信号, 便于断言"换权重就换选择"这一核心行为。
+// weightedDeps 用桩构造各维信号, 便于断言"换权重就换选择"这一核心行为。
 type weightedDeps struct {
 	cost    map[int]float64
 	quality map[int]float64
 	latency map[int]int64
 	busy    map[int]int
 	load    map[int]int
+	// billing 是第二阶段的渠道计费事实（倍率/按次/包月/余额）, 按成员 ID 给。
+	billing map[int]model.ChannelBilling
 }
 
 func (d weightedDeps) deps() routeDeps {
@@ -33,6 +35,10 @@ func (d weightedDeps) deps() routeDeps {
 		load: func(itemID int) (int, int, bool) {
 			value, ok := d.load[itemID]
 			return 1, value, ok
+		},
+		billing: func(item model.GroupItem) (model.ChannelBilling, bool) {
+			value, ok := d.billing[item.ID]
+			return value, ok
 		},
 	}
 }
@@ -158,5 +164,156 @@ func TestWeightedTiesBreakByPriorityAndID(t *testing.T) {
 	}
 	if got := order(t, ranked); got[0] != 11 || got[1] != 22 || got[2] != 33 {
 		t.Fatalf("全等时应按 priority/ID 定序, got %v", got)
+	}
+}
+
+// ---------- 第二阶段：倍率 / 按次单价 / 余额 / 包月余量 ----------
+
+// TestWeightedMultiplierDominates 倍率权重拉满时选倍率最低的成员（同样价格的站, 倍率 2 比倍率 1 贵一倍）。
+func TestWeightedMultiplierDominates(t *testing.T) {
+	deps := weightedDeps{billing: map[int]model.ChannelBilling{
+		11: {Multiplier: 2.0},
+		22: {Multiplier: 1.0},
+		33: {Multiplier: 1.5},
+	}}
+	ranked, err := rankByWeighted(weightedItems(), map[int]int64{}, 1000, nil, deps.deps(),
+		weightSettings{multiplier: 100, monthlyAction: "demote"})
+	if err != nil {
+		t.Fatalf("rankByWeighted: %v", err)
+	}
+	if got := order(t, ranked); got[0] != 22 {
+		t.Fatalf("倍率权重拉满应选倍率最低的 22, got %v", got)
+	}
+}
+
+// TestWeightedPerCallDominates 按次单价权重拉满时选每请求最便宜的成员。
+func TestWeightedPerCallDominates(t *testing.T) {
+	deps := weightedDeps{billing: map[int]model.ChannelBilling{
+		11: {Mode: "per_call", PerCallPrice: 0.05},
+		22: {Mode: "per_call", PerCallPrice: 0.01},
+	}}
+	ranked, err := rankByWeighted(weightedItems(), map[int]int64{}, 1000, nil, deps.deps(),
+		weightSettings{perCall: 100, monthlyAction: "demote"})
+	if err != nil {
+		t.Fatalf("rankByWeighted: %v", err)
+	}
+	if got := order(t, ranked); got[0] != 22 {
+		t.Fatalf("按次权重拉满应选单次最便宜的 22, got %v", got)
+	}
+}
+
+// TestWeightedBalanceDominates 余额权重拉满时选余额最多的成员（余额来自配额扫描的最近一次读数）。
+func TestWeightedBalanceDominates(t *testing.T) {
+	deps := weightedDeps{billing: map[int]model.ChannelBilling{
+		11: {Balance: 3, BalanceKnown: true},
+		22: {Balance: 90, BalanceKnown: true},
+	}}
+	ranked, err := rankByWeighted(weightedItems(), map[int]int64{}, 1000, nil, deps.deps(),
+		weightSettings{balance: 100, monthlyAction: "demote"})
+	if err != nil {
+		t.Fatalf("rankByWeighted: %v", err)
+	}
+	if got := order(t, ranked); got[0] != 22 {
+		t.Fatalf("余额权重拉满应选余额最多的 22, got %v", got)
+	}
+}
+
+// TestWeightedMonthlyDemoteKeepsMemberAvailable 包月用尽的成员在 demote（默认）下只是降权, 仍可能被选到。
+func TestWeightedMonthlyDemoteKeepsMemberAvailable(t *testing.T) {
+	deps := weightedDeps{billing: map[int]model.ChannelBilling{
+		11: {MonthlyQuota: 100, MonthlyUsed: 100}, // 用尽
+		22: {MonthlyQuota: 100, MonthlyUsed: 10},  // 还剩 90%
+	}}
+	ranked, err := rankByWeighted(weightedItems(), map[int]int64{}, 1000, nil, deps.deps(),
+		weightSettings{monthly: 100, monthlyAction: "demote"})
+	if err != nil {
+		t.Fatalf("rankByWeighted: %v", err)
+	}
+	got := order(t, ranked)
+	if len(got) != 3 {
+		t.Fatalf("demote 不应剔除任何成员, got %v", got)
+	}
+	if got[0] != 22 {
+		t.Fatalf("包月余量多的应排在前面, got %v", got)
+	}
+	if got[len(got)-1] != 11 {
+		t.Fatalf("包月用尽的应被降权到后面（但仍在候选里）, got %v", got)
+	}
+}
+
+// TestWeightedMonthlyExcludeDropsMember 选择 exclude 时包月用尽的成员不再参与。
+func TestWeightedMonthlyExcludeDropsMember(t *testing.T) {
+	deps := weightedDeps{billing: map[int]model.ChannelBilling{
+		11: {MonthlyQuota: 100, MonthlyUsed: 100},
+		22: {MonthlyQuota: 100, MonthlyUsed: 10},
+	}}
+	ranked, err := rankByWeighted(weightedItems(), map[int]int64{}, 1000, nil, deps.deps(),
+		weightSettings{monthly: 100, monthlyAction: "exclude"})
+	if err != nil {
+		t.Fatalf("rankByWeighted: %v", err)
+	}
+	for _, item := range ranked {
+		if item.ID == 11 {
+			t.Fatalf("exclude 下包月用尽的 11 不该出现在候选里, got %v", order(t, ranked))
+		}
+	}
+	// 剩下的两个: 22 有包月数据（还剩 90%）, 33 没有包月数据 → 按乐观先验 33 在前。
+	// 这正是「没填过的成员先给一次机会」的口径（与 lowest_latency 的无耗时按 0ms、quality_first 的无样本中性 1.0 一致）。
+	if got := order(t, ranked); got[0] != 33 || got[1] != 22 {
+		t.Fatalf("剩下的应选 33（无包月数据, 乐观先验）再 22, got %v", got)
+	}
+}
+
+// TestWeightedMonthlyExcludeAllExhaustedReportsNoMember 全员包月用尽 + exclude 时报无人可用（外层等下一轮）。
+func TestWeightedMonthlyExcludeAllExhaustedReportsNoMember(t *testing.T) {
+	deps := weightedDeps{billing: map[int]model.ChannelBilling{
+		11: {MonthlyQuota: 10, MonthlyUsed: 10},
+		22: {MonthlyQuota: 10, MonthlyUsed: 10},
+		33: {MonthlyQuota: 10, MonthlyUsed: 10},
+	}}
+	if _, err := rankByWeighted(weightedItems(), map[int]int64{}, 1000, nil, deps.deps(),
+		weightSettings{monthly: 100, monthlyAction: "exclude"}); err == nil {
+		t.Fatal("全员包月用尽 + exclude 时应返回 ErrNoEligibleMember")
+	}
+}
+
+// TestWeightedBillingUnknownIsOptimistic 没填计费信息的成员按乐观先验参与: 已知倍率很差的成员排在它之后。
+func TestWeightedBillingUnknownIsOptimistic(t *testing.T) {
+	deps := weightedDeps{billing: map[int]model.ChannelBilling{
+		11: {Multiplier: 5.0}, // 贵得离谱
+	}}
+	ranked, err := rankByWeighted(weightedItems(), map[int]int64{}, 1000, nil, deps.deps(),
+		weightSettings{multiplier: 100, monthlyAction: "demote"})
+	if err != nil {
+		t.Fatalf("rankByWeighted: %v", err)
+	}
+	if got := order(t, ranked); got[0] == 11 {
+		t.Fatalf("已知倍率很差的 11 不该继续排第一, got %v", got)
+	}
+}
+
+// TestHotRouteDepsCoversEveryDimension 守卫生产热路径的 provider 接线。
+//
+// 新增维度时如果只在 hotRouteDeps 里接线、或只在 pickGroupItemHot 的副本里接线, 本测试会红:
+// 该测试盯着 hotRouteDeps（热路径现在唯一使用的依赖集合）。
+func TestHotRouteDepsCoversEveryDimension(t *testing.T) {
+	deps := hotRouteDeps()
+	if deps.cost == nil {
+		t.Error("hotRouteDeps.cost 未接线")
+	}
+	if deps.quality == nil {
+		t.Error("hotRouteDeps.quality 未接线")
+	}
+	if deps.latency == nil {
+		t.Error("hotRouteDeps.latency 未接线")
+	}
+	if deps.busy == nil {
+		t.Error("hotRouteDeps.busy 未接线")
+	}
+	if deps.load == nil {
+		t.Error("hotRouteDeps.load 未接线")
+	}
+	if deps.billing == nil {
+		t.Error("hotRouteDeps.billing 未接线（倍率/按次/包月/余额四个维度会静默失效）")
 	}
 }
