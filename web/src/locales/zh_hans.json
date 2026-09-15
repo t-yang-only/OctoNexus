@@ -275,7 +275,10 @@
         "routing": {
             "title": "路由策略",
             "balance": "加权轮询",
-            "balanceHint": "故障转移分组启用后按权重轮换候选，默认关闭"
+            "balanceHint": "故障转移分组启用后按权重轮换候选，默认关闭",
+            "probe": "冷却成员主动探活",
+            "probeHint": "对冷却中的成员主动发一次最小真实请求，确认恢复即立即解除冷却；探测按量计费，默认关闭",
+            "probeInterval": "探活周期（秒，0 表示停用）"
         },
         "alerts": {
             "webhook": "告警 Webhook（可选）"

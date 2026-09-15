@@ -12,6 +12,12 @@ Behavior is driven by the upstream model name in the request body "model" field:
   otherwise       -> answer normally
 Streaming (body.stream == true) answers SSE in the same wire shape as the protocol.
 
+Runtime override (drives proactive-probe tests, which must flip a model from
+failing to healthy while the relay is running):
+  POST /__control {"model": "mock-bad", "behavior": "ok"|"bad"|"slow"}
+  GET  /__control -> current overrides
+An override wins over the name-derived behavior for that model.
+
 Every request is appended to requests.jsonl with method/path/model/stream/headers
 so tests can prove what the relay actually sent upstream (including protocol
 conversion: an Anthropic inbound either arrives at /v1/messages or is converted
@@ -32,6 +38,10 @@ LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requests.js
 _lock = threading.Lock()
 
 MODELS = ["mock-good", "mock-slow", "mock-bad", "mock-chatonly"]
+
+# FORCED 是运行期行为覆盖: 模型名 → "ok"/"bad"/"slow"。探活用例要证明"上游恢复后冷却被提前解除",
+# 就需要在实例运行中把某个模型从失败翻成健康, 改模型名做不到 (成员模型名是落库配置)。
+FORCED = {}
 
 
 def _redact(value):
@@ -88,6 +98,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def do_GET(self):
+        if self.path.rstrip("/").endswith("/__control"):
+            self._send_json(200, {"forced": dict(FORCED), "slow_seconds": SLOW_SECONDS})
+            return
         if self.path.endswith("/models"):
             log_request({"method": "GET", "path": self.path, "model": None, "stream": None})
             self._send_json(200, {"object": "list", "data": [{"id": m, "object": "model"} for m in MODELS]})
@@ -98,6 +111,17 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_body()
         model = body.get("model") or ""
         stream = bool(body.get("stream"))
+        if self.path.rstrip("/").endswith("/__control"):
+            behavior = body.get("behavior")
+            if body.get("model") and behavior in ("ok", "bad", "slow"):
+                FORCED[body["model"]] = behavior
+            elif body.get("model") and behavior == "clear":
+                FORCED.pop(body["model"], None)
+            else:
+                self._send_json(400, {"error": {"message": "want {model, behavior=ok|bad|slow|clear}"}})
+                return
+            self._send_json(200, {"forced": dict(FORCED)})
+            return
         log_request({
             "method": "POST",
             "path": self.path,
@@ -110,9 +134,10 @@ class Handler(BaseHTTPRequestHandler):
             "body_keys": sorted(body.keys()),
         })
 
-        if "slow" in model:
+        forced = FORCED.get(model)
+        if forced == "slow" or (forced is None and "slow" in model):
             time.sleep(SLOW_SECONDS)
-        if "bad" in model:
+        if forced == "bad" or (forced is None and "bad" in model):
             self._send_json(500, {"error": {"message": "mock upstream forced failure", "type": "mock_error"}})
             return
 

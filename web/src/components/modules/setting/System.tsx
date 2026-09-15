@@ -22,6 +22,8 @@ export function SettingSystem() {
     const [quotaAlertThreshold, setQuotaAlertThreshold] = useState('');
     const [alertWebhookUrl, setAlertWebhookUrl] = useState('');
     const [routeBalanceEnabled, setRouteBalanceEnabled] = useState(false);
+    const [routeProbeEnabled, setRouteProbeEnabled] = useState(false);
+    const [routeProbeInterval, setRouteProbeInterval] = useState('');
 
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
@@ -31,6 +33,8 @@ export function SettingSystem() {
     const initialQuotaAlertThreshold = useRef('');
     const initialAlertWebhookUrl = useRef('');
     const initialRouteBalanceEnabled = useRef(false);
+    const initialRouteProbeEnabled = useRef(false);
+    const initialRouteProbeInterval = useRef('');
 
     useEffect(() => {
         if (settings) {
@@ -62,6 +66,10 @@ export function SettingSystem() {
             if (quotaThreshold) { queueMicrotask(() => setQuotaAlertThreshold(quotaThreshold.value)); initialQuotaAlertThreshold.current = quotaThreshold.value; }
             if (webhook) { queueMicrotask(() => setAlertWebhookUrl(webhook.value)); initialAlertWebhookUrl.current = webhook.value; }
             if (balance) { const enabled = balance.value === 'true'; queueMicrotask(() => setRouteBalanceEnabled(enabled)); initialRouteBalanceEnabled.current = enabled; }
+            const probe = settings.find(s => s.key === SettingKey.RouteProbeEnabled);
+            const probeInterval = settings.find(s => s.key === SettingKey.RouteProbeInterval);
+            if (probe) { const enabled = probe.value === 'true'; queueMicrotask(() => setRouteProbeEnabled(enabled)); initialRouteProbeEnabled.current = enabled; }
+            if (probeInterval) { queueMicrotask(() => setRouteProbeInterval(probeInterval.value)); initialRouteProbeInterval.current = probeInterval.value; }
         }
     }, [settings]);
 
@@ -87,6 +95,10 @@ export function SettingSystem() {
                     initialAlertWebhookUrl.current = value;
                 } else if (key === SettingKey.RouteBalanceEnabled) {
                     initialRouteBalanceEnabled.current = value === 'true';
+                } else if (key === SettingKey.RouteProbeEnabled) {
+                    initialRouteProbeEnabled.current = value === 'true';
+                } else if (key === SettingKey.RouteProbeInterval) {
+                    initialRouteProbeInterval.current = value;
                 }
             }
         });
@@ -219,6 +231,8 @@ export function SettingSystem() {
             <div className="space-y-3 rounded-2xl border border-border/50 bg-muted/20 p-3">
                 <div className="flex items-center gap-2 text-sm font-semibold"><Scale className="size-4 text-primary" />{t('routing.title')}</div>
                 <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium">{t('routing.balance')}</p><p className="text-xs text-muted-foreground">{t('routing.balanceHint')}</p></div><Switch checked={routeBalanceEnabled} onCheckedChange={(checked) => { setRouteBalanceEnabled(checked); handleSave(SettingKey.RouteBalanceEnabled, String(checked), String(initialRouteBalanceEnabled.current)); }} /></div>
+                <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium">{t('routing.probe')}</p><p className="text-xs text-muted-foreground">{t('routing.probeHint')}</p></div><Switch checked={routeProbeEnabled} onCheckedChange={(checked) => { setRouteProbeEnabled(checked); handleSave(SettingKey.RouteProbeEnabled, String(checked), String(initialRouteProbeEnabled.current)); }} /></div>
+                <label className="grid gap-1 text-xs text-muted-foreground">{t('routing.probeInterval')}<Input type="number" min="0" value={routeProbeInterval} onChange={(e) => setRouteProbeInterval(e.target.value)} onBlur={() => handleSave(SettingKey.RouteProbeInterval, routeProbeInterval, initialRouteProbeInterval.current)} className="rounded-xl" /></label>
                 <label className="grid gap-1 text-xs text-muted-foreground"><span className="flex items-center gap-1"><BellRing className="size-3.5" />{t('alerts.webhook')}</span><Input value={alertWebhookUrl} onChange={(e) => setAlertWebhookUrl(e.target.value)} onBlur={() => handleSave(SettingKey.AlertWebhookURL, alertWebhookUrl, initialAlertWebhookUrl.current)} placeholder="https://..." type="url" className="rounded-xl" /></label>
             </div>
 

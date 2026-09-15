@@ -267,7 +267,7 @@
             "hint": "渠道獲取模型時與渠道自身的過濾表達式同時生效（AND），留空不過濾"
         },
         "quota": { "title": "餘額掃描與告警", "scanInterval": "掃描週期（分鐘，0 停用）", "alertThreshold": "告警閾值", "unlimited": "不設定閾值" },
-        "routing": { "title": "路由策略", "balance": "加權輪詢", "balanceHint": "啟用後按權重輪換故障轉移候選，預設關閉" },
+        "routing": { "title": "路由策略", "balance": "加權輪詢", "balanceHint": "啟用後按權重輪換故障轉移候選，預設關閉", "probe": "冷卻成員主動探活", "probeHint": "對冷卻中的成員主動發一次最小真實請求，確認恢復即立即解除冷卻；探測按量計費，預設關閉", "probeInterval": "探活週期（秒，0 表示停用）" },
         "alerts": { "webhook": "告警 Webhook（可選）" },
         "saved": "已儲存",
         "backup": {

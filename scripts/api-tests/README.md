@@ -29,6 +29,7 @@ python scripts/api-tests/run_all.py --list
 | `lossless` | 跨协议无损转化：3 客户端协议 × 3 上游协议钉死，标记/工具/max_tokens/temperature 逐项校验 |
 | `real` | 真实上游调用：成本与价表逐项对照 |
 | `failover` | 超时切换与故障转移：失败重试到上限、冷却与跳过、非流式整响应超时、流式首事件超时、全员不可用 |
+| `probe` | 主动探活：上游恢复后提前解除冷却、流量回切、探测是最小真实请求（`max_tokens=1`）、探测失败不改冷却且不重试、设置热写热读并复原（**会在套件内临时打开 `route_probe_enabled`，`finally` 复原**） |
 | `stats` | 后台统计审计：日志行字段、缓存自洽、daily 收敛、usage 与 `relay_logs` 对照、按渠道计数 |
 | `apikey` | Key 级审计：新 Key 转发、自助/管理端统计一致、RPM/TPM 限流与 `Retry-After`、过期/禁用/超额/伪造/越权、SSE 概览、人工中止轮次、Key 登录 |
 | `costmode` / `quality` / `latency` / `busy` | 四种路由策略的活体验证（最低成本 / 质量优先 / 最低延迟 / 最空闲） |
@@ -48,6 +49,8 @@ python scripts/api-tests/run_all.py --list
 - **mock 上游行为**：模型名含 `slow` → 先 sleep `MOCK_SLOW_SECONDS` 再应答（驱动超时切换）；
   含 `bad` → 返回 500（驱动重试/冷却）；`mock-good` 正常；三协议（`/v1/chat/completions`、
   `/v1/responses`、`/v1/messages`）都支持，另有 `/v1/models` 供拉取模型与探针使用。
+  运行期可用 `POST /__control {"model":"mock-bad","behavior":"ok|bad|slow|clear"}` 覆盖某个模型的行为
+  （`GET /__control` 看当前覆盖）——探活用例要靠它把"上游恢复"造出来，因为成员模型名是落库配置、改不了名。
 - **真实上游套件**依赖库里存在可用的真实分组（本机默认用 `deepseek-v4-flash`）；
   没有真实渠道时该套件会失败，其余套件不受影响。
 
@@ -58,6 +61,6 @@ python scripts/api-tests/run_all.py --list
 
 ## 已知限制
 
-- `failover` / `latency` / `busy` 依赖 mock 的 15s 慢响应，整轮实测约 2-3 分钟；
+- `failover` / `latency` / `busy` 依赖 mock 的 15s 慢响应，`probe` 依赖两个探活周期，整轮实测约 4-6 分钟；
 - 需要 mock 的套件在 `--only` 选中时才会拉起 mock；单独跑某个脚本前请先确保 mock 在 18099；
 - 本套件验证的是**本机实例的真实 HTTP 行为**，不做单元测试替代：Go 单测仍走 `go test ./...`。

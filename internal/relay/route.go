@@ -205,6 +205,25 @@ func recordRouteFailure(group model.Group, itemID, failures int, latencyMs int64
 	return true
 }
 
+// clearMemberCooldown 解除单个成员的冷却, 供主动探活确认恢复时调用 (R-probe-001)。
+// 只删冷却条目, 不动当前路由与亲和: 正在服务的成员不因一次后台探测被切走,
+// 该成员在亲和窗口结束后按既有优先级自然回归。返回是否确有冷却被解除。
+func clearMemberCooldown(group model.Group, itemID int) bool {
+	routeMu.Lock()
+	defer routeMu.Unlock()
+
+	route := routes[group.ID]
+	if route == nil {
+		return false
+	}
+	if _, cooling := route.Cooldowns[itemID]; !cooling {
+		return false
+	}
+	delete(route.Cooldowns, itemID)
+	publishRouteLocked(route)
+	return true
+}
+
 // releaseRouteProbe 归还未产生成败结论的探测占用, 用于请求被人工中止或客户端断开。
 func releaseRouteProbe(group model.Group, itemID int) {
 	routeMu.Lock()

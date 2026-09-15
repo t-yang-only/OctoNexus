@@ -85,6 +85,12 @@ func setSetting(c *gin.Context) {
 		if minutes, err := strconv.Atoi(setting.Value); err == nil {
 			task.Update(task.TaskQuotaScan, time.Duration(minutes)*time.Minute)
 		}
+	case model.SettingKeyRouteProbeInterval:
+		// 主动探活周期热更新: 与注册同口径 (0 停用, task.Update 自会摘任务), 解析失败不拦保存。
+		// 开关 route_probe_enabled 不必在此热接线: 探活任务每轮都重新读设置。
+		if seconds, err := strconv.Atoi(setting.Value); err == nil {
+			task.Update(task.TaskRouteProbe, time.Duration(seconds)*time.Second)
+		}
 	case model.SettingKeyStatsSaveInterval:
 		// 统计保存周期热更新: 注册时与历史日志清理同周期, 改值两条一起跟随, 免得落库与清理节奏错位。
 		// 与注册同口径 (0 停用, task.Update 自会摘任务), 解析失败不拦保存。
