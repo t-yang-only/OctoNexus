@@ -21,8 +21,8 @@ type RouteState struct {
 	AffinityUntil int64         `json:"affinity_until"`  // 当前路由的亲和截止 Unix 毫秒时间, 0 表示无亲和; 手动模式恒为 0。
 	Cooldowns     map[int]int64 `json:"cooldowns"`       // 失败成员 ID 对应的冷却截止 Unix 毫秒时间, 已到期的条目由前端按当前时间忽略。
 
-	affinityArmed bool     // 当前路由下一次成功后是否开始亲和, 仅故障切换后为真。
-	balanceRound  uint64   // 加权轮询 (T-route-002 L5) 的当选者轮转计数, 仅在 flag 开启时推进, 随状态重置归零。
+	affinityArmed bool   // 当前路由下一次成功后是否开始亲和, 仅故障切换后为真。
+	balanceRound  uint64 // 加权轮询 (T-route-002 L5) 的当选者轮转计数, 仅在 flag 开启时推进, 随状态重置归零。
 }
 
 const routeStreamBuffer = 16 // 单个路由流连接的非阻塞消息缓冲容量。
@@ -255,13 +255,24 @@ func PickGroupItem(group model.Group, flat []model.GroupItem) model.GroupItem {
 	return pickGroupItem(group.WithItems(flat))
 }
 
-// pickGroupItemHot 是转发热循环的唯一选路入口: flag 关走原路径, flag 开走加权轮询定序。
-// 开关判定只在 failover 分支内生效, manual 两条路径同归 pickGroupItem 原语义。
+// pickGroupItemHot 是转发热循环的唯一选路入口: lowest_cost 由分组模式自身显式开启,
+// 不受全局加权轮询开关约束; 其余模式 flag 关走原路径, flag 开走加权轮询定序。
 func pickGroupItemHot(group model.Group) model.GroupItem {
-	if RouteBalanceEnabled() {
+	return pickGroupItemByMode(group, memberUnitPrice, RouteBalanceEnabled())
+}
+
+// pickGroupItemByMode 按分组模式与加权轮询开关分发选路（热路径与单测共用同一入口）:
+// manual/未识别模式走原语义, failover 依开关决定是否加权轮询定序,
+// lowest_cost 一律走最低成本定序（模式的显式选择本身即开关）。
+func pickGroupItemByMode(group model.Group, cost CostProvider, balanceEnabled bool) model.GroupItem {
+	switch {
+	case group.Mode == model.GroupModeLowestCost:
+		return pickGroupItemLowestCost(group, cost)
+	case balanceEnabled:
 		return pickGroupItemBalanced(group)
+	default:
+		return pickGroupItem(group)
 	}
-	return pickGroupItem(group)
 }
 
 // RouteBalanceEnabled 报告加权轮询热路径 (T-route-002 L5) 是否开启; 默认关闭,

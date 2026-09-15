@@ -427,9 +427,10 @@
         "form": {
             "name": "Group Name",
             "mode": "Routing Mode",
-            "modeHint": "Manual fixes one member; failover follows member order and switches on failures",
+            "modeHint": "Manual fixes one member; failover follows member order and switches on failures; lowest cost tries the cheapest member first (same failover behaviour)",
             "manual": "Manual",
             "failover": "Failover",
+"lowest_cost": "Lowest cost",
             "members": "Members",
             "relay": "Routing",
             "retryCount": "Maximum Attempts",
