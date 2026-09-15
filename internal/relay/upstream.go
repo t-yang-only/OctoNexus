@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +20,7 @@ import (
 	"github.com/looplj/axonhub/llm/transformer/anthropic"
 	"github.com/looplj/axonhub/llm/transformer/openai"
 	"github.com/looplj/axonhub/llm/transformer/openai/responses"
+	"github.com/tidwall/sjson"
 )
 
 // upstreamResponse 是已验证但尚未写给客户端的上游成功响应; events 为 nil 表示非流式响应。
@@ -145,16 +148,68 @@ func sendPassthroughStream(ctx context.Context, format llm.APIFormat, request *h
 
 // conversionMiddleware 保存跨协议 pipeline 单次调用需要应用和取得的状态。
 type conversionMiddleware struct {
-	pipeline.DummyMiddleware // 提供本次无需处理的其余 pipeline 中间件方法。
-	channel model.Channel // 本轮上游请求使用的渠道配置。
-	format  llm.APIFormat // 上游渠道协议, 用于校验统一响应终态。
-	rawBody []byte        // 上游非流式响应或错误的原始正文。
-	usage   *llm.Usage    // 非流式统一响应中确认的用量。
+	pipeline.DummyMiddleware               // 提供本次无需处理的其余 pipeline 中间件方法。
+	channel                  model.Channel // 本轮上游请求使用的渠道配置。
+	format                   llm.APIFormat // 上游渠道协议, 用于校验统一响应终态。
+	clientBody               []byte        // 客户端原始请求正文, 用于补回转成 Responses 时被丢掉的采样参数。
+	rawBody                  []byte        // 上游非流式响应或错误的原始正文。
+	usage                    *llm.Usage    // 非流式统一响应中确认的用量。
 }
 
 // OnOutboundRawRequest 在转换后的上游请求上应用渠道参数和自定义 Header。
 func (m *conversionMiddleware) OnOutboundRawRequest(_ context.Context, request *httpclient.Request) (*httpclient.Request, error) {
-	return request, applyChannelConfig(m.channel, request)
+	if err := applyChannelConfig(m.channel, request); err != nil {
+		return nil, err
+	}
+	body, err := carryOverSamplingParams(m.clientBody, m.format, request.Body)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(body, request.Body) {
+		request.Body = body
+		if len(request.JSONBody) > 0 {
+			request.JSONBody = slices.Clone(body)
+		}
+	}
+	return request, nil
+}
+
+// responsesCarriedParams 是转换成 Responses 上游时会被转换层丢掉的采样参数（NM-DS-005 实测：
+// 客户端 Chat / Anthropic 入、上游 Responses 出时 temperature 不会出现在上游请求体里，
+// 而同一份请求直通 Responses 时它是在的）。两个键都是 Responses API 的合法字段，
+// 只在"客户端给了、上游没有"时补，不会引入非法参数，也不覆盖转换层或渠道覆盖写下的值。
+var responsesCarriedParams = []string{"temperature", "top_p"}
+
+// carryOverSamplingParams 把客户端请求里的采样参数补进上游请求体；目标协议不是 Responses、
+// 客户端正文不是 JSON 对象、或上游已有该键时都不改动（返回原正文）。
+func carryOverSamplingParams(clientBody []byte, format llm.APIFormat, outboundBody []byte) ([]byte, error) {
+	if format != llm.APIFormatOpenAIResponse || len(clientBody) == 0 || len(outboundBody) == 0 {
+		return outboundBody, nil
+	}
+	var client map[string]json.RawMessage
+	if err := json.Unmarshal(clientBody, &client); err != nil {
+		return outboundBody, nil
+	}
+	var outbound map[string]json.RawMessage
+	if err := json.Unmarshal(outboundBody, &outbound); err != nil {
+		return outboundBody, nil
+	}
+	body := outboundBody
+	for _, key := range responsesCarriedParams {
+		value, ok := client[key]
+		if !ok {
+			continue
+		}
+		if _, exists := outbound[key]; exists {
+			continue
+		}
+		next, err := sjson.SetRawBytes(body, ":"+key, value)
+		if err != nil {
+			return outboundBody, fmt.Errorf("carry over %s: %w", key, err)
+		}
+		body = next
+	}
+	return body, nil
 }
 
 // OnOutboundRawError 保留上游错误状态码携带的原始正文。
@@ -205,7 +260,7 @@ func sendConverted(ctx context.Context, format llm.APIFormat, raw *httpclient.Re
 			}
 		}()
 	}
-	middleware := &conversionMiddleware{channel: channel, format: outbound.APIFormat()}
+	middleware := &conversionMiddleware{channel: channel, format: outbound.APIFormat(), clientBody: slices.Clone(raw.Body)}
 	processor := pipeline.NewFactory(httpclient.NewHttpClientWithClient(httpClient)).Pipeline(
 		inbound,
 		outbound,
