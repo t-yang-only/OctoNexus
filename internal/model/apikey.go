@@ -4,7 +4,7 @@ type APIKey struct {
 	ID              int      `json:"id" gorm:"primaryKey"`
 	Name            string   `json:"name" gorm:"not null"`
 	APIKey          string   `json:"api_key" gorm:"not null"`
-	Enabled         bool     `json:"enabled" gorm:"default:true"`
+	Enabled         bool     `json:"enabled"`
 	ExpireAt        int64    `json:"expire_at,omitempty"`
 	MaxCost         float64  `json:"max_cost,omitempty"`
 	RPM             int      `json:"rpm,omitempty"`                           // 每分钟请求数上限, 0 表示不限 (litellm parallel_request_limiter 对标)。
