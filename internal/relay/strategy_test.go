@@ -158,16 +158,16 @@ func TestPickGroupItemByModeLowestCostBeatsPriority(t *testing.T) {
 	cfg := model.DefaultGroupRelayConfig()
 
 	legacyGroup := model.Group{ID: gid, Name: "cost-legacy", Mode: model.GroupModeFailover, Items: items, RelayConfig: cfg}
-	if got := pickGroupItemByMode(legacyGroup, cost, false); got.ID != 101 {
+	if got := pickGroupItemByMode(legacyGroup, cost, nil, false); got.ID != 101 {
 		t.Fatalf("failover+flag off picked %d, want 101 (priority order unchanged)", got.ID)
 	}
 
 	costGroup := model.Group{ID: gid, Name: "cost", Mode: model.GroupModeLowestCost, Items: items, RelayConfig: cfg}
-	if got := pickGroupItemByMode(costGroup, cost, false); got.ID != 102 {
+	if got := pickGroupItemByMode(costGroup, cost, nil, false); got.ID != 102 {
 		t.Fatalf("lowest_cost picked %d, want 102 (cheaper member wins despite lower priority)", got.ID)
 	}
 	// 加权轮询开关打开也不影响 lowest_cost 的定序口径（模式优先于全局开关）。
-	if got := pickGroupItemByMode(costGroup, cost, true); got.ID != 102 {
+	if got := pickGroupItemByMode(costGroup, cost, nil, true); got.ID != 102 {
 		t.Fatalf("lowest_cost with balance flag on picked %d, want 102", got.ID)
 	}
 }
@@ -183,10 +183,10 @@ func TestPickGroupItemByModeKeepsManualPath(t *testing.T) {
 		RelayConfig: model.DefaultGroupRelayConfig()}
 	cost := strategyCost(map[string]*model.LLMPrice{"pricey": llmPrice(1.0, 2.0), "cheap": llmPrice(0.15, 0.6)})
 
-	if got := pickGroupItemByMode(group, cost, false); got.ID != 111 {
+	if got := pickGroupItemByMode(group, cost, nil, false); got.ID != 111 {
 		t.Fatalf("manual picked %d, want the active item 111", got.ID)
 	}
-	if got := pickGroupItemByMode(group, cost, true); got.ID != 111 {
+	if got := pickGroupItemByMode(group, cost, nil, true); got.ID != 111 {
 		t.Fatalf("manual with balance flag on picked %d, want 111", got.ID)
 	}
 }

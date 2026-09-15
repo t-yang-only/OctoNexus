@@ -98,3 +98,64 @@ func pickGroupItemLowestCost(group model.Group, cost CostProvider) model.GroupIt
 	}
 	return pickGroupItem(group.WithItems(ranked))
 }
+
+// NM-DS-004 迭代：质量优先（quality_first）选路定序。
+// 与最低成本共用同一套过滤/冷却口径（partitionCandidates），只换排序键：
+// 最近窗口成功率降序 → priority 升序 → ID 升序。
+// "无样本"按中性先验 1.0 参与排序（乐观口径）：新成员照样会被尝试，失败过的成员自然沉到
+// 已验证成员之后；坏成员另有既有冷却/探测链路兜底，不靠这里做惩罚。
+
+// 中性先验：无样本（含未接线的 provider）视作与"全成功"同档，靠 priority 定序。
+const memberQualityNeutralPrior = 1.0
+
+// rankByQuality 对候选做质量优先定序：首个即"最近表现最好的可用成员"。
+func rankByQuality(items []model.GroupItem, cooldowns map[int]int64, nowMs int64, zeroBalanceGrantIDs map[int]bool, quality MemberQualityProvider) ([]model.GroupItem, error) {
+	eligible, cooling, err := partitionCandidates(items, cooldowns, nowMs, zeroBalanceGrantIDs)
+	if err != nil {
+		return nil, err
+	}
+	ranked := append([]model.GroupItem(nil), eligible...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		si := memberQualityScore(quality, ranked[i])
+		sj := memberQualityScore(quality, ranked[j])
+		if si != sj {
+			return si > sj // 成功率高的在前
+		}
+		if ranked[i].Priority != ranked[j].Priority {
+			return ranked[i].Priority < ranked[j].Priority
+		}
+		return ranked[i].ID < ranked[j].ID
+	})
+	return append(ranked, cooling...), nil
+}
+
+// memberQualityScore 取成员成功率；provider 未接线或无样本时返回中性先验。
+func memberQualityScore(quality MemberQualityProvider, item model.GroupItem) float64 {
+	if quality == nil {
+		return memberQualityNeutralPrior
+	}
+	rate, ok := quality(item.ID)
+	if !ok {
+		return memberQualityNeutralPrior
+	}
+	return rate
+}
+
+// pickGroupItemQualityFirst 在质量优先定序下选出本轮目标：只改"本轮先试谁"的顺序,
+// 亲和/冷却/探测/上限语义仍归 pickGroupItem 既有链路；定序失败时返回零值由调用方等待。
+func pickGroupItemQualityFirst(group model.Group, quality MemberQualityProvider) model.GroupItem {
+	routeMu.Lock()
+	route := routes[group.ID]
+	if route == nil {
+		route = &RouteState{GroupID: group.ID, Cooldowns: make(map[int]int64)}
+		routes[group.ID] = route
+	}
+	cooldowns := maps.Clone(route.Cooldowns)
+	routeMu.Unlock()
+
+	ranked, err := rankByQuality(group.Items, cooldowns, time.Now().UnixMilli(), nil, quality)
+	if err != nil || len(ranked) == 0 {
+		return model.GroupItem{}
+	}
+	return pickGroupItem(group.WithItems(ranked))
+}
