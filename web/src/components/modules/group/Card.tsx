@@ -143,6 +143,10 @@ export const GroupCard = memo(function GroupCard({ group, now }: { group: Group;
             values.relay_config.member_stream_first_event_timeout_seconds !== group.relay_config.member_stream_first_event_timeout_seconds ||
             values.relay_config.member_cooldown_seconds !== group.relay_config.member_cooldown_seconds ||
             values.relay_config.member_affinity_seconds !== group.relay_config.member_affinity_seconds
+            || values.relay_config.hedge_enabled !== group.relay_config.hedge_enabled
+            || values.relay_config.hedge_width !== group.relay_config.hedge_width
+            || values.relay_config.hedge_after_ms !== group.relay_config.hedge_after_ms
+            || values.relay_config.hedge_peak_in_flight !== group.relay_config.hedge_peak_in_flight
         ) payload.relay_config = values.relay_config;
         // 成员集合与顺序有任一处不同就整体提交; 后端按引用（授权/子分组）匹配, 已有成员保留其主键与统计。
         const refKey = (m: { channel_grant_id: number; child_group_id: number }) =>

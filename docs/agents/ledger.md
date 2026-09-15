@@ -52,3 +52,9 @@
 
 | T-chan-001 | 渠道凭据补录（53HK / 53HK-L 换新密钥、新增 longcat）与「创建渠道时 enabled:false 的凭据被静默忽略」修复 | channel | done |
 | | 备注：longcat 基址须带 `/openai`（裸域名 `/v1/*` 是 404）；换密钥走「读 detail → 只替换 keys[].key → 回写」的非破坏路径；缺陷根因是 ChannelKeyConfig.Enabled 的 `gorm:"default:true"`，修法与 APIKey.Enabled 同族（默认值移到请求层，指针区分未提交/显式 false）。验证：新增 internal/op/channel_key_test.go 回归单测 + 活体复验（create enabled:false 落库为 0）+ 19 套件矩阵。未决（需用户拍板）：单成员分组在冷却期内静默等待是否改为快速失败；两站点登录自动化被人机验证挡住，改用手动登录跳转页。已提交。 | 2026-09-16 03:01:42 |
+
+| T-hedge-001 | 首字竞速：提交首字节之前并发请求排序靠前的多个成员，取最快给出有效响应者（用户 2026-09-16 指令）| route | done |
+| | 备注：模式无关（候选沿用各模式排序），两个触发条件 hedge_after_ms（慢启动）与 hedge_peak_in_flight（高峰期在途）；落选成员被我们自己取消，不算失败、不进冷却、不污染质量样本；默认关闭（竞速会多打上游、多花钱）。实现 internal/relay/hedge.go + handler.go 接入 + state.go 的 inFlightByModel/retargetRound + model/group.go 四个配置项；前端分组编辑面板已有开关/并发数/慢启动阈值/在途阈值 + 三语文案（含额外费用提示）。验证：scripts/api-tests/run_hedge_test.py 5/5（竞速 0.8s 快者胜出 vs 对照 15s 慢者走完、落选不进冷却、在途触发、宽度越界 400）+ 全量矩阵。已提交。 | 2026-09-16 03:47:42 |
+
+| T-test-004 | 测试门禁：真实上游套件默认跳过（用户要求不要在空闲时间拿真实 API 测试）| test | done |
+| | 备注：run_all.py 给 real/costmode 打 real 依赖标记并默认跳过，需 --with-real 或 OCTOPUS_ALLOW_REAL=1；两个套件自身也加门禁（无开关时 SKIPPED 退出码 0）。新增 hedge 套件并注册进矩阵（20 套件）。已提交。 | 2026-09-16 03:47:42 |

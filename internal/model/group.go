@@ -36,6 +36,12 @@ type GroupRelayConfig struct {
 	MemberStreamFirstEventTimeoutSeconds  int `json:"member_stream_first_event_timeout_seconds" binding:"omitempty,min=1"`  // 单个成员返回首个有效流事件的超时秒数。
 	MemberCooldownSeconds                 int `json:"member_cooldown_seconds" binding:"omitempty,min=1"`                    // 单个成员耗尽尝试后被跳过的秒数，仅在故障转移模式生效。
 	MemberAffinitySeconds                 int `json:"member_affinity_seconds" binding:"omitempty,min=0"`                    // 成员亲和时间:故障切换成功后继续保持当前成员的秒数;当前成员失败会立即结束亲和,0 表示不保持。
+	// 首字竞速 (T-hedge-001): 提交首字节之前并发向排序靠前的多个成员发同一请求, 取最快给出有效响应者。
+	// 默认关闭: 竞速意味着同一份输入可能被多个上游各处理一次, 上游按 token 计费时最坏付 width 份钱。
+	HedgeEnabled      bool `json:"hedge_enabled"`                                         // 是否开启首字竞速。
+	HedgeWidth        int  `json:"hedge_width" binding:"omitempty,min=2,max=5"`           // 并发路数（含首选）, 2..5, 缺省 2。
+	HedgeAfterMs      int  `json:"hedge_after_ms" binding:"omitempty,min=0"`              // 首选在该毫秒数内无首个有效响应就追加竞速路, 0 表示不按延迟触发。
+	HedgePeakInFlight int  `json:"hedge_peak_in_flight" binding:"omitempty,min=0,max=64"` // 该分组在途请求数达到该值时立即并发竞速, 0 表示不按在途触发。                    // 成员亲和时间:故障切换成功后继续保持当前成员的秒数;当前成员失败会立即结束亲和,0 表示不保持。
 }
 
 // DefaultGroupRelayConfig 返回新分组使用的 Relay 默认配置。
@@ -47,6 +53,8 @@ func DefaultGroupRelayConfig() GroupRelayConfig {
 		MemberStreamFirstEventTimeoutSeconds:  30,
 		MemberCooldownSeconds:                 60,
 		MemberAffinitySeconds:                 300,
+		HedgeWidth:                            2,
+		HedgeAfterMs:                          800,
 	}
 }
 
@@ -74,6 +82,27 @@ func NormalizeGroupRelayConfig(config *GroupRelayConfig) {
 	}
 	if config.MemberAffinitySeconds < 0 {
 		config.MemberAffinitySeconds = defaults.MemberAffinitySeconds
+	}
+	// 竞速配置: 未开启时保持全零（不影响任何既有行为）; 开启后把越界值夹到边界。
+	if config.HedgeEnabled {
+		if config.HedgeWidth == 0 {
+			config.HedgeWidth = defaults.HedgeWidth
+		}
+		if config.HedgeWidth < 2 {
+			config.HedgeWidth = 2
+		}
+		if config.HedgeWidth > 5 {
+			config.HedgeWidth = 5
+		}
+		if config.HedgeAfterMs < 0 {
+			config.HedgeAfterMs = 0
+		}
+		if config.HedgePeakInFlight < 0 {
+			config.HedgePeakInFlight = 0
+		}
+		if config.HedgePeakInFlight > 64 {
+			config.HedgePeakInFlight = 64
+		}
 	}
 }
 
