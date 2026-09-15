@@ -85,6 +85,14 @@ func setSetting(c *gin.Context) {
 		if minutes, err := strconv.Atoi(setting.Value); err == nil {
 			task.Update(task.TaskQuotaScan, time.Duration(minutes)*time.Minute)
 		}
+	case model.SettingKeyStatsSaveInterval:
+		// 统计保存周期热更新: 注册时与历史日志清理同周期, 改值两条一起跟随, 免得落库与清理节奏错位。
+		// 与注册同口径 (0 停用, task.Update 自会摘任务), 解析失败不拦保存。
+		if minutes, err := strconv.Atoi(setting.Value); err == nil {
+			interval := time.Duration(minutes) * time.Minute
+			task.Update(task.TaskStatsSave, interval)
+			task.Update(task.TaskRelayLogClean, interval)
+		}
 	}
 	resp.Success(c, setting)
 }
