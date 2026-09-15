@@ -261,15 +261,20 @@ func PickGroupItem(group model.Group, flat []model.GroupItem) model.GroupItem {
 	return pickGroupItem(group.WithItems(flat))
 }
 
-// pickGroupItemHot 是转发热循环的唯一选路入口: lowest_cost / quality_first / lowest_latency 由分组模式自身显式开启,
+// pickGroupItemHot 是转发热循环的唯一选路入口: lowest_cost / quality_first / lowest_latency / least_busy 由分组模式自身显式开启,
 // 不受全局加权轮询开关约束; 其余模式 flag 关走原路径, flag 开走加权轮询定序。
 func pickGroupItemHot(group model.Group) model.GroupItem {
-	return pickGroupItemByMode(group, routeDeps{cost: memberUnitPrice, quality: memberSuccessRate, latency: memberLatencyMs}, RouteBalanceEnabled())
+	return pickGroupItemByMode(group, routeDeps{
+		cost:    memberUnitPrice,
+		quality: memberSuccessRate,
+		latency: memberLatencyMs,
+		busy:    memberBusyCount,
+	}, RouteBalanceEnabled())
 }
 
 // pickGroupItemByMode 按分组模式与加权轮询开关分发选路（热路径与单测共用同一入口）:
 // manual/未识别模式走原语义, failover 依开关决定是否加权轮询定序,
-// lowest_cost / quality_first / lowest_latency 走各自的定序（模式的显式选择本身即开关）。
+// lowest_cost / quality_first / lowest_latency / least_busy 走各自的定序（模式的显式选择本身即开关）。
 func pickGroupItemByMode(group model.Group, deps routeDeps, balanceEnabled bool) model.GroupItem {
 	switch {
 	case group.Mode == model.GroupModeLowestCost:
@@ -278,6 +283,8 @@ func pickGroupItemByMode(group model.Group, deps routeDeps, balanceEnabled bool)
 		return pickGroupItemQualityFirst(group, deps.quality)
 	case group.Mode == model.GroupModeLowestLatency:
 		return pickGroupItemLowestLatency(group, deps.latency)
+	case group.Mode == model.GroupModeLeastBusy:
+		return pickGroupItemLeastBusy(group, deps.busy)
 	case balanceEnabled:
 		return pickGroupItemBalanced(group)
 	default:

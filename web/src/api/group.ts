@@ -5,7 +5,7 @@ import { queryClient } from './client';
 import { groupListQueryOptions } from './queries';
 
 // GroupMode 表示分组的手动或故障转移路由模式。
-export type GroupMode = 'manual' | 'failover' | 'lowest_cost' | 'quality_first' | 'lowest_latency';
+export type GroupMode = 'manual' | 'failover' | 'lowest_cost' | 'quality_first' | 'lowest_latency' | 'least_busy';
 
 // GroupRelayConfig 保存分组 Relay 配置。
 export interface GroupRelayConfig {

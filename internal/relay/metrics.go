@@ -68,6 +68,10 @@ func sampleLocked(itemID int) (memberQualitySample, bool) {
 	return sample, true
 }
 
+// BusyProvider 返回成员当前的在途请求数（生产实现是 state.go 的 memberBusyCount，
+// 直接从活动请求注册表派生，不需要 acquire/release 成对维护）。
+type BusyProvider func(itemID int) int
+
 // MemberQualityProvider 返回成员最近窗口的成功率；ok=false 表示样本不足（排序按乐观先验处理）。
 type MemberQualityProvider func(itemID int) (successRate float64, ok bool)
 
