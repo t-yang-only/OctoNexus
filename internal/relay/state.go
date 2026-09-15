@@ -120,6 +120,25 @@ func (r *RequestState) startRound(cancel context.CancelFunc, itemID int, channel
 }
 
 // finishRound 记录本轮上游结果, errText 为空表示已取得可提交响应。
+// retargetRound 把当前轮的目标换成首字竞速的胜出者。
+// 只改目标字段不递增轮次: 竞速是一个逻辑轮次内的多路尝试, 面板上仍是一轮。
+func (r *RequestState) retargetRound(itemID int, channel, modelName string, protocol model.Protocol) {
+	mu.Lock()
+	defer mu.Unlock()
+	target, ok := requests[r.ID]
+	if !ok {
+		return
+	}
+	target.TargetItemID = itemID
+	target.TargetChannel = channel
+	target.TargetModel = modelName
+	target.TargetProtocol = protocol
+	r.TargetItemID = itemID
+	r.TargetChannel = channel
+	r.TargetModel = modelName
+	r.TargetProtocol = protocol
+}
+
 func (r *RequestState) finishRound(errText string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -134,6 +153,23 @@ func (r *RequestState) finishRound(errText string) {
 // 口径：只数 Sending 为真的请求，即从发起上游请求到本轮结束（提交 / 失败 / 取消）之间；
 // 因为直接从活动请求注册表派生，不存在"计数漏释放"导致成员被永久当成忙的风险。
 // 人工中止那一轮会停在 Sending 为真的状态直到下一轮开始，是已知的轻微高估（人工操作且下一轮即刻修正）。
+// inFlightByModel 统计某个分组（按客户端模型名=分组名）当前在途的请求数。
+// 与 memberBusyCount 同一份活动请求注册表: 结构上不可能漏释放, 也不需要成对 acquire/release。
+func inFlightByModel(modelName string) int {
+	if modelName == "" {
+		return 0
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	count := 0
+	for _, state := range requests {
+		if state.Sending && state.Model == modelName {
+			count++
+		}
+	}
+	return count
+}
+
 func memberBusyCount(itemID int) int {
 	if itemID == 0 {
 		return 0

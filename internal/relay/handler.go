@@ -20,7 +20,6 @@ import (
 	"github.com/looplj/axonhub/llm/transformer/anthropic"
 	"github.com/looplj/axonhub/llm/transformer/openai"
 	"github.com/looplj/axonhub/llm/transformer/openai/responses"
-	"github.com/tidwall/sjson"
 )
 
 // Forward 按客户端协议承载一个请求的完整转发过程: 解析请求, 定位分组, 循环选目标请求上游, 直至提交响应或请求结束。
@@ -117,86 +116,85 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				continue
 			}
 
-			// 成员指向的授权缺失, 凭据被停用或两侧已被删除时等待, 该成员可能很快被改回可用配置。
-			// ChannelGrantGet 一次校验齐这几种情况, 取到的授权必然可直接转发, 无需再逐项检查。
-			// 子分组成员 (未引用授权) 不在此展开: GrantRef 返回 0 走同一等待分支, 展平语义归 T-group-002。
-			grant, err := op.ChannelGrantGet(item.GrantRef())
-			if err != nil {
+			// 成员指向的授权缺失、凭据被停用或已被删除时等待: 该成员可能很快被改回或恢复可用。
+			// 解析与出站准备统一走 prepareRoundTarget: 首字竞速要并发多路, 每路必须有独立的请求副本,
+			// 否则 applyChannelConfig 改写 Body/Headers 会在并发下数据竞争。
+			primary, prepErr := prepareRoundTarget(item, raw, metadata.Streaming, format, requestProtocol)
+			if prepErr != nil {
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
 					return
 				}
 				continue
 			}
-			channelModel := grant.ChannelModel
-			channelKey := grant.ChannelKey
-
-			// 成员指向的渠道已被删除时同样等待, 该成员可能很快被改回可用渠道。
-			channel, err := op.ChannelGet(channelModel.ChannelID)
-			if err != nil {
-				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
-					return
-				}
-				continue
-			}
-
-			// 将分组成员配置的真实模型写入本轮上游请求。
-			raw.Body, err = sjson.SetBytes(raw.Body, "model", channelModel.Name)
-			if err != nil {
-				request.markFailed(err, "", nil)
-				rejectRequest(c, inbound, err)
-				return
-			}
-			// OpenAI Chat 流式响应需显式要求上游在末尾附带用量。
-			if metadata.Streaming && format == llm.APIFormatOpenAIChatCompletion {
-				raw.Body, err = sjson.SetBytes(raw.Body, "stream_options.include_usage", true)
-				if err != nil {
-					request.markFailed(err, "", nil)
-					rejectRequest(c, inbound, err)
-					return
-				}
-			}
-
-			// 在渠道授权支持的协议内选出本轮上游协议, 按该协议的路径与授权绑定的凭据构造出站转换器。
-			// 先于登记本轮目标: 选中的协议是本轮目标的一部分, 需与渠道和模型一并推给界面。
-			outbound, targetProtocol, passthrough, err := buildOutbound(channel, grant, *channelKey, requestProtocol)
+			channelModel := primary.channelModel
+			channelKey := primary.channelKey
+			channel := primary.channel
+			targetProtocol := primary.targetProtocol
+			passthrough := primary.passthrough
+			outbound := primary.outbound
+			roundRaw := primary.raw
+			err = nil
 
 			// 为本轮上游调用建立独立取消入口并登记当前目标; 取消原因用于区分人工中止与响应超时。
+			// 每一轮独立上下文: 人工中止 / 客户端取消 / 超时都通过它传播;
+			// 首字竞速的多路尝试都挂在它下面, 人工中止时一并取消。
 			roundCtx, cancelRoundCause := context.WithCancelCause(ctx)
-			// 人工中止和本轮完成都使用普通 canceled 原因, 超时回调则写入具体的超时错误。
+			// 人工中止和本地取消都使用普通 canceled 原因, 此时回写请求状态为超时会造成误解。
 			cancelRound := func() {
 				cancelRoundCause(context.Canceled)
 			}
 			request.startRound(cancelRound, item.ID, channel.Name, channelModel.Name, targetProtocol)
 
-			roundStartedAt := time.Now() // 本轮上游调用的开始时间, 用于统计首个有效响应耗时。
+			roundStartedAt := time.Now() // 本轮调用的开始时间, 用于统计首个有效响应耗时
 
-			// 请求上游并等待首个有效响应: 非流式等待完整响应, 流式等待首个事件。
-			// 同协议渠道原样直通, 跨协议渠道经转换后请求; 此时尚未写给客户端, 失败仍可换目标重试。
+			// 首字竞速 (T-hedge-001): 触发条件满足时并发请求排序靠前的多个成员, 取最快给出有效响应者。
+			// 两个触发条件: 高峰期(分组在途数达阈值, 立刻并发) 与 慢启动(首选超过阈值毫秒仍无响应, 再并发)。
+			settings := hedgeSettingsOf(group.RelayConfig)
+			var hedgeTargets []preparedTarget
+			hedgeImmediately := false
+			if settings.enabled && settings.width > 1 {
+				if settings.peak > 0 && groupInFlight(metadata.Model) >= settings.peak {
+					hedgeImmediately = true
+				}
+				candidates := hotRouteDeps().rankedHedgeCandidates(group.WithItems(op.FlattenGroupItems(group)))
+				for _, candidate := range candidates {
+					if len(hedgeTargets) >= settings.width-1 {
+						break
+					}
+					if candidate.ID == item.ID {
+						continue
+					}
+					target, targetErr := prepareRoundTarget(candidate, raw, metadata.Streaming, format, requestProtocol)
+					if targetErr != nil {
+						continue
+					}
+					hedgeTargets = append(hedgeTargets, target)
+				}
+			}
+
 			var result *upstreamResponse
-			if err == nil {
-				timeoutSeconds := group.RelayConfig.MemberNonStreamResponseTimeoutSeconds // 非流式等待完整响应, 流式分支改为首事件超时。
-				timeoutErr := errors.New("upstream non-stream response timeout")          // 具体错误用于区分超时与人工中止。
+			if len(hedgeTargets) == 0 {
+				// 未开启竞速或候选不足: 与既有行为完全一致（单路, 超时即切下一个成员）。
+				timeoutSeconds := group.RelayConfig.MemberNonStreamResponseTimeoutSeconds
+				timeoutErr := errors.New("upstream non-stream response timeout")
 				if metadata.Streaming {
 					timeoutSeconds = group.RelayConfig.MemberStreamFirstEventTimeoutSeconds
 					timeoutErr = errors.New("upstream stream first event timeout")
 				}
-				// 计时器取消本轮上下文, 让正在等待 HTTP 响应或首个流事件的调用及时返回。
+				// 超时只取消本轮的上游调用, 不会在等待 HTTP 响应或首个流事件的调用间超时重叠。
 				timeoutTimer := time.AfterFunc(time.Duration(timeoutSeconds)*time.Second, func() {
 					cancelRoundCause(timeoutErr)
 				})
-				// 客户端与渠道协议一致时直接透传, 其余组合通过 pipeline 转换。
 				if passthrough {
-					result, err = sendPassthrough(roundCtx, format, raw, channel, outbound, metadata.Streaming, channelModel.Name)
+					result, err = sendPassthrough(roundCtx, format, roundRaw, channel, outbound, metadata.Streaming, channelModel.Name)
 				} else {
-					result, err = sendConverted(roundCtx, format, raw, channel, outbound, metadata.Streaming)
+					result, err = sendConverted(roundCtx, format, roundRaw, channel, outbound, metadata.Streaming)
 				}
-				// 上游调用返回即结束首响应等待; Stop 失败说明已到期, 主动取消可避免等待异步回调完成。
 				if !timeoutTimer.Stop() {
 					cancelRoundCause(timeoutErr)
 				}
 				if context.Cause(roundCtx) == timeoutErr {
 					err = timeoutErr
-					// 超时与响应返回同时发生时舍弃尚未提交的流结果, 避免把超时误记为成功。
 					if result != nil && result.events != nil {
 						result.events.Close()
 						if result.closeIdle != nil {
@@ -204,8 +202,20 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 						}
 					}
 				}
+			} else {
+				winner, raceResult, raceErr, losers := runRoundWithHedge(roundCtx, group, primary, hedgeTargets,
+					metadata.Streaming, format, hedgeImmediately, settings.afterMs)
+				if raceErr == nil {
+					logHedge(group, primary, winner, losers, time.Since(roundStartedAt))
+					// 胜出者可能不是首选: 把本轮目标换成胜出者, 后续统计 / 亲和 / 日志都按它记账。
+					// 落选者是被我们自己取消的, 不算失败、不进冷却（设计稿 §5）。
+					item = winner.item
+					channelModel, channelKey, channel = winner.channelModel, winner.channelKey, winner.channel
+					targetProtocol, passthrough, outbound = winner.targetProtocol, winner.passthrough, winner.outbound
+					request.retargetRound(winner.item.ID, winner.channel.Name, winner.channelModel.Name, winner.targetProtocol)
+				}
+				result, err = raceResult, raceErr
 			}
-
 			if err != nil {
 				// 记录本轮上游调用已经结束及其失败原因。
 				request.finishRound(err.Error())

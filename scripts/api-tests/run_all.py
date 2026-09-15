@@ -45,7 +45,7 @@ SUITES = [
     ("entities", "setup_test_entities.py", "测试实体与分组（幂等）", "instance,mock"),
     ("format", "run_format_tests.py", "多格式调用矩阵（三协议 × 流式/非流式 + 跨协议）", "instance,mock"),
     ("lossless", "run_lossless_tests.py", "跨协议无损转化（3 客户端协议 × 3 上游协议）", "instance,mock"),
-    ("real", "run_real_tests.py", "真实上游调用（成本与价表逐项对照）", "instance,db"),
+    ("real", "run_real_tests.py", "真实上游调用（成本与价表逐项对照）", "instance,db,real"),
     ("failover", "run_failover_tests.py", "超时切换与故障转移（重试/冷却/切成员/整响应与首事件超时）", "instance,mock"),
     ("probe", "run_probe_test.py", "冷却成员主动探活（恢复即提前解除冷却 + 探测失败不改冷却）", "instance,mock,db"),
     ("notify", "run_notify_audit.py", "多渠道通知（四家报文形状 + SMTP 真投递 + 业务错误码 + 真实事件投递）", "instance,mock,db"),
@@ -53,11 +53,12 @@ SUITES = [
     ("stats", "check_stats.py", "后台统计审计（日志/缓存/daily/usage 与 relay_logs 对照）", "instance"),
     ("pool", "run_pool_audit.py", "号池统一视图（谷歌/GPT/Claude 合并视图 + 同步契约 + 鉴权）", "instance,db"),
     ("apikey", "run_apikey_audit.py", "Key 级审计（限流/过期/禁用/额度/越权/登录/流/中止）", "instance,mock"),
-    ("costmode", "run_costmode_test.py", "最低成本选路", "instance"),
+    ("costmode", "run_costmode_test.py", "最低成本选路", "instance,real"),
     ("quality", "run_quality_test.py", "按质量自动切换", "instance,mock"),
     ("latency", "run_latency_test.py", "最低延迟选路", "instance,mock"),
     ("busy", "run_busy_test.py", "最空闲选路（并发摊分）", "instance,mock"),
     ("rpm", "run_rpm_test.py", "近期消耗最低选路（60s 窗口 + token 优先 + 窗口过期）", "instance,mock,db"),
+    ("hedge", "run_hedge_test.py", "首字竞速（触发条件/快者胜出/落选不计失败/宽度校验）", "instance,mock,db"),
     ("hotapply", "hot_apply_check.py", "设置热生效（改完无需重启）", "instance"),
     ("display", "check_display.js", "日志卡片字段容错解析（纯函数自检）", "node,esbuild"),
     ("reallog", "check_real_logs.js", "日志卡片真实数据等价性", "node,db"),
@@ -195,8 +196,12 @@ def parse_summary(text):
 
 def run_step(command, cwd=HERE):
     # 子进程输出统一按 UTF-8 解码（中文断言/汇总行在 GBK 控制台下会解码失败，导致汇总行被吞）。
+    # 环境里带上放行标记: 套件自身也做门禁, 只有 --with-real / OCTOPUS_ALLOW_REAL=1 时才允许打真实上游。
+    env = dict(os.environ)
+    if os.environ.get("OCTOPUS_ALLOW_REAL") == "1":
+        env["OCTOPUS_ALLOW_REAL"] = "1"
     proc = subprocess.run(command, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", shell=isinstance(command, str))
+                          errors="replace", shell=isinstance(command, str), env=env)
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
@@ -205,6 +210,8 @@ def main():
     parser.add_argument("--only", help="只跑指定套件，逗号分隔（见 --list）")
     parser.add_argument("--list", action="store_true", help="列出套件后退出")
     parser.add_argument("--keep-mock", action="store_true", help="跑完不停止本运行器启动的 mock")
+    parser.add_argument("--with-real", action="store_true",
+                        help="允许跑会打真实上游、会产生费用的套件（real / costmode）；默认跳过")
     args = parser.parse_args()
 
     if args.list:
@@ -213,7 +220,17 @@ def main():
         return 0
 
     selected = set(args.only.split(",")) if args.only else None
+    allow_real = args.with_real or os.environ.get("OCTOPUS_ALLOW_REAL") == "1"
+    if allow_real:
+        # 放行标记传下去: 单个套件自己也做门禁（默认不透支用户额度）。
+        os.environ["OCTOPUS_ALLOW_REAL"] = "1"
     suites = [s for s in SUITES if not selected or s[0] in selected]
+    # 真实上游套件会消耗用户额度、产生费用: 默认不跑, 必须显式 --with-real / OCTOPUS_ALLOW_REAL=1。
+    skipped_real = [s[0] for s in suites if "real" in s[3] and not allow_real]
+    if skipped_real:
+        suites = [s for s in suites if s[0] not in set(skipped_real)]
+        log("跳过真实上游套件（默认不透支额度）: %s —— 需要时加 --with-real 或设 OCTOPUS_ALLOW_REAL=1"
+            % ", ".join(skipped_real))
     if selected:
         unknown = selected - {s[0] for s in SUITES}
         if unknown:

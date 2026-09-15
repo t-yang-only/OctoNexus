@@ -15,6 +15,11 @@ export interface GroupRelayConfig {
     member_stream_first_event_timeout_seconds: number;
     member_cooldown_seconds: number;
     member_affinity_seconds: number;
+    // 首字竞速 (T-hedge-001): 提交首字节之前并发请求排序靠前的多个成员, 取最快给出有效响应者。
+    hedge_enabled: boolean;
+    hedge_width: number;
+    hedge_after_ms: number;
+    hedge_peak_in_flight: number;
 }
 
 // GroupItem 是分组内一条可路由的成员：或引用一条渠道授权，或引用一个子分组，二者互斥。

@@ -286,6 +286,18 @@ func PickGroupItem(group model.Group, flat []model.GroupItem) model.GroupItem {
 
 // pickGroupItemHot 是转发热循环的唯一选路入口: lowest_cost / quality_first / lowest_latency / least_busy 由分组模式自身显式开启,
 // 不受全局加权轮询开关约束; 其余模式 flag 关走原路径, flag 开走加权轮询定序。
+// hotRouteDeps 返回生产环境的选路依赖（成本/质量/延迟/在途/近期消耗）。
+// 热路径选路与首字竞速共用同一组 provider, 保证两者的排序口径不会漂移。
+func hotRouteDeps() routeDeps {
+	return routeDeps{
+		cost:    memberUnitPrice,
+		quality: memberSuccessRate,
+		latency: memberLatencyMs,
+		busy:    memberBusyCount,
+		load:    memberRecentLoad,
+	}
+}
+
 func pickGroupItemHot(group model.Group) model.GroupItem {
 	return pickGroupItemByMode(group, routeDeps{
 		cost:    memberUnitPrice,

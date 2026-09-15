@@ -17,6 +17,12 @@ import time
 import urllib.error
 import urllib.request
 
+# 门禁: 这个套件会打真实上游、会产生费用, 必须显式开启才跑（默认跳过, 见 scripts/api-tests/README.md）。
+if os.environ.get("OCTOPUS_ALLOW_REAL") != "1":
+    print("SKIPPED: this suite calls real upstreams and costs money; set OCTOPUS_ALLOW_REAL=1 "
+          "(or run run_all.py --with-real) to run it.")
+    raise SystemExit(0)
+
 ADMIN = os.environ.get("OCTOPUS_ADMIN_URL", "http://127.0.0.1:13303")
 RELAY_HOST = os.environ.get("OCTOPUS_RELAY_HOST", "127.0.0.1")
 RELAY_PORT = int(os.environ.get("OCTOPUS_RELAY_PORT", "11234"))

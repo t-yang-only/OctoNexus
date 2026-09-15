@@ -6,6 +6,7 @@ import { Protocol, useChannelGrantList } from '@/api/channel';
 import { Button } from '@/components/ui/button';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem } from '@/components/ui/accordion';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -33,6 +34,10 @@ const defaultRelayConfig: GroupRelayConfig = {
     member_stream_first_event_timeout_seconds: 30,
     member_cooldown_seconds: 60,
     member_affinity_seconds: 0,
+    hedge_enabled: false,
+    hedge_width: 2,
+    hedge_after_ms: 800,
+    hedge_peak_in_flight: 0,
 };
 
 // PROTOCOL_TAGS 是凭据行上的协议标识。
@@ -680,6 +685,81 @@ export function GroupEditor({
                                         onChange={(event) => {
                                             const value = Number.parseInt(event.target.value, 10);
                                             setRelayConfig((prev) => ({ ...prev, member_affinity_seconds: Number.isFinite(value) && value >= 0 ? value : 0 }));
+                                        }}
+                                        className="rounded-xl"
+                                    />
+                                </Field>
+                                <Field className="sm:col-span-2">
+                                    <FieldLabel htmlFor="group-hedge">
+                                        {t('form.hedge')}
+                                        <FieldHelp text={t('form.hedgeHint')} />
+                                    </FieldLabel>
+                                    <div className="flex items-center gap-3">
+                                        <Switch
+                                            id="group-hedge"
+                                            checked={relayConfig.hedge_enabled}
+                                            onCheckedChange={(checked) =>
+                                                setRelayConfig((prev) => ({ ...prev, hedge_enabled: checked === true }))
+                                            }
+                                        />
+                                        <span className="text-sm text-muted-foreground">{t('form.hedgeCostWarn')}</span>
+                                    </div>
+                                </Field>
+                                <Field>
+                                    <FieldLabel htmlFor="group-hedge-width">
+                                        {t('form.hedgeWidth')}
+                                        <FieldHelp text={t('form.hedgeWidthHint')} />
+                                    </FieldLabel>
+                                    <Input
+                                        id="group-hedge-width"
+                                        type="number"
+                                        inputMode="numeric"
+                                        min={2}
+                                        max={5}
+                                        step={1}
+                                        value={String(relayConfig.hedge_width)}
+                                        onChange={(event) => {
+                                            const value = Number.parseInt(event.target.value, 10);
+                                            setRelayConfig((prev) => ({ ...prev, hedge_width: Number.isFinite(value) ? Math.min(5, Math.max(2, value)) : 2 }));
+                                        }}
+                                        className="rounded-xl"
+                                    />
+                                </Field>
+                                <Field>
+                                    <FieldLabel htmlFor="group-hedge-after">
+                                        {t('form.hedgeAfter')}
+                                        <FieldHelp text={t('form.hedgeAfterHint')} />
+                                    </FieldLabel>
+                                    <Input
+                                        id="group-hedge-after"
+                                        type="number"
+                                        inputMode="numeric"
+                                        min={0}
+                                        step={100}
+                                        value={String(relayConfig.hedge_after_ms)}
+                                        onChange={(event) => {
+                                            const value = Number.parseInt(event.target.value, 10);
+                                            setRelayConfig((prev) => ({ ...prev, hedge_after_ms: Number.isFinite(value) && value >= 0 ? value : 0 }));
+                                        }}
+                                        className="rounded-xl"
+                                    />
+                                </Field>
+                                <Field>
+                                    <FieldLabel htmlFor="group-hedge-peak">
+                                        {t('form.hedgePeak')}
+                                        <FieldHelp text={t('form.hedgePeakHint')} />
+                                    </FieldLabel>
+                                    <Input
+                                        id="group-hedge-peak"
+                                        type="number"
+                                        inputMode="numeric"
+                                        min={0}
+                                        max={64}
+                                        step={1}
+                                        value={String(relayConfig.hedge_peak_in_flight)}
+                                        onChange={(event) => {
+                                            const value = Number.parseInt(event.target.value, 10);
+                                            setRelayConfig((prev) => ({ ...prev, hedge_peak_in_flight: Number.isFinite(value) ? Math.min(64, Math.max(0, value)) : 0 }));
                                         }}
                                         className="rounded-xl"
                                     />
