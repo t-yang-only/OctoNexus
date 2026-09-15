@@ -473,11 +473,11 @@ func reloadChannelChildren(ctx context.Context, channelID int) error {
 func channelDetail(channel model.Channel) model.ChannelDetail {
 	detail := model.ChannelDetail{ID: channel.ID, ChannelConfig: channel.ChannelConfig}
 
-	detail.Keys = make([]model.ChannelKeyConfig, 0)
+	detail.Keys = make([]model.ChannelKeyInput, 0)
 	keyNameByID := make(map[int]string)
 	for _, channelKey := range channelKeyCache.GetAll() {
 		if channelKey.ChannelID == channel.ID {
-			detail.Keys = append(detail.Keys, channelKey.ChannelKeyConfig)
+			detail.Keys = append(detail.Keys, model.ChannelKeyOutput(channelKey.ChannelKeyConfig))
 			keyNameByID[channelKey.ID] = channelKey.Name
 		}
 	}
@@ -529,7 +529,12 @@ func channelGrantIDs(channelID int) []int {
 
 // syncChannelKeys 按提交的凭据集合新增, 更新与删除渠道凭据。
 // 凭据在渠道内按名称唯一, 名称作为匹配依据; 删除凭据会级联删除其渠道授权。
-func syncChannelKeys(tx *gorm.DB, channelID int, requested []model.ChannelKeyConfig) error {
+func syncChannelKeys(tx *gorm.DB, channelID int, inputs []model.ChannelKeyInput) error {
+	// 请求侧先解析: 没提交 enabled 的凭据按启用落库, 显式 false 必须真的写成 false。
+	requested := make([]model.ChannelKeyConfig, 0, len(inputs))
+	for _, input := range inputs {
+		requested = append(requested, input.Resolved())
+	}
 	var existing []model.ChannelKey
 	if err := tx.Where("channel_id = ?", channelID).Find(&existing).Error; err != nil {
 		return fmt.Errorf("failed to load channel keys: %w", err)

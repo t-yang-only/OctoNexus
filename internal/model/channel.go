@@ -58,7 +58,32 @@ type Channel struct {
 type ChannelKeyConfig struct {
 	Name    string `json:"name" gorm:"not null;index:idx_channel_key,unique"` // 凭据名称, 界面展示与人工识别用。
 	Key     string `json:"key" gorm:"not null"`                               // 上游访问凭据。
-	Enabled bool   `json:"enabled" gorm:"default:true"`                       // 是否可用, 禁用后不参与选路但保留统计。
+	Enabled bool   `json:"enabled"`                                           // 是否可用, 禁用后不参与选路但保留统计。
+}
+
+// ChannelKeyInput 是请求侧的凭据形状。
+// Enabled 用指针是为了区分「没有提交这个字段」（默认启用）与「显式提交 false」（禁用）:
+// 落库结构上的 bool 零值两者不分, 而列上的 gorm default 标签会让显式的 false 被 GORM 当成零值跳过,
+// 于是「创建时禁用凭据」被静默忽略 —— 实测正是如此, 故默认值改由这一层决定。
+type ChannelKeyInput struct {
+	Name    string `json:"name"`
+	Key     string `json:"key"`
+	Enabled *bool  `json:"enabled"`
+}
+
+// Resolved 把请求侧凭据解析成落库形状: enabled 未提交时默认启用。
+func (input ChannelKeyInput) Resolved() ChannelKeyConfig {
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	return ChannelKeyConfig{Name: input.Name, Key: input.Key, Enabled: enabled}
+}
+
+// ChannelKeyOutput 把落库形状转回请求形状, 让读写共用同一份 JSON 契约。
+func ChannelKeyOutput(config ChannelKeyConfig) ChannelKeyInput {
+	enabled := config.Enabled
+	return ChannelKeyInput{Name: config.Name, Key: config.Key, Enabled: &enabled}
 }
 
 // 渠道下的一份上游凭据; 不同凭据通常对应不同的额度与计费。
@@ -95,7 +120,7 @@ type ChannelGrant struct {
 type ChannelDetail struct {
 	ID            int                  `json:"id"` // 渠道主键; 创建时提交 0, 由数据库分配。
 	ChannelConfig                      // 渠道自身的可编辑配置。
-	Keys          []ChannelKeyConfig   `json:"keys"`   // 渠道下的上游凭据。
+	Keys          []ChannelKeyInput    `json:"keys"`   // 渠道下的上游凭据。
 	Models        []string             `json:"models"` // 渠道提供的上游模型名称。
 	Grants        []ChannelGrantConfig `json:"grants"` // 渠道下的授权。
 }
