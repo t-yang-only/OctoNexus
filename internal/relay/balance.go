@@ -34,23 +34,9 @@ type LatencyProvider func(itemID int) (latencyMs int64, ok bool)
 // round 为轮转序号（调用方自增，0 起），返回第 round 个当选者的定序表（首个即当选）。
 // 冷却中成员压到队尾（仍保留，到期回）；被剔除的成员不在表内。
 func rankCandidates(items []model.GroupItem, cooldowns map[int]int64, nowMs int64, zeroBalanceGrantIDs map[int]bool, latency LatencyProvider, round uint64) ([]model.GroupItem, error) {
-	eligible := make([]model.GroupItem, 0, len(items))
-	cooling := make([]model.GroupItem, 0)
-	for _, item := range items {
-		if !item.Available {
-			continue
-		}
-		if zeroBalanceGrantIDs != nil && zeroBalanceGrantIDs[item.GrantRef()] {
-			continue
-		}
-		if deadline, ok := cooldowns[item.ID]; ok && deadline > nowMs {
-			cooling = append(cooling, item)
-			continue
-		}
-		eligible = append(eligible, item)
-	}
-	if len(eligible) == 0 {
-		return nil, ErrNoEligibleMember
+	eligible, cooling, err := partitionCandidates(items, cooldowns, nowMs, zeroBalanceGrantIDs)
+	if err != nil {
+		return nil, err
 	}
 	// priority 升序定权重：首个权重最高。
 	sorted := append([]model.GroupItem(nil), eligible...)
@@ -75,6 +61,31 @@ func rankCandidates(items []model.GroupItem, cooldowns map[int]int64, nowMs int6
 		stableLatencySort(out, latency)
 	}
 	return append(out, cooling...), nil
+}
+
+// partitionCandidates 是各选路策略共用的候选分区：eligible 为当前可尝试的成员,
+// cooling 为冷却中成员（到期即回, 由调用方压到队尾）；渠道或凭据停用（Available=false）与
+// 剩余额度归零（zeroBalanceGrantIDs）的成员直接剔除。可尝试成员为空时返回 ErrNoEligibleMember,
+// 由调用方按"无目标"等待——冷却成员不算可尝试, 与加权轮询定序的既有语义保持一致。
+func partitionCandidates(items []model.GroupItem, cooldowns map[int]int64, nowMs int64, zeroBalanceGrantIDs map[int]bool) (eligible, cooling []model.GroupItem, err error) {
+	eligible = make([]model.GroupItem, 0, len(items))
+	for _, item := range items {
+		if !item.Available {
+			continue
+		}
+		if zeroBalanceGrantIDs != nil && zeroBalanceGrantIDs[item.GrantRef()] {
+			continue
+		}
+		if deadline, ok := cooldowns[item.ID]; ok && deadline > nowMs {
+			cooling = append(cooling, item)
+			continue
+		}
+		eligible = append(eligible, item)
+	}
+	if len(eligible) == 0 {
+		return nil, cooling, ErrNoEligibleMember
+	}
+	return eligible, cooling, nil
 }
 
 // smoothWeightedOrder 返回平滑加权轮询在给定 round 下的当选者优先的下标序列：
