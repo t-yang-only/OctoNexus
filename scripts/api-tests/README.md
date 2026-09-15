@@ -30,6 +30,7 @@ python scripts/api-tests/run_all.py --list
 | `real` | 真实上游调用：成本与价表逐项对照 |
 | `failover` | 超时切换与故障转移：失败重试到上限、冷却与跳过、非流式整响应超时、流式首事件超时、全员不可用 |
 | `probe` | 主动探活：上游恢复后提前解除冷却、流量回切、探测是最小真实请求（`max_tokens=1`）、探测失败不改冷却且不重试、设置热写热读并复原（**会在套件内临时打开 `route_probe_enabled`，`finally` 复原**） |
+| `notify` | 多渠道通知：四家报文形状（通用 webhook / 飞书 / 钉钉 / 企微）、SMTP 真投递（套件内起 SMTP sink）、「HTTP 200 + 业务错误码」判失败、单渠道失败不影响其它渠道、未配置渠道报缺项、真实探活事件经 fan-out 抵达 webhook；**套件内临时改写全部通知设置，`finally` 原样复原** |
 | `stats` | 后台统计审计：日志行字段、缓存自洽、daily 收敛、usage 与 `relay_logs` 对照、按渠道计数 |
 | `apikey` | Key 级审计：新 Key 转发、自助/管理端统计一致、RPM/TPM 限流与 `Retry-After`、过期/禁用/超额/伪造/越权、SSE 概览、人工中止轮次、Key 登录 |
 | `costmode` / `quality` / `latency` / `busy` | 四种路由策略的活体验证（最低成本 / 质量优先 / 最低延迟 / 最空闲） |
@@ -51,6 +52,8 @@ python scripts/api-tests/run_all.py --list
   `/v1/responses`、`/v1/messages`）都支持，另有 `/v1/models` 供拉取模型与探针使用。
   运行期可用 `POST /__control {"model":"mock-bad","behavior":"ok|bad|slow|clear"}` 覆盖某个模型的行为
   （`GET /__control` 看当前覆盖）——探活用例要靠它把"上游恢复"造出来，因为成员模型名是落库配置、改不了名。
+  另有通知渠道桩：`POST /notify/echo|feishu|dingtalk|wecom` 返回各家形状的成功应答，
+  `/notify/feishu-fail` 返回"HTTP 200 + 业务错误码"，用于验证发送方真的在检查响应体。
 - **真实上游套件**依赖库里存在可用的真实分组（本机默认用 `deepseek-v4-flash`）；
   没有真实渠道时该套件会失败，其余套件不受影响。
 

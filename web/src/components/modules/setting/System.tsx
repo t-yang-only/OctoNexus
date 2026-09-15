@@ -1,12 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'use-intl';
-import { Monitor, Globe, Clock, Shield, Filter, HelpCircle, X, Gauge, BellRing, Scale } from 'lucide-react';
+import { Monitor, Globe, Clock, Shield, Filter, HelpCircle, X, Gauge, BellRing, Scale, Send } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useSettingList, useSetSetting, SettingKey } from '@/api/setting';
+import { useSettingList, useSetSetting, useTestNotifyChannels, SettingKey, type NotifyDeliveryResult } from '@/api/setting';
 import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
+
+// 通知渠道的固定顺序：界面按此顺序渲染，写回 alert_channels 时也按此顺序拼接，避免"勾选顺序"造成无意义 diff。
+const NOTIFY_KINDS = ['webhook', 'feishu', 'dingtalk', 'wecom', 'smtp'] as const;
+
+// 通知相关的设置键：界面里统一样式渲染，保存后统一回写初始值。
+const NOTIFY_SETTING_KEYS = {
+    channels: SettingKey.AlertChannels,
+    webhook: SettingKey.AlertWebhookURL,
+    feishu: SettingKey.AlertFeishuWebhook,
+    dingtalk: SettingKey.AlertDingTalkWebhook,
+    wecom: SettingKey.AlertWeComWebhook,
+    smtpHost: SettingKey.AlertSMTPHost,
+    smtpPort: SettingKey.AlertSMTPPort,
+    smtpUser: SettingKey.AlertSMTPUser,
+    smtpFrom: SettingKey.AlertSMTPFrom,
+    smtpTo: SettingKey.AlertSMTPTo,
+} as const;
 
 export function SettingSystem() {
     const t = useTranslations('setting');
@@ -24,6 +42,9 @@ export function SettingSystem() {
     const [routeBalanceEnabled, setRouteBalanceEnabled] = useState(false);
     const [routeProbeEnabled, setRouteProbeEnabled] = useState(false);
     const [routeProbeInterval, setRouteProbeInterval] = useState('');
+    // 通知渠道配置字段多且形状一致（都是 string 设置键），用一个对象承载，避免十几对 state/ref。
+    const [notifyFields, setNotifyFields] = useState<Record<string, string>>({});
+    const [notifyResults, setNotifyResults] = useState<NotifyDeliveryResult[] | null>(null);
 
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
@@ -35,6 +56,7 @@ export function SettingSystem() {
     const initialRouteBalanceEnabled = useRef(false);
     const initialRouteProbeEnabled = useRef(false);
     const initialRouteProbeInterval = useRef('');
+    const initialNotifyFields = useRef<Record<string, string>>({});
 
     useEffect(() => {
         if (settings) {
@@ -70,6 +92,14 @@ export function SettingSystem() {
             const probeInterval = settings.find(s => s.key === SettingKey.RouteProbeInterval);
             if (probe) { const enabled = probe.value === 'true'; queueMicrotask(() => setRouteProbeEnabled(enabled)); initialRouteProbeEnabled.current = enabled; }
             if (probeInterval) { queueMicrotask(() => setRouteProbeInterval(probeInterval.value)); initialRouteProbeInterval.current = probeInterval.value; }
+            const notifyKeys = Object.values(NOTIFY_SETTING_KEYS) as string[];
+            const found = settings.filter(s => notifyKeys.includes(s.key));
+            if (found.length > 0) {
+                const values: Record<string, string> = {};
+                found.forEach(s => { values[s.key] = s.value; });
+                queueMicrotask(() => setNotifyFields(prev => ({ ...prev, ...values })));
+                initialNotifyFields.current = { ...initialNotifyFields.current, ...values };
+            }
         }
     }, [settings]);
 
@@ -99,8 +129,42 @@ export function SettingSystem() {
                     initialRouteProbeEnabled.current = value === 'true';
                 } else if (key === SettingKey.RouteProbeInterval) {
                     initialRouteProbeInterval.current = value;
+                } else if ((Object.values(NOTIFY_SETTING_KEYS) as string[]).includes(key)) {
+                    initialNotifyFields.current = { ...initialNotifyFields.current, [key]: value };
                 }
             }
+        });
+    };
+
+    const testNotify = useTestNotifyChannels();
+
+    // 通知渠道：勾选即写回 alert_channels（逗号分隔），顺序固定避免无意义 diff。
+    const enabledNotifyKinds = (notifyFields[SettingKey.AlertChannels] ?? 'webhook')
+        .split(',')
+        .map(kind => kind.trim())
+        .filter(Boolean);
+
+    const toggleNotifyKind = (kind: string, checked: boolean) => {
+        const next = new Set(enabledNotifyKinds);
+        if (checked) next.add(kind); else next.delete(kind);
+        const value = NOTIFY_KINDS.filter(known => next.has(known)).join(',');
+        setNotifyFields(prev => ({ ...prev, [SettingKey.AlertChannels]: value }));
+        handleSave(SettingKey.AlertChannels, value, initialNotifyFields.current[SettingKey.AlertChannels] ?? '');
+    };
+
+    const notifyField = (key: string) => notifyFields[key] ?? '';
+
+    const setNotifyField = (key: string, value: string) => setNotifyFields(prev => ({ ...prev, [key]: value }));
+
+    const runNotifyTest = () => {
+        testNotify.mutate(undefined, {
+            onSuccess: (results) => {
+                setNotifyResults(results);
+                const sent = results.filter(r => r.sent).length;
+                if (sent > 0) toast.success(t('notify.testDone', { sent }));
+                else toast.error(t('notify.testAllFailed'));
+            },
+            onError: (error) => toast.error(String(error)),
         });
     };
 
@@ -234,6 +298,50 @@ export function SettingSystem() {
                 <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium">{t('routing.probe')}</p><p className="text-xs text-muted-foreground">{t('routing.probeHint')}</p></div><Switch checked={routeProbeEnabled} onCheckedChange={(checked) => { setRouteProbeEnabled(checked); handleSave(SettingKey.RouteProbeEnabled, String(checked), String(initialRouteProbeEnabled.current)); }} /></div>
                 <label className="grid gap-1 text-xs text-muted-foreground">{t('routing.probeInterval')}<Input type="number" min="0" value={routeProbeInterval} onChange={(e) => setRouteProbeInterval(e.target.value)} onBlur={() => handleSave(SettingKey.RouteProbeInterval, routeProbeInterval, initialRouteProbeInterval.current)} className="rounded-xl" /></label>
                 <label className="grid gap-1 text-xs text-muted-foreground"><span className="flex items-center gap-1"><BellRing className="size-3.5" />{t('alerts.webhook')}</span><Input value={alertWebhookUrl} onChange={(e) => setAlertWebhookUrl(e.target.value)} onBlur={() => handleSave(SettingKey.AlertWebhookURL, alertWebhookUrl, initialAlertWebhookUrl.current)} placeholder="https://..." type="url" className="rounded-xl" /></label>
+            </div>
+
+            {/* 通知渠道（R-alert-001）：一个事件投递到全部启用渠道 + 发送前真实测试 */}
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-muted/20 p-3">
+                <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-semibold"><Send className="size-4 text-primary" />{t('notify.title')}</div>
+                    <Button size="sm" variant="outline" className="rounded-xl" disabled={testNotify.isPending} onClick={runNotifyTest}>
+                        {testNotify.isPending ? t('notify.testing') : t('notify.test')}
+                    </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">{t('notify.hint')}</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                    {NOTIFY_KINDS.map(kind => (
+                        <label key={kind} className="flex items-center justify-between gap-3 rounded-xl border border-border/60 px-3 py-2 text-xs">
+                            <span>{t(`notify.kind.${kind}`)}</span>
+                            <Switch checked={enabledNotifyKinds.includes(kind)} onCheckedChange={(checked) => toggleNotifyKind(kind, checked)} />
+                        </label>
+                    ))}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.feishu')}<Input value={notifyField(SettingKey.AlertFeishuWebhook)} onChange={(e) => setNotifyField(SettingKey.AlertFeishuWebhook, e.target.value)} onBlur={() => handleSave(SettingKey.AlertFeishuWebhook, notifyField(SettingKey.AlertFeishuWebhook), initialNotifyFields.current[SettingKey.AlertFeishuWebhook] ?? '')} placeholder="https://open.feishu.cn/..." type="url" className="rounded-xl" /></label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.dingtalk')}<Input value={notifyField(SettingKey.AlertDingTalkWebhook)} onChange={(e) => setNotifyField(SettingKey.AlertDingTalkWebhook, e.target.value)} onBlur={() => handleSave(SettingKey.AlertDingTalkWebhook, notifyField(SettingKey.AlertDingTalkWebhook), initialNotifyFields.current[SettingKey.AlertDingTalkWebhook] ?? '')} placeholder="https://oapi.dingtalk.com/..." type="url" className="rounded-xl" /></label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.wecom')}<Input value={notifyField(SettingKey.AlertWeComWebhook)} onChange={(e) => setNotifyField(SettingKey.AlertWeComWebhook, e.target.value)} onBlur={() => handleSave(SettingKey.AlertWeComWebhook, notifyField(SettingKey.AlertWeComWebhook), initialNotifyFields.current[SettingKey.AlertWeComWebhook] ?? '')} placeholder="https://qyapi.weixin.qq.com/..." type="url" className="rounded-xl" /></label>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-5">
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.smtpHost')}<Input value={notifyField(SettingKey.AlertSMTPHost)} onChange={(e) => setNotifyField(SettingKey.AlertSMTPHost, e.target.value)} onBlur={() => handleSave(SettingKey.AlertSMTPHost, notifyField(SettingKey.AlertSMTPHost), initialNotifyFields.current[SettingKey.AlertSMTPHost] ?? '')} placeholder="smtp.example.com" className="rounded-xl" /></label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.smtpPort')}<Input type="number" min="0" value={notifyField(SettingKey.AlertSMTPPort)} onChange={(e) => setNotifyField(SettingKey.AlertSMTPPort, e.target.value)} onBlur={() => handleSave(SettingKey.AlertSMTPPort, notifyField(SettingKey.AlertSMTPPort), initialNotifyFields.current[SettingKey.AlertSMTPPort] ?? '')} placeholder="587" className="rounded-xl" /></label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.smtpUser')}<Input value={notifyField(SettingKey.AlertSMTPUser)} onChange={(e) => setNotifyField(SettingKey.AlertSMTPUser, e.target.value)} onBlur={() => handleSave(SettingKey.AlertSMTPUser, notifyField(SettingKey.AlertSMTPUser), initialNotifyFields.current[SettingKey.AlertSMTPUser] ?? '')} placeholder="user@example.com" className="rounded-xl" /></label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.smtpFrom')}<Input value={notifyField(SettingKey.AlertSMTPFrom)} onChange={(e) => setNotifyField(SettingKey.AlertSMTPFrom, e.target.value)} onBlur={() => handleSave(SettingKey.AlertSMTPFrom, notifyField(SettingKey.AlertSMTPFrom), initialNotifyFields.current[SettingKey.AlertSMTPFrom] ?? '')} placeholder="octopus@example.com" className="rounded-xl" /></label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.smtpTo')}<Input value={notifyField(SettingKey.AlertSMTPTo)} onChange={(e) => setNotifyField(SettingKey.AlertSMTPTo, e.target.value)} onBlur={() => handleSave(SettingKey.AlertSMTPTo, notifyField(SettingKey.AlertSMTPTo), initialNotifyFields.current[SettingKey.AlertSMTPTo] ?? '')} placeholder="ops@example.com" className="rounded-xl" /></label>
+                </div>
+                <p className="text-xs text-muted-foreground">{t('notify.smtpPasswordHint')}</p>
+                {notifyResults && (
+                    <div className="space-y-1">
+                        {notifyResults.map(result => (
+                            <div key={result.kind} className="flex items-start justify-between gap-3 rounded-xl border border-border/60 px-3 py-2 text-xs">
+                                <span className="font-medium">{t(`notify.kind.${result.kind}`)}</span>
+                                <span className={result.sent ? 'text-muted-foreground' : 'text-destructive'}>
+                                    {result.sent ? t('notify.resultOk') : t('notify.resultFail', { reason: result.detail })}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* CORS 跨域白名单 */}

@@ -21,7 +21,48 @@ export const SettingKey = {
     RouteProbeEnabled: 'route_probe_enabled',
     RouteProbeInterval: 'route_probe_interval_seconds',
     AlertWebhookURL: 'alert_webhook_url',
+    AlertChannels: 'alert_channels',
+    AlertFeishuWebhook: 'alert_feishu_webhook',
+    AlertDingTalkWebhook: 'alert_dingtalk_webhook',
+    AlertWeComWebhook: 'alert_wecom_webhook',
+    AlertSMTPHost: 'alert_smtp_host',
+    AlertSMTPPort: 'alert_smtp_port',
+    AlertSMTPUser: 'alert_smtp_user',
+    AlertSMTPFrom: 'alert_smtp_from',
+    AlertSMTPTo: 'alert_smtp_to',
 } as const;
+
+/**
+ * 通知渠道状态与发送前真实测试（R-alert-001）
+ */
+export interface NotifyChannelStatus {
+    kind: 'webhook' | 'feishu' | 'dingtalk' | 'wecom' | 'smtp';
+    enabled: boolean;
+    configured: boolean;
+    hint: string;
+}
+
+export interface NotifyDeliveryResult extends NotifyChannelStatus {
+    sent: boolean;
+    detail: string;
+}
+
+/** 各通知渠道的启用与配置状态；只回"能不能发"，不回显带凭据的地址。 */
+export function useNotifyChannels(enabled = true) {
+    return useQuery({
+        queryKey: ['settings', 'notify', 'channels'],
+        queryFn: () => apiRequest<NotifyChannelStatus[]>('/api/v1/setting/notify/channels'),
+        enabled,
+    });
+}
+
+/** 发送前真实测试：用合成事件真的投递一次，逐渠道回报成败与失败原因。 */
+export function useTestNotifyChannels() {
+    return useMutation({
+        mutationFn: () => apiRequest<NotifyDeliveryResult[]>('/api/v1/setting/notify/test', { method: 'POST' }),
+        onSuccess: () => undefined,
+    });
+}
 
 /**
  * 获取 Setting 列表 Hook

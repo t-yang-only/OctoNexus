@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/notify"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/relay"
 	"github.com/bestruirui/octopus/internal/server/middleware"
@@ -38,7 +39,27 @@ func init() {
 		AddRoute(
 			router.NewRoute("/import", http.MethodPost).
 				Handle(importDB),
+		).
+		AddRoute(
+			router.NewRoute("/notify/channels", http.MethodGet).
+				Handle(listNotifyChannels),
+		).
+		AddRoute(
+			router.NewRoute("/notify/test", http.MethodPost).
+				Handle(testNotifyChannels),
 		)
+}
+
+// listNotifyChannels 返回各通知渠道的启用与配置状态: 只给"能不能发", 不回显带凭据的地址本身。
+func listNotifyChannels(c *gin.Context) {
+	resp.Success(c, notify.Targets())
+}
+
+// testNotifyChannels 发送前真实测试 (R-alert-001 余项): 用合成事件真的投递一次, 逐渠道回报成败与失败原因。
+// 未配置的渠道直接报缺项, 未启用但已配置的也会尝试——用户点这个按钮就是要验证配置对不对。
+func testNotifyChannels(c *gin.Context) {
+	results := notify.TestSend(c.Request.Context())
+	resp.Success(c, results)
 }
 
 func getSettingList(c *gin.Context) {
