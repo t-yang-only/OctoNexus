@@ -49,6 +49,8 @@ func quotaScanOnce() {
 		changed := !seen || last != fingerprint
 		if changed {
 			quotaScanFinger[target.ChannelID] = fingerprint
+			// 顺手把余额快照留给加权选路用（内存, 不落库）。
+			op.RecordChannelBalance(target.ChannelID, remaining)
 		}
 		quotaScanMu.Unlock()
 		if !changed {

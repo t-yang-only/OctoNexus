@@ -42,6 +42,14 @@ type ChannelConfig struct {
 	CustomHeader             []CustomHeader `json:"custom_header" gorm:"serializer:json"`                                                               // 追加到上游请求的 Header。
 	ParamOverride            string         `json:"param_override"`                                                                                     // 请求参数覆盖配置; 留空表示不覆盖。
 	MatchRegex               string         `json:"match_regex"`                                                                                        // 拉取模型列表时的过滤表达式; 留空表示不过滤。
+
+	// 计费事实（R-weight-001 第二阶段）: 全部可选, 零值表示「未知」; 未知不做惩罚, 只按乐观先验参与加权。
+	// 这些是站点/渠道的属性, 由用户填写, 用来折算「实际有多贵」——价表只反映模型基准价, 反映不了倍率与按次计费。
+	BillingMode  string  `json:"billing_mode" binding:"omitempty,oneof=metered per_call subscription"` // metered 按量 / per_call 按次 / subscription 包月; 留空表示未知
+	Multiplier   float64 `json:"multiplier"`                                                           // 计价倍率: 该站相对基准价的倍率, 0 表示未知(按 1 计)
+	PerCallPrice float64 `json:"per_call_price"`                                                       // 按次单价(每请求), 0 表示未知或不按次计费
+	MonthlyQuota float64 `json:"monthly_quota"`                                                        // 包月额度(总量), 0 表示未知或不限
+	MonthlyUsed  float64 `json:"monthly_used"`                                                         // 包月已用, 0 表示未知
 }
 
 // 单个上游渠道的共享配置; 路径按协议分别配置, 凭据由 ChannelKey 提供。
@@ -284,4 +292,18 @@ func firstPathSegment(endpointPath string) string {
 		return trimmed[:i]
 	}
 	return trimmed
+}
+
+// ChannelBilling 是一条成员（渠道）的计费事实, 供加权选路折算「实际有多贵」。
+//
+// 与 ChannelConfig 上的字段一一对应, 外加配额扫描留下的余额快照（内存, 可能未知）。
+// 未知一律用 0/false 表示, 由打分侧按乐观先验处理, 不在这里编默认值。
+type ChannelBilling struct {
+	Mode         string  `json:"mode"`
+	Multiplier   float64 `json:"multiplier"`
+	PerCallPrice float64 `json:"per_call_price"`
+	MonthlyQuota float64 `json:"monthly_quota"`
+	MonthlyUsed  float64 `json:"monthly_used"`
+	Balance      float64 `json:"balance"`
+	BalanceKnown bool    `json:"balance_known"`
 }

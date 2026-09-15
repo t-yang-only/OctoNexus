@@ -64,3 +64,6 @@
 
 | T-weight-001 | 加权综合选路第一阶段：五维权重（成本/质量/延迟/在途/近期消耗）做成可调设置项 + weighted 模式 | route | done |
 | | 备注：需求 R-weight-001 的第一阶段。新增 GroupModeWeighted + internal/relay/weights.go（候选集合内归一化、按权重求和、并列按 priority/ID）+ 5 个设置键 route_weight_*（默认 30/30/15/15/10，0..100，越界拒绝而非静默夹紧）。两条口径：缺数据按**乐观先验**（与 lowest_latency 的无耗时按 0ms、quality_first 的无样本中性 1.0 同一哲学）、权重全 0 退化为 priority 顺序。单测 7/7；活体套件 run_weighted_test.py 4/4（延迟权重拉满后 15.0s → 0.0s 改选快成员）；全量矩阵 21 套件 0 失败。**包月/按次/余额/倍率四个维度未做**：仓库里没有存这些数据的位置，需新增渠道字段 + 迁移 + 面板（下一阶段）。三个取舍点（默认权重排序 / 贵而快能否压过便宜但常错 / 包月用尽降权还是剔除）仍留用户决定，本阶段已全部做成设置项，所以无论怎么定都不用再改代码。已提交。 | 2026-09-16 05:30:25 |
+
+| T-weight-002 | 加权综合第二阶段：倍率 / 按次单价 / 余额 / 包月余量 接入加权选路（R-weight-001）| route | done |
+| | 备注：渠道新增 5 个可空字段（billing_mode/multiplier/per_call_price/monthly_quota/monthly_used，GORM 启动自动加列，纯增量）；余额不靠用户填 —— 配额扫描本来就取到 remaining，这次把它存进内存快照（op.RecordChannelBalance/ChannelBalance）供选路读；包月用尽的处置做成设置项 route_monthly_exhausted_action（demote 默认 / exclude），即用户点名的第三个取舍点；新增 4 个权重键 route_weight_multiplier/per_call/balance/monthly（默认 15/10/15/10）。**过程中发现并修掉一个真实接线缺陷**：pickGroupItemHot 自己抄了一份 routeDeps 字面量，没带 billing，导致「模式支持、单测全绿、生产该维度静默失效」——热路径改为统一走 hotRouteDeps()，并加守卫测试 TestHotRouteDepsCoversEveryDimension（任一 provider 为空即红）。单测 14/14；活体套件 run_weighted_test.py 6/6（T5 计费字段写入读回、T6 倍率权重拉满改选倍率 1 的渠道）；全量矩阵通过。未做：渠道编辑面板的计费字段输入框、权重设置界面（纯前端，下一轮）。已提交。 | 2026-09-16 06:12:17 |
