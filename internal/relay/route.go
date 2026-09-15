@@ -130,6 +130,8 @@ func pickGroupItem(group model.Group) model.GroupItem {
 func recordRouteSuccess(group model.Group, itemID int, latencyMs int64) {
 	// 质量/延迟样本与模式无关: 手动模式也记, 便于切模式时立刻有历史可依。
 	recordMemberOutcome(itemID, true, latencyMs)
+	// 近期负载同样与模式无关: 一次尝试占掉的上游配额, 换模式也还在窗口里。
+	recordMemberAttempt(itemID)
 
 	if group.Mode == model.GroupModeManual {
 		return
@@ -173,6 +175,8 @@ func recordRouteSuccess(group model.Group, itemID int, latencyMs int64) {
 func recordRouteFailure(group model.Group, itemID, failures int, latencyMs int64) bool {
 	// 一次失败一轮即记一次: 质量口径就是"成员尝试成功率", 与成员尝试上限无关。
 	recordMemberOutcome(itemID, false, latencyMs)
+	// 失败同样占用了该成员的配额(连接/上游计数), 故也计入近期负载。
+	recordMemberAttempt(itemID)
 
 	if group.Mode == model.GroupModeManual {
 		return false
@@ -288,6 +292,7 @@ func pickGroupItemHot(group model.Group) model.GroupItem {
 		quality: memberSuccessRate,
 		latency: memberLatencyMs,
 		busy:    memberBusyCount,
+		load:    memberRecentLoad,
 	}, RouteBalanceEnabled())
 }
 
@@ -304,6 +309,8 @@ func pickGroupItemByMode(group model.Group, deps routeDeps, balanceEnabled bool)
 		return pickGroupItemLowestLatency(group, deps.latency)
 	case group.Mode == model.GroupModeLeastBusy:
 		return pickGroupItemLeastBusy(group, deps.busy)
+	case group.Mode == model.GroupModeLowestTpmRpm:
+		return pickGroupItemLowestTpmRpm(group, deps.load)
 	case balanceEnabled:
 		return pickGroupItemBalanced(group)
 	default:

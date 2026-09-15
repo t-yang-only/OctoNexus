@@ -46,7 +46,10 @@ MODELS = ["mock-good", "mock-slow", "mock-bad", "mock-chatonly"]
 
 # FORCED 是运行期行为覆盖: 模型名 → "ok"/"bad"/"slow"。探活用例要证明"上游恢复后冷却被提前解除",
 # 就需要在实例运行中把某个模型从失败翻成健康, 改模型名做不到 (成员模型名是落库配置)。
-FORCED = {}
+FORCED = {}  # 运行期覆盖: 模型名 -> ok|bad|slow
+USAGE_SCALE = {}  # 运行期覆盖: 模型名 -> token 计数倍数（验证按 token 消耗选路）
+USAGE_KEYS = {"input_tokens", "output_tokens", "prompt_tokens", "completion_tokens",
+              "cached_tokens", "total_tokens"}
 
 
 def _redact(value):
@@ -68,6 +71,21 @@ def usage_echo(model):
     return {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}
 
 
+def _scale_usage_payload(payload, scale):
+    """把响应里出现的 token 计数按倍数放大, 用于验证"按 token 消耗选路"(TPM 口径)。
+
+    只改已知的用量字段名, 递归处理 dict/list, 于是三种协议(含 SSE 事件)都覆盖到。
+    """
+    if scale == 1:
+        return payload
+    if isinstance(payload, dict):
+        return {k: (int(v * scale) if k in USAGE_KEYS and isinstance(v, (int, float)) else _scale_usage_payload(v, scale))
+                for k, v in payload.items()}
+    if isinstance(payload, list):
+        return [_scale_usage_payload(item, scale) for item in payload]
+    return payload
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -83,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             return {"_raw": raw.decode("utf-8", "replace")}
 
     def _send_json(self, code, payload):
-        body = json.dumps(payload).encode("utf-8")
+        body = json.dumps(_scale_usage_payload(payload, USAGE_SCALE.get(getattr(self, "_current_model", ""), 1))).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -91,13 +109,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_sse(self, events):
+        scale = USAGE_SCALE.get(getattr(self, "_current_model", ""), 1)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
         self.end_headers()
         for ev in events:
-            self.wfile.write(("data: " + json.dumps(ev) + "\n\n").encode("utf-8"))
+            self.wfile.write(("data: " + json.dumps(_scale_usage_payload(ev, scale)) + "\n\n").encode("utf-8"))
             self.wfile.flush()
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
@@ -125,8 +144,19 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json(400, {"error": {"message": "want {model, behavior=ok|bad|slow|clear}"}})
                 return
-            self._send_json(200, {"forced": dict(FORCED)})
+            if body.get("model") and "usage_scale" in body:
+                try:
+                    scale = float(body["usage_scale"])
+                except (TypeError, ValueError):
+                    self._send_json(400, {"error": {"message": "usage_scale must be a number"}})
+                    return
+                if scale <= 1:
+                    USAGE_SCALE.pop(body["model"], None)
+                else:
+                    USAGE_SCALE[body["model"]] = scale
+            self._send_json(200, {"forced": dict(FORCED), "usage_scale": dict(USAGE_SCALE)})
             return
+        self._current_model = model
         log_request({
             "method": "POST",
             "path": self.path,

@@ -99,13 +99,14 @@ func pickGroupItemLowestCost(group model.Group, cost CostProvider) model.GroupIt
 	return pickGroupItem(group.WithItems(ranked))
 }
 
-// routeDeps 是选路需要的外部数据来源（成本 / 质量 / 延迟）。分组模式决定用其中哪几个：
+// routeDeps 是选路需要的外部数据来源（成本 / 质量 / 延迟 / 在途 / 近期负载）。分组模式决定用其中哪几个：
 // 热路径传生产实现，单测传 stub；字段为 nil 表示该维度不参与（各种模式都有明确的"无数据"口径）。
 type routeDeps struct {
 	cost    CostProvider
 	quality MemberQualityProvider
 	latency LatencyProvider
 	busy    BusyProvider
+	load    LoadProvider
 }
 
 // NM-DS-004 迭代：质量优先（quality_first）选路定序。
@@ -280,6 +281,81 @@ func pickGroupItemLeastBusy(group model.Group, busy BusyProvider) model.GroupIte
 	routeMu.Unlock()
 
 	ranked, err := rankByBusy(group.Items, cooldowns, time.Now().UnixMilli(), nil, busy)
+	if err != nil || len(ranked) == 0 {
+		return model.GroupItem{}
+	}
+	return pickGroupItem(group.WithItems(ranked))
+}
+
+// NM-DS-014 迭代：按最近一分钟的消耗（lowest_tpm_rpm）选路定序。
+// 与其它策略共用同一套过滤与冷却口径（partitionCandidates），只换排序键：
+// 窗口内 token 数升序 → 请求数升序 → priority 升序 → ID 升序。
+//
+// 两处与 least_busy 的关键区别（避免用户以为它们一样）：
+//   - least_busy 看的是**此刻在途**（进程内活动请求数），窗口为 0；
+//   - lowest_tpm_rpm 看的是**最近 60 秒已经消耗掉的量**（请求数与 token 数），
+//     所以一个刚把大请求做完的成员会在这 60 秒内被让开，哪怕它此刻没有在途请求。
+//
+// "无记录"的成员按 0 消耗参与排序（乐观口径，与 quality_first 的中性先验、lowest_latency 的 0ms 同哲学）：
+// 未知者先当成空闲的试一次，试出消耗后自然被让开。
+// 需要说明的是：上游真实的 RPM/TPM 限额我们并不知道，这里排的是"我们自己的近期消耗"，
+// 效果是摊平负载、降低撞限流的概率，而不是严格意义上的"剩余额度最多者"。
+
+// rankByRecentLoad 对候选做近期负载定序：首个即"最近一分钟消耗最少的可用成员"。
+func rankByRecentLoad(items []model.GroupItem, cooldowns map[int]int64, nowMs int64, zeroBalanceGrantIDs map[int]bool, load LoadProvider) ([]model.GroupItem, error) {
+	eligible, cooling, err := partitionCandidates(items, cooldowns, nowMs, zeroBalanceGrantIDs)
+	if err != nil {
+		return nil, err
+	}
+	ranked := append([]model.GroupItem(nil), eligible...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		ri, ti := memberLoadScore(load, ranked[i])
+		rj, tj := memberLoadScore(load, ranked[j])
+		if ti != tj {
+			return ti < tj // token 消耗少的在前（TPM）
+		}
+		if ri != rj {
+			return ri < rj // 请求数少的在前（RPM）
+		}
+		if ranked[i].Priority != ranked[j].Priority {
+			return ranked[i].Priority < ranked[j].Priority
+		}
+		return ranked[i].ID < ranked[j].ID
+	})
+	return append(ranked, cooling...), nil
+}
+
+// memberLoadScore 取成员窗口内的消耗（请求数, token 数）；provider 未接线或无记录时都按 0（乐观先验）。
+func memberLoadScore(load LoadProvider, item model.GroupItem) (int, int) {
+	if load == nil {
+		return 0, 0
+	}
+	requests, tokens, ok := load(item.ID)
+	if !ok {
+		return 0, 0
+	}
+	if requests < 0 {
+		requests = 0
+	}
+	if tokens < 0 {
+		tokens = 0
+	}
+	return requests, tokens
+}
+
+// pickGroupItemLowestTpmRpm 在近期负载定序下选出本轮目标；只改"本轮先试谁"的顺序,
+// 亲和/冷却/探测/上限语义仍归 pickGroupItem 既有链路；定序失败时返回零值由调用方等待。
+func pickGroupItemLowestTpmRpm(group model.Group, load LoadProvider) model.GroupItem {
+	routeMu.Lock()
+	route := routes[group.ID]
+	if route == nil {
+		route = &RouteState{GroupID: group.ID, Cooldowns: make(map[int]int64)}
+		routes[group.ID] = route
+	}
+	cooldowns := maps.Clone(route.Cooldowns)
+	routeMu.Unlock()
+
+	ranked, err := rankByRecentLoad(group.Items, cooldowns, time.Now().UnixMilli(), nil, load)
 	if err != nil || len(ranked) == 0 {
 		return model.GroupItem{}
 	}

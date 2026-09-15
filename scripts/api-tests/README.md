@@ -34,7 +34,7 @@ python scripts/api-tests/run_all.py --list
 | `export` | 请求级明细导出：CSV 的 BOM/表头/行序与唯一行 ID、与 `/history` 字段级等价、状态/模型/关键字筛选、下载响应头、未登录 401 |
 | `stats` | 后台统计审计：日志行字段、缓存自洽、daily 收敛、usage 与 `relay_logs` 对照、按渠道计数 |
 | `apikey` | Key 级审计：新 Key 转发、自助/管理端统计一致、RPM/TPM 限流与 `Retry-After`、过期/禁用/超额/伪造/越权、SSE 概览、人工中止轮次、Key 登录 |
-| `costmode` / `quality` / `latency` / `busy` | 四种路由策略的活体验证（最低成本 / 质量优先 / 最低延迟 / 最空闲） |
+| `costmode` / `quality` / `latency` / `busy` / `rpm` | 五种路由策略的活体验证（最低成本 / 质量优先 / 最低延迟 / 最空闲 / 近期消耗最低）。其中 `rpm` 会**删组重建**以获得干净的成员行，并用 mock 的 `usage_scale` 把某个成员的 token 放大 40 倍，验证"token 优先于请求数" |
 | `hotapply` | 设置热生效（改完不重启即生效） |
 | `display` | 日志卡片字段容错解析（把 `web/src/.../log/display.ts` 单独编译成 cjs 后跑纯函数断言） |
 | `reallog` | 日志卡片真实数据等价性（用库里最近两条 `relay_logs` 对照新解析与旧内联公式） |
