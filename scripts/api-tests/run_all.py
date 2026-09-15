@@ -49,6 +49,7 @@ SUITES = [
     ("failover", "run_failover_tests.py", "超时切换与故障转移（重试/冷却/切成员/整响应与首事件超时）", "instance,mock"),
     ("probe", "run_probe_test.py", "冷却成员主动探活（恢复即提前解除冷却 + 探测失败不改冷却）", "instance,mock,db"),
     ("notify", "run_notify_audit.py", "多渠道通知（四家报文形状 + SMTP 真投递 + 业务错误码 + 真实事件投递）", "instance,mock,db"),
+    ("export", "run_log_export_audit.py", "请求级明细导出（CSV 形状/字段等价/筛选/鉴权/下载响应头）", "instance,mock,db"),
     ("stats", "check_stats.py", "后台统计审计（日志/缓存/daily/usage 与 relay_logs 对照）", "instance"),
     ("pool", "run_pool_audit.py", "号池统一视图（谷歌/GPT/Claude 合并视图 + 同步契约 + 鉴权）", "instance,db"),
     ("apikey", "run_apikey_audit.py", "Key 级审计（限流/过期/禁用/额度/越权/登录/流/中止）", "instance,mock"),

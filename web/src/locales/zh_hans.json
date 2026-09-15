@@ -546,6 +546,10 @@
     },
     "log": {
         "list": {
+                "export": "导出 CSV",
+                "exported": "已开始下载导出文件",
+                "exportEmpty": "当前筛选没有可导出的记录",
+                "exportFailed": "导出失败",
             "empty": "暂无日志",
             "disconnected": "日志连接已断开，正在重连",
             "filtered": "已筛选 {shown}/{total}",

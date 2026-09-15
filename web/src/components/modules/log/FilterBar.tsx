@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Download, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useTranslations } from 'use-intl';
-import type { RelayLogOverview, RequestState } from '@/api/log';
+import { toast } from 'sonner';
+import { exportRelayLogs, type RelayLogOverview, type RequestState } from '@/api/log';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { buttonVariants } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -53,6 +54,23 @@ export function LogToolbar({ filter, onFilterChange }: LogToolbarProps) {
     const interval = useLogAutoRefreshStore((s) => s.interval);
     const setInterval = useLogAutoRefreshStore((s) => s.setInterval);
     const [searchExpanded, setSearchExpanded] = useState(false);
+    const [exporting, setExporting] = useState(false);
+
+    // runExport 导出持久化历史里的请求级明细（CSV）。内存筛选栏里的状态与关键字直接映射到后端查询参数,
+    // 保证"屏幕上筛出来的"和"导出去的"是同一套条件。
+    const runExport = () => {
+        setExporting(true);
+        exportRelayLogs({
+            status: filter.status === 'all' ? undefined : filter.status,
+            q: filter.query.trim() || undefined,
+        })
+            .then((size) => {
+                if (size === 0) toast.info(t('exportEmpty'));
+                else toast.success(t('exported'));
+            })
+            .catch((error) => toast.error(`${t('exportFailed')}: ${String(error)}`))
+            .finally(() => setExporting(false));
+    };
 
     const statuses: Array<RequestState | 'all'> = ['all', 'running', 'committed', 'success', 'failed', 'canceled'];
 
@@ -98,6 +116,21 @@ export function LogToolbar({ filter, onFilterChange }: LogToolbarProps) {
                     </button>
                 </div>
             </div>
+
+            <button
+                type="button"
+                aria-label={t('export')}
+                title={t('export')}
+                disabled={exporting}
+                onClick={runExport}
+                className={buttonVariants({
+                    variant: 'ghost',
+                    size: 'icon',
+                    className: 'rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground disabled:opacity-50',
+                })}
+            >
+                <Download className={cn('size-4', exporting && 'animate-pulse')} />
+            </button>
 
             <Popover>
                 <PopoverTrigger asChild>

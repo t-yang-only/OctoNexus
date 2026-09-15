@@ -1,6 +1,7 @@
 package op
 
 import (
+	"database/sql"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ type dbConn interface {
 	Model(value any) *gorm.DB
 	Create(value any) *gorm.DB
 	Where(query any, args ...any) *gorm.DB
+	ScanRows(rows *sql.Rows, dest any) error
 }
 
 func connOrDefault(conn dbConn) dbConn {
@@ -56,6 +58,21 @@ func relayLogListOn(conn dbConn, filter model.RelayLogFilter) ([]model.RelayLog,
 		offset = 0
 	}
 
+	query := relayLogQuery(conn, filter)
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0
+	}
+	var logs []model.RelayLog
+	if err := query.Order("id DESC").Limit(limit).Offset(offset).Find(&logs).Error; err != nil {
+		return nil, total
+	}
+	return logs, total
+}
+
+// relayLogQuery 按筛选条件构造查询, 供分页读取与导出共用, 保证"面板看到的"与"导出的"是同一套条件口径。
+func relayLogQuery(conn dbConn, filter model.RelayLogFilter) *gorm.DB {
 	query := connOrDefault(conn).Model(&model.RelayLog{})
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
@@ -73,16 +90,7 @@ func relayLogListOn(conn dbConn, filter model.RelayLogFilter) ([]model.RelayLog,
 		like := "%" + q + "%"
 		query = query.Where("model LIKE ? OR target_channel LIKE ? OR error LIKE ?", like, like, like)
 	}
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0
-	}
-	var logs []model.RelayLog
-	if err := query.Order("id DESC").Limit(limit).Offset(offset).Find(&logs).Error; err != nil {
-		return nil, total
-	}
-	return logs, total
+	return query
 }
 
 // RelayLogClean 删除 CreatedAt 早于保留期的历史日志, 返回删除条数。
