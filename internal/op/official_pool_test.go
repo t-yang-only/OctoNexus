@@ -384,3 +384,70 @@ func TestOfficialPoolStatusListReportsMapping(t *testing.T) {
 		t.Fatalf("unused provider must report an empty pool: %+v", gemini)
 	}
 }
+
+// TestOfficialPoolStatusListIncludesMemberDetail 统一号池视图逐账号给出映射明细：
+// active 账号有启用凭据；曾 active 后失活的账号凭据行保留但停用；从未 active 的账号根本没有凭据行；
+// 未建号池渠道的服务商照旧出行（凭据标记为不存在），界面据此区分"有账号没同步"与"没账号"。
+func TestOfficialPoolStatusListIncludesMemberDetail(t *testing.T) {
+	withOfficialKey(t, "pool-cipher-key-a")
+	conn := openOfficialPoolTestDB(t)
+	provider := model.OfficialAccountProviderGemini
+	seedPoolAccount(t, conn, provider, poolAccountSeed{name: "g1@example.com", status: model.OfficialAccountStatusActive, access: "tok-1"})
+	seedPoolAccount(t, conn, provider, poolAccountSeed{name: "g2@example.com", status: model.OfficialAccountStatusActive, access: "tok-2"})
+	if _, err := OfficialPoolSync(conn, provider); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// g2 在官方侧被撤销后重新同步：凭据行必须保留（只是停用），历史映射不丢。
+	if err := conn.Model(&model.OfficialAccount{}).
+		Where("provider = ? AND external_name = ?", provider, "g2@example.com").
+		Update("status", model.OfficialAccountStatusRevoked).Error; err != nil {
+		t.Fatalf("revoke g2: %v", err)
+	}
+	if _, err := OfficialPoolSync(conn, provider); err != nil {
+		t.Fatalf("resync: %v", err)
+	}
+	// 另一个服务商：只有账号、从未同步过（pending）。
+	seedPoolAccount(t, conn, model.OfficialAccountProviderOpenAI, poolAccountSeed{name: "o1@example.com", status: model.OfficialAccountStatusPending, access: "tok-3"})
+
+	statuses, err := OfficialPoolStatusList(conn)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	byProvider := make(map[model.OfficialAccountProvider]model.OfficialPoolStatus, len(statuses))
+	for _, status := range statuses {
+		byProvider[status.Provider] = status
+	}
+
+	gemini := byProvider[model.OfficialAccountProviderGemini]
+	if gemini.ChannelID == 0 || len(gemini.Members) != 2 {
+		t.Fatalf("gemini status = %+v, want a channel with 2 members", gemini)
+	}
+	first, second := gemini.Members[0], gemini.Members[1]
+	if first.ExternalName != "g1@example.com" || !first.KeyExists || !first.KeyEnabled {
+		t.Fatalf("active member = %+v, want g1 mapped to an enabled key", first)
+	}
+	if first.KeyName != "g1@example.com" {
+		t.Fatalf("key name = %q, want account external name", first.KeyName)
+	}
+	if second.ExternalName != "g2@example.com" || !second.KeyExists || second.KeyEnabled {
+		t.Fatalf("revoked member = %+v, want g2 mapped to a disabled-but-kept key", second)
+	}
+	if second.Status != model.OfficialAccountStatusRevoked || second.KeyName != "g2@example.com" {
+		t.Fatalf("revoked member = %+v, want status revoked with key name kept", second)
+	}
+	if gemini.ActiveKeys != 1 {
+		t.Fatalf("gemini active keys = %d, want 1", gemini.ActiveKeys)
+	}
+
+	openai := byProvider[model.OfficialAccountProviderOpenAI]
+	if openai.ChannelID != 0 {
+		t.Fatalf("openai channel id = %d, want 0 (never synced)", openai.ChannelID)
+	}
+	if len(openai.Members) != 1 || openai.Members[0].KeyExists {
+		t.Fatalf("openai members = %+v, want one member with no key yet", openai.Members)
+	}
+	if openai.Members[0].Status != model.OfficialAccountStatusPending {
+		t.Fatalf("openai member status = %q", openai.Members[0].Status)
+	}
+}

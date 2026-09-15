@@ -128,3 +128,80 @@ export function useCreateJumpToken() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: jumpTokenListQueryKey }),
     });
 }
+
+// OfficialPoolMember 是统一号池视图里的一行：一个官方账号与它物化出的那条渠道凭据。
+export interface OfficialPoolMember {
+    account_id: number;
+    external_name: string;
+    status: OfficialStatus;
+    expires_at: string | null;
+    plan_tier: string;
+    window_5h: string;
+    window_7d: string;
+    healthy: boolean;
+    last_error: string;
+    key_name: string;
+    key_exists: boolean;
+    key_enabled: boolean;
+}
+
+// OfficialPoolStatus 是一个服务商的号池快照（账号 → 凭据映射明细在 members 里）。
+export interface OfficialPoolStatus {
+    provider: OfficialProvider;
+    channel_id: number;
+    channel_name: string;
+    accounts: number;
+    active_keys: number;
+    models: number;
+    grants: number;
+    members: OfficialPoolMember[] | null;
+}
+
+// OfficialPoolSyncResult 是一次号池同步的结论。
+export interface OfficialPoolSyncResult {
+    provider: OfficialProvider;
+    channel_id: number;
+    channel_name: string;
+    keys: number;
+    disabled: number;
+    refreshed: number;
+    models: number;
+    grants: number;
+    notes?: string[];
+}
+
+export interface OfficialPoolListResult {
+    items: OfficialPoolStatus[];
+    total: number;
+}
+
+export interface OfficialPoolSyncResponse {
+    items: OfficialPoolSyncResult[];
+    total: number;
+}
+
+export const officialPoolListQueryKey = ['account', 'official', 'pool'] as const;
+
+export const officialPoolListQueryOptions = queryOptions({
+    queryKey: officialPoolListQueryKey,
+    queryFn: () => apiRequest<OfficialPoolListResult>('/api/v1/account/official/pool/list'),
+});
+
+// useOfficialPools 读取统一号池视图：一次拿到 OpenAI/Gemini/Claude 三个号池的账号与凭据映射。
+export function useOfficialPools() {
+    return useQuery({ ...officialPoolListQueryOptions, refetchInterval: 30000, refetchOnMount: 'always' as const });
+}
+
+// useSyncOfficialPool 触发号池同步；不传 provider 即三个号池一起同步。
+export function useSyncOfficialPool() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (provider?: OfficialProvider) =>
+            apiRequest<OfficialPoolSyncResponse>('/api/v1/account/official/pool/sync', {
+                method: 'POST',
+                body: provider ? { provider } : {},
+            }),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: officialPoolListQueryKey }),
+    });
+}
+

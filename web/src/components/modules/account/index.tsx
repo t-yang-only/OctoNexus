@@ -10,6 +10,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { CopyIconButton } from '@/components/common/CopyButton';
+import { cn } from '@/lib/utils';
 import {
     officialAccountListQueryKey,
     jumpTokenListQueryKey,
@@ -18,8 +19,11 @@ import {
     useCreateJumpToken,
     useJumpTokens,
     useOfficialAccounts,
+    useOfficialPools,
     useRefreshOfficialAccountUsage,
+    useSyncOfficialPool,
     type OfficialAccount,
+    type OfficialPoolStatus,
     type OfficialProvider,
     type JumpKind,
     type JumpToken,
@@ -165,6 +169,89 @@ function JumpRow({ token }: { token: JumpToken }) {
     return <div className="flex flex-col gap-2 rounded-2xl bg-muted/35 p-3 text-sm sm:flex-row sm:items-center"><div className="flex items-center gap-2"><Badge variant="outline">{token.kind === 'na' ? 'New API' : 'Sub2Api'}</Badge><span className="font-medium">{token.target_url}</span></div><div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">{token.consumed_at ? <Badge variant="secondary">{t('used')}</Badge> : expired ? <Badge variant="destructive">{t('expired')}</Badge> : <Badge variant="default">{t('available')}</Badge>}<span>{formatDate(token.created_at)}</span></div></div>;
 }
 
+// PoolPanel 是统一号池视图：OpenAI(GPT) 与 Gemini(谷歌) 以及 Claude 三个号池放在同一张表里，
+// 一个"全部同步"按钮即可把它们一起物化成号池渠道凭据（后端按 provider 各建一条渠道，渠道地址互不干扰）。
+function PoolPanel() {
+    const t = useTranslations('pool');
+    const { data, isLoading, error } = useOfficialPools();
+    const sync = useSyncOfficialPool();
+    const [notes, setNotes] = useState<Array<{ provider: OfficialProvider; notes: string[] }>>([]);
+    const pools = data?.items ?? [];
+
+    const runSync = (provider?: OfficialProvider) => {
+        sync.mutate(provider, {
+            onSuccess: (result) => {
+                const withNotes = (result.items ?? [])
+                    .filter((item) => (item.notes ?? []).length > 0)
+                    .map((item) => ({ provider: item.provider, notes: item.notes ?? [] }));
+                setNotes(withNotes);
+                toast.success(provider ? t('syncedOne', { provider: providerMeta[provider].label }) : t('syncedAll'));
+            },
+            onError: (err) => toast.error(t('syncFailed'), { description: err.message }),
+        });
+    };
+
+    return <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto pb-8 pr-1">
+        <section className="rounded-3xl border border-border/70 bg-card p-6">
+            <div className="flex items-start gap-3">
+                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-sky-500/10 text-sky-600"><KeyRound className="size-5" /></div>
+                <div className="min-w-0 flex-1">
+                    <h2 className="text-xl font-bold">{t('title')}</h2>
+                    <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{t('subtitle')}</p>
+                </div>
+                <Button className="rounded-xl" onClick={() => runSync()} disabled={sync.isPending}>
+                    {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />} {t('syncAll')}
+                </Button>
+            </div>
+            <Separator className="my-5" />
+            {isLoading ? <LoadingState /> : error ? <ErrorState message={error.message} /> : pools.length ? (
+                <div className="grid gap-4">
+                    {pools.map((pool) => <PoolCard key={pool.provider} pool={pool} syncing={sync.isPending} onSync={() => runSync(pool.provider)} />)}
+                </div>
+            ) : <EmptyState icon={Sparkles} title={t('empty')} description={t('emptyHint')} />}
+            {notes.length > 0 && <div className="mt-4 grid gap-2">{notes.map((item) => <div key={item.provider} className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.06] p-3 text-xs text-amber-700 dark:text-amber-400"><span className="font-semibold">{providerMeta[item.provider].label}</span>{item.notes.map((note, index) => <div key={index} className="mt-1">{note}</div>)}</div>)}</div>}
+        </section>
+    </div>;
+}
+
+// PoolCard 是一个服务商的号池：概览计数 + 逐账号的"账号 → 凭据"映射 + 单独同步入口。
+function PoolCard({ pool, syncing, onSync }: { pool: OfficialPoolStatus; syncing: boolean; onSync: () => void }) {
+    const t = useTranslations('pool');
+    const meta = providerMeta[pool.provider];
+    const members = pool.members ?? [];
+    return <div className="rounded-2xl border border-border/70 bg-muted/25 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+            <span className={cn('rounded-lg px-2 py-0.5 text-xs font-semibold', meta.className)}>{meta.label}</span>
+            <span className="font-medium">{pool.channel_name}</span>
+            {pool.channel_id === 0 ? <Badge variant="secondary">{t('notSynced')}</Badge> : null}
+            <div className="ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <span>{t('accounts')} <b className="text-foreground">{pool.accounts}</b></span>
+                <span>{t('activeKeys')} <b className="text-foreground">{pool.active_keys}</b></span>
+                <span>{t('models')} <b className="text-foreground">{pool.models}</b></span>
+                <span>{t('grants')} <b className="text-foreground">{pool.grants}</b></span>
+                <Button size="sm" variant="outline" className="rounded-xl" onClick={onSync} disabled={syncing}>
+                    <RefreshCw className="size-3.5" /> {t('syncOne')}
+                </Button>
+            </div>
+        </div>
+        {members.length ? <div className="mt-3 grid gap-1.5">{members.map((member) => <div key={member.account_id} className="flex flex-wrap items-center gap-2 rounded-xl bg-background/70 px-3 py-2 text-xs">
+            <span className="font-medium">{member.external_name}</span>
+            <Badge variant={member.status === 'active' ? 'default' : 'secondary'}>{member.status}</Badge>
+            {member.plan_tier ? <span className="text-muted-foreground">{member.plan_tier}</span> : null}
+            {member.window_5h ? <span className="text-muted-foreground">5H {member.window_5h}</span> : null}
+            {member.window_7d ? <span className="text-muted-foreground">7D {member.window_7d}</span> : null}
+            {member.expires_at ? <span className="text-muted-foreground">{formatDate(member.expires_at)}</span> : null}
+            <span className="ml-auto flex items-center gap-1.5">
+                {member.key_exists
+                    ? (member.key_enabled
+                        ? <><CheckCircle2 className="size-3.5 text-emerald-500" />{t('keyEnabled')}</>
+                        : <><CircleAlert className="size-3.5 text-muted-foreground" />{t('keyDisabled')}</>)
+                    : <><CircleAlert className="size-3.5 text-amber-500" />{t('keyMissing')}</>}
+            </span>
+        </div>)}</div> : <p className="mt-3 text-xs text-muted-foreground">{t('noAccount')}</p>}
+    </div>;
+}
+
 function LoadingState() { return <div className="grid place-items-center rounded-3xl border border-dashed border-border p-12 text-sm text-muted-foreground"><Loader2 className="mb-2 size-5 animate-spin" />Loading…</div>; }
 function ErrorState({ message }: { message: string }) { return <div className="rounded-3xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">{message}</div>; }
 function EmptyState({ icon: Icon, title, description }: { icon: typeof Sparkles; title: string; description: string }) { return <div className="grid place-items-center rounded-3xl border border-dashed border-border p-12 text-center"><Icon className="mb-3 size-8 text-muted-foreground/50" /><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{description}</p></div>; }
@@ -175,5 +262,5 @@ export function Account() {
     const t = useTranslations('accounts');
     const stats = useMemo(() => null, []);
     void stats;
-    return <Tabs defaultValue="official" className="flex min-h-0 flex-1"><TabsList className="mb-4 grid w-full max-w-md grid-cols-2 rounded-2xl bg-muted/60 p-1"><TabsTrigger value="official" className="rounded-xl"><UserRound className="size-4" />{t('officialTab')}</TabsTrigger><TabsTrigger value="jump" className="rounded-xl"><Link2 className="size-4" />{t('jumpTab')}</TabsTrigger></TabsList><TabsContent value="official"><OfficialAccountsPanel /></TabsContent><TabsContent value="jump"><JumpPanel /></TabsContent></Tabs>;
+    return <Tabs defaultValue="official" className="flex min-h-0 flex-1"><TabsList className="mb-4 grid w-full max-w-xl grid-cols-3 rounded-2xl bg-muted/60 p-1"><TabsTrigger value="official" className="rounded-xl"><UserRound className="size-4" />{t('officialTab')}</TabsTrigger><TabsTrigger value="pool" className="rounded-xl"><KeyRound className="size-4" />{t('poolTab')}</TabsTrigger><TabsTrigger value="jump" className="rounded-xl"><Link2 className="size-4" />{t('jumpTab')}</TabsTrigger></TabsList><TabsContent value="official"><OfficialAccountsPanel /></TabsContent><TabsContent value="pool"><PoolPanel /></TabsContent><TabsContent value="jump"><JumpPanel /></TabsContent></Tabs>;
 }
