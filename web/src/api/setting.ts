@@ -30,6 +30,16 @@ export const SettingKey = {
     AlertSMTPUser: 'alert_smtp_user',
     AlertSMTPFrom: 'alert_smtp_from',
     AlertSMTPTo: 'alert_smtp_to',
+    RouteWeightCost: 'route_weight_cost',
+    RouteWeightQuality: 'route_weight_quality',
+    RouteWeightLatency: 'route_weight_latency',
+    RouteWeightBusy: 'route_weight_busy',
+    RouteWeightLoad: 'route_weight_load',
+    RouteWeightMultiplier: 'route_weight_multiplier',
+    RouteWeightPerCall: 'route_weight_per_call',
+    RouteWeightBalance: 'route_weight_balance',
+    RouteWeightMonthly: 'route_weight_monthly',
+    RouteMonthlyAction: 'route_monthly_exhausted_action',
 } as const;
 
 /**

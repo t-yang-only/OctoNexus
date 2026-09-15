@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FormGrants } from './FormGrants';
 import { FormKeys } from './FormKeys';
 import { IconButton } from '@/components/common/IconButton';
@@ -224,6 +225,49 @@ function ChannelFormFields({ channel, onBack }: { channel?: ChannelDetail; onBac
                                     />
                                 </div>
                             ))}
+                            <div className="space-y-2">
+                                <Label htmlFor={`${idPrefix}-billing-mode`}>{t('billingMode')}</Label>
+                                <Select
+                                    value={state.billing_mode || 'unknown'}
+                                    onValueChange={(value) => setState({ ...state, billing_mode: value === 'unknown' ? '' : value })}
+                                >
+                                    <SelectTrigger id={`${idPrefix}-billing-mode`} className="rounded-xl">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="unknown">{t('billingModeUnknown')}</SelectItem>
+                                        <SelectItem value="metered">{t('billingModeMetered')}</SelectItem>
+                                        <SelectItem value="per_call">{t('billingModePerCall')}</SelectItem>
+                                        <SelectItem value="subscription">{t('billingModeSubscription')}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                {([
+                                    ['multiplier', t('multiplier'), '0.01'],
+                                    ['per_call_price', t('perCallPrice'), '0.001'],
+                                    ['monthly_quota', t('monthlyQuota'), '1'],
+                                    ['monthly_used', t('monthlyUsed'), '1'],
+                                ] as const).map(([field, label, step]) => (
+                                    <div key={field} className="space-y-2">
+                                        <Label htmlFor={`${idPrefix}-${field}`}>{label}</Label>
+                                        <Input
+                                            id={`${idPrefix}-${field}`}
+                                            type="number"
+                                            min={0}
+                                            step={step}
+                                            value={String(state[field])}
+                                            onChange={(e) => {
+                                                const value = Number.parseFloat(e.target.value);
+                                                setState({ ...state, [field]: Number.isFinite(value) && value >= 0 ? value : 0 });
+                                            }}
+                                            className="rounded-xl"
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">{t('billingHint')}</p>
+
                             <div className="space-y-2">
                                 <Label htmlFor={`${idPrefix}-param-override`}>{t('paramOverride')}</Label>
                                 <textarea
