@@ -99,6 +99,14 @@ func pickGroupItemLowestCost(group model.Group, cost CostProvider) model.GroupIt
 	return pickGroupItem(group.WithItems(ranked))
 }
 
+// routeDeps 是选路需要的外部数据来源（成本 / 质量 / 延迟）。分组模式决定用其中哪几个：
+// 热路径传生产实现，单测传 stub；字段为 nil 表示该维度不参与（各种模式都有明确的"无数据"口径）。
+type routeDeps struct {
+	cost    CostProvider
+	quality MemberQualityProvider
+	latency LatencyProvider
+}
+
 // NM-DS-004 迭代：质量优先（quality_first）选路定序。
 // 与最低成本共用同一套过滤/冷却口径（partitionCandidates），只换排序键：
 // 最近窗口成功率降序 → priority 升序 → ID 升序。
@@ -154,6 +162,64 @@ func pickGroupItemQualityFirst(group model.Group, quality MemberQualityProvider)
 	routeMu.Unlock()
 
 	ranked, err := rankByQuality(group.Items, cooldowns, time.Now().UnixMilli(), nil, quality)
+	if err != nil || len(ranked) == 0 {
+		return model.GroupItem{}
+	}
+	return pickGroupItem(group.WithItems(ranked))
+}
+
+// NM-DS-006 迭代：最低延迟（lowest_latency）选路定序。
+// 与最低成本 / 质量优先共用同一套过滤与冷却口径（partitionCandidates），只换排序键：
+// 最近一次尝试耗时升序 → priority 升序 → ID 升序。
+// "没有耗时数据"的成员按 0ms 参与排序（乐观口径，与 quality_first 的中性先验同哲学）：
+// 未知者先当成快的试一次、试出真相后自然沉底；否则新成员会被已知的慢成员永久压住。
+
+// rankByLatency 对候选做最低延迟定序：首个即"最近最快的可用成员"。
+func rankByLatency(items []model.GroupItem, cooldowns map[int]int64, nowMs int64, zeroBalanceGrantIDs map[int]bool, latency LatencyProvider) ([]model.GroupItem, error) {
+	eligible, cooling, err := partitionCandidates(items, cooldowns, nowMs, zeroBalanceGrantIDs)
+	if err != nil {
+		return nil, err
+	}
+	ranked := append([]model.GroupItem(nil), eligible...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		li := memberLatencyScore(latency, ranked[i])
+		lj := memberLatencyScore(latency, ranked[j])
+		if li != lj {
+			return li < lj // 耗时短的在前
+		}
+		if ranked[i].Priority != ranked[j].Priority {
+			return ranked[i].Priority < ranked[j].Priority
+		}
+		return ranked[i].ID < ranked[j].ID
+	})
+	return append(ranked, cooling...), nil
+}
+
+// memberLatencyScore 取成员最近耗时；provider 未接线或无数据时按 0 参与排序（乐观先验）。
+func memberLatencyScore(latency LatencyProvider, item model.GroupItem) int64 {
+	if latency == nil {
+		return 0
+	}
+	value, ok := latency(item.ID)
+	if !ok || value < 0 {
+		return 0
+	}
+	return value
+}
+
+// pickGroupItemLowestLatency 在最低延迟定序下选出本轮目标：只改"本轮先试谁"的顺序,
+// 亲和/冷却/探测/上限语义仍归 pickGroupItem 既有链路；定序失败时返回零值由调用方等待。
+func pickGroupItemLowestLatency(group model.Group, latency LatencyProvider) model.GroupItem {
+	routeMu.Lock()
+	route := routes[group.ID]
+	if route == nil {
+		route = &RouteState{GroupID: group.ID, Cooldowns: make(map[int]int64)}
+		routes[group.ID] = route
+	}
+	cooldowns := maps.Clone(route.Cooldowns)
+	routeMu.Unlock()
+
+	ranked, err := rankByLatency(group.Items, cooldowns, time.Now().UnixMilli(), nil, latency)
 	if err != nil || len(ranked) == 0 {
 		return model.GroupItem{}
 	}

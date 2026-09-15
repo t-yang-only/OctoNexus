@@ -47,7 +47,7 @@ func TestPickGroupItemBalancedFlagOffMatchesLegacy(t *testing.T) {
 		t.Fatalf("flag off first pick = %d, want 11 (legacy priority order)", got.ID)
 	}
 	group.Items = availableLeaves(11)
-	if !recordRouteFailure(group, 11, 1) {
+	if !recordRouteFailure(group, 11, 1, 0) {
 		t.Fatal("failure 11 did not cool down")
 	}
 	// 原路径 pickGroupItem 亲和/探测随缓存继续生效; 平衡外壳 failover 冷却顺延
@@ -96,7 +96,7 @@ func TestPickGroupItemBalancedFlagOnKeepsProbeAndCooldown(t *testing.T) {
 		t.Fatalf("first pick = %d, want 11", got.ID)
 	}
 	group.Items = availableLeaves(11)
-	if !recordRouteFailure(group, 11, 1) {
+	if !recordRouteFailure(group, 11, 1, 0) {
 		t.Fatal("failure 11 did not cool down")
 	}
 	group.Items = availableLeaves(11, 12, 13)

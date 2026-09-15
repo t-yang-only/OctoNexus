@@ -36,10 +36,10 @@ func withFrozenClock(t *testing.T, startMs int64) func(int64) {
 func TestMemberQualityWindowDecays(t *testing.T) {
 	advance := withFrozenClock(t, 1_000_000)
 
-	recordMemberOutcome(11, true)
-	recordMemberOutcome(11, false)
-	recordMemberOutcome(11, false)
-	recordMemberOutcome(11, false)
+	recordMemberOutcome(11, true, 0)
+	recordMemberOutcome(11, false, 0)
+	recordMemberOutcome(11, false, 0)
+	recordMemberOutcome(11, false, 0)
 
 	rate, ok := memberSuccessRate(11)
 	if !ok || rate != 0.25 {
@@ -49,7 +49,7 @@ func TestMemberQualityWindowDecays(t *testing.T) {
 		t.Fatalf("unknown member must report no samples")
 	}
 	// itemID 0 是"无成员"哨兵：不得被统计。
-	recordMemberOutcome(0, true)
+	recordMemberOutcome(0, true, 0)
 	if _, ok := memberSuccessRate(0); ok {
 		t.Fatalf("sentinel itemID 0 must not collect samples")
 	}
@@ -59,7 +59,7 @@ func TestMemberQualityWindowDecays(t *testing.T) {
 		t.Fatalf("window expired but samples survived")
 	}
 
-	recordMemberOutcome(11, true)
+	recordMemberOutcome(11, true, 0)
 	rate, ok = memberSuccessRate(11)
 	if !ok || rate != 1.0 {
 		t.Fatalf("after expiry the new window must start clean: rate=%v ok=%v", rate, ok)
@@ -150,16 +150,16 @@ func TestPickGroupItemByModeQualityFirstBeatsPriority(t *testing.T) {
 	cfg := model.DefaultGroupRelayConfig()
 
 	legacy := model.Group{ID: gid, Name: "q-legacy", Mode: model.GroupModeFailover, Items: items, RelayConfig: cfg}
-	if got := pickGroupItemByMode(legacy, nil, quality, false); got.ID != 111 {
+	if got := pickGroupItemByMode(legacy, routeDeps{quality: quality}, false); got.ID != 111 {
 		t.Fatalf("failover picked %d, want 111 (priority order unchanged by quality)", got.ID)
 	}
 
 	qGroup := model.Group{ID: gid, Name: "q", Mode: model.GroupModeQualityFirst, Items: items, RelayConfig: cfg}
-	if got := pickGroupItemByMode(qGroup, nil, quality, false); got.ID != 112 {
+	if got := pickGroupItemByMode(qGroup, routeDeps{quality: quality}, false); got.ID != 112 {
 		t.Fatalf("quality_first picked %d, want 112 (higher success rate wins)", got.ID)
 	}
 	// 加权轮询开关打开也不影响 quality_first 的定序口径（模式优先于全局开关）。
-	if got := pickGroupItemByMode(qGroup, nil, quality, true); got.ID != 112 {
+	if got := pickGroupItemByMode(qGroup, routeDeps{quality: quality}, true); got.ID != 112 {
 		t.Fatalf("quality_first with balance flag on picked %d, want 112", got.ID)
 	}
 }
@@ -177,15 +177,15 @@ func TestRecordMemberOutcomeFeedsPicking(t *testing.T) {
 		RelayConfig: model.DefaultGroupRelayConfig()}
 
 	// 双方都无样本：按 priority 先试 flaky。
-	if got := pickGroupItemByMode(group, nil, memberSuccessRate, false); got.ID != 121 {
+	if got := pickGroupItemByMode(group, routeDeps{quality: memberSuccessRate}, false); got.ID != 121 {
 		t.Fatalf("cold start picked %d, want 121 (priority order when no samples)", got.ID)
 	}
 	// flaky 连吃两次失败、solid 成功一次。
-	recordMemberOutcome(121, false)
-	recordMemberOutcome(121, false)
-	recordMemberOutcome(122, true)
+	recordMemberOutcome(121, false, 0)
+	recordMemberOutcome(121, false, 0)
+	recordMemberOutcome(122, true, 0)
 
-	if got := pickGroupItemByMode(group, nil, memberSuccessRate, false); got.ID != 122 {
+	if got := pickGroupItemByMode(group, routeDeps{quality: memberSuccessRate}, false); got.ID != 122 {
 		t.Fatalf("after failures picked %d, want 122 (quality switches away from the flaky member)", got.ID)
 	}
 }

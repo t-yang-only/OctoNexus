@@ -235,7 +235,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					failures = 1
 				}
 				// 达到总尝试次数时成员进入冷却并立即重新选路, 否则等待后重试。
-				if recordRouteFailure(group, item.ID, failures) {
+				if recordRouteFailure(group, item.ID, failures, time.Since(roundStartedAt).Milliseconds()) {
 					continue
 				}
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
@@ -247,7 +247,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			request.finishRound("")
 			roundWaitTime := time.Since(roundStartedAt).Milliseconds() // 流式响应只统计等待首帧的时间。
 			// 上游成功后解除该成员的冷却与探测占用, 并按路由配置开始亲和。
-			recordRouteSuccess(group, item.ID)
+			recordRouteSuccess(group, item.ID, roundWaitTime)
 			// 同协议透传时原样返回上游响应头; 跨协议响应没有需要透传的响应头。
 			for key, values := range result.header {
 				c.Writer.Header()[key] = values
