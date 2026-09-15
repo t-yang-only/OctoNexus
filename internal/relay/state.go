@@ -236,6 +236,11 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 	if r.usageRecorder != nil && usage != nil {
 		r.usageRecorder(usage.PromptTokens, usage.CompletionTokens)
 	}
+	if usage != nil {
+		// 成员近期负载（T-route-007 lowest_tpm_rpm 的数据源）：只在请求终态记一次，
+		// 归属到最近一次服务它的成员行（分轮重试时拿不到中间轮的 usage，口径见 metrics.go）。
+		recordMemberTokens(r.TargetItemID, usage.PromptTokens+usage.CompletionTokens)
+	}
 	metrics := usageMetrics(r.TargetModel, usage)
 	r.Cost = metrics.InputCost + metrics.OutputCost
 	r.Duration = time.Since(r.StartedAt)

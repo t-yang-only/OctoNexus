@@ -116,3 +116,90 @@ func resetMemberQualityForTest() {
 	memberQualitySamples = make(map[int]memberQualitySample)
 	memberQualityMu.Unlock()
 }
+
+// 成员近期负载（NM-DS-014 迭代：lowest_tpm_rpm 选路的数据底座）。
+//
+// 为什么需要它：上游的 RPM/TPM 限额我们并不知道（那是服务商的账），能观察到的是**我们自己最近
+// 往这个成员发了多少请求、消耗了多少 token**。按"最近一分钟消耗最少"选路，效果就是把请求摊到
+// 还没被榨干的成员上，避免把并发全压在一个成员上（也就更不容易撞上游的限流）。
+//
+// 口径：
+//  1. 窗口固定 60s（memberLoadWindowMs），与常见的 RPM/TPM 计量周期一致；写入时判定过期即开新窗口，
+//     同样没有后台协程；
+//  2. **统计的是"尝试"而不是"成功"**：失败的尝试一样占了上游的连接与配额，必须计入负载；
+//  3. token 只在请求终态记一次（state.go 的 finishLocked 有 usage），归属到最后服务它的成员行；
+//     分轮重试时不会把每一轮的 token 都算上（我们本来也拿不到中间轮的 usage），这一点在报告里写明；
+//  4. 与质量/延迟样本一样按展平成员行（GroupItem.ID）聚合，重启清零。
+
+// memberLoadWindowMs 是"近期负载"的有效窗口（毫秒）。固定 60s。
+const memberLoadWindowMs int64 = 60_000
+
+type memberLoadSample struct {
+	requests int64 // 窗口内投递到该成员的尝试次数（成功与失败都算）
+	tokens   int64 // 窗口内该成员实际消耗的输入+输出 token
+	windowAt int64 // 本窗口起点（毫秒）
+}
+
+var (
+	memberLoadMu      sync.Mutex
+	memberLoadSamples = make(map[int]memberLoadSample)
+)
+
+// recordMemberAttempt 记一次投递给该成员的尝试；窗口过期则开新窗口重新计数。
+func recordMemberAttempt(itemID int) {
+	if itemID == 0 {
+		return
+	}
+	now := relayNowMs()
+	memberLoadMu.Lock()
+	defer memberLoadMu.Unlock()
+
+	sample := memberLoadSamples[itemID]
+	if sample.windowAt == 0 || now-sample.windowAt > memberLoadWindowMs {
+		sample = memberLoadSample{windowAt: now}
+	}
+	sample.requests++
+	memberLoadSamples[itemID] = sample
+}
+
+// recordMemberTokens 记该成员本次实际消耗的 token（输入+输出）; <=0 或未选中目标时不记。
+func recordMemberTokens(itemID int, tokens int64) {
+	if itemID == 0 || tokens <= 0 {
+		return
+	}
+	now := relayNowMs()
+	memberLoadMu.Lock()
+	defer memberLoadMu.Unlock()
+
+	sample := memberLoadSamples[itemID]
+	if sample.windowAt == 0 || now-sample.windowAt > memberLoadWindowMs {
+		sample = memberLoadSample{windowAt: now}
+	}
+	sample.tokens += tokens
+	memberLoadSamples[itemID] = sample
+}
+
+// LoadProvider 返回成员最近一个窗口内的请求数与 token 数；ok=false 表示窗口内没有记录。
+type LoadProvider func(itemID int) (requests int, tokens int, ok bool)
+
+// memberRecentLoad 是生产用的负载实现。
+func memberRecentLoad(itemID int) (int, int, bool) {
+	if itemID == 0 {
+		return 0, 0, false
+	}
+	memberLoadMu.Lock()
+	defer memberLoadMu.Unlock()
+
+	sample, seen := memberLoadSamples[itemID]
+	if !seen || sample.windowAt == 0 || relayNowMs()-sample.windowAt > memberLoadWindowMs {
+		return 0, 0, false
+	}
+	return int(sample.requests), int(sample.tokens), true
+}
+
+// resetMemberLoadForTest 清空负载样本；仅测试用。
+func resetMemberLoadForTest() {
+	memberLoadMu.Lock()
+	memberLoadSamples = make(map[int]memberLoadSample)
+	memberLoadMu.Unlock()
+}

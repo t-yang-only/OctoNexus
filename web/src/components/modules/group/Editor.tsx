@@ -530,6 +530,7 @@ export function GroupEditor({
                                     <SelectItem value="quality_first">{t('form.quality_first')}</SelectItem>
                                     <SelectItem value="lowest_latency">{t('form.lowest_latency')}</SelectItem>
                                     <SelectItem value="least_busy">{t('form.least_busy')}</SelectItem>
+                                        <SelectItem value="lowest_tpm_rpm">{t('form.lowest_tpm_rpm')}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </Field>
