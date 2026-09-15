@@ -1,0 +1,203 @@
+"""DS-TEST mock upstream for octopus relay format/timeout/failover tests.
+
+Endpoints (all paths are what octopus channels will call):
+  POST /v1/chat/completions   OpenAI Chat Completions
+  POST /v1/responses          OpenAI Responses
+  POST /v1/messages           Anthropic Messages
+  GET  /v1/models             model list (for fetch-model / probe)
+
+Behavior is driven by the upstream model name in the request body "model" field:
+  contains "slow" -> sleep SLOW_SECONDS before answering (drives timeout switchover)
+  contains "bad"  -> answer HTTP 500 immediately (drives failover)
+  otherwise       -> answer normally
+Streaming (body.stream == true) answers SSE in the same wire shape as the protocol.
+
+Every request is appended to requests.jsonl with method/path/model/stream/headers
+so tests can prove what the relay actually sent upstream (including protocol
+conversion: an Anthropic inbound either arrives at /v1/messages or is converted
+and arrives at /v1/chat/completions).
+"""
+
+import hashlib
+import json
+import os
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PORT = int(os.environ.get("MOCK_PORT", "18099"))
+SLOW_SECONDS = float(os.environ.get("MOCK_SLOW_SECONDS", "15"))
+LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requests.jsonl")
+_lock = threading.Lock()
+
+MODELS = ["mock-good", "mock-slow", "mock-bad", "mock-chatonly"]
+
+
+def _redact(value):
+    """测试脚手架不持久化凭据: Authorization / x-api-key 只留类型与指纹, 便于区分用哪把凭据而不泄露内容。"""
+    if not value:
+        return None
+    kind = "bearer:" if value.lower().startswith("bearer ") else "key:"
+    return kind + hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def log_request(entry):
+    entry["ts"] = time.strftime("%H:%M:%S")
+    with _lock:
+        with open(LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def usage_echo(model):
+    return {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt, *args):  # keep stdout quiet
+        pass
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            return json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            return {"_raw": raw.decode("utf-8", "replace")}
+
+    def _send_json(self, code, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_sse(self, events):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for ev in events:
+            self.wfile.write(("data: " + json.dumps(ev) + "\n\n").encode("utf-8"))
+            self.wfile.flush()
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+    def do_GET(self):
+        if self.path.endswith("/models"):
+            log_request({"method": "GET", "path": self.path, "model": None, "stream": None})
+            self._send_json(200, {"object": "list", "data": [{"id": m, "object": "model"} for m in MODELS]})
+            return
+        self._send_json(404, {"error": {"message": "not found: " + self.path}})
+
+    def do_POST(self):
+        body = self._read_body()
+        model = body.get("model") or ""
+        stream = bool(body.get("stream"))
+        log_request({
+            "method": "POST",
+            "path": self.path,
+            "model": model,
+            "stream": stream,
+            "body": body,
+            "authorization": _redact(self.headers.get("Authorization")),
+            "x_api_key": _redact(self.headers.get("x-api-key")),
+            "anthropic_version": self.headers.get("anthropic-version"),
+            "body_keys": sorted(body.keys()),
+        })
+
+        if "slow" in model:
+            time.sleep(SLOW_SECONDS)
+        if "bad" in model:
+            self._send_json(500, {"error": {"message": "mock upstream forced failure", "type": "mock_error"}})
+            return
+
+        if self.path.endswith("/chat/completions"):
+            return self._chat(model, stream)
+        if self.path.endswith("/responses"):
+            return self._responses(model, stream)
+        if self.path.endswith("/messages"):
+            return self._messages(model, stream)
+        self._send_json(404, {"error": {"message": "unknown path " + self.path}})
+
+    # ---- OpenAI Chat Completions ----
+    def _chat(self, model, stream):
+        if stream:
+            base = {"id": "chatcmpl-mock", "object": "chat.completion.chunk",
+                    "created": int(time.time()), "model": model}
+            self._send_sse([
+                dict(base, choices=[{"index": 0, "delta": {"role": "assistant", "content": "mock "}, "finish_reason": None}]),
+                dict(base, choices=[{"index": 0, "delta": {"content": "chat ok"}, "finish_reason": None}]),
+                dict(base, choices=[{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                     usage={"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}),
+            ])
+            return
+        self._send_json(200, {
+            "id": "chatcmpl-mock", "object": "chat.completion", "created": int(time.time()), "model": model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "mock chat ok"},
+                         "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+        })
+
+    # ---- OpenAI Responses ----
+    def _responses(self, model, stream):
+        if stream:
+            base = {"type": "response.output_text.delta", "item_id": "msg_mock", "output_index": 0,
+                    "content_index": 0, "delta": "mock responses ok"}
+            events = [
+                {"type": "response.created", "response": {"id": "resp_mock", "object": "response",
+                                                          "status": "in_progress", "model": model, "output": []}},
+                dict(base),
+                {"type": "response.completed", "response": {"id": "resp_mock", "object": "response",
+                                                            "status": "completed", "model": model,
+                                                            "output": [{"type": "message", "role": "assistant",
+                                                                        "content": [{"type": "output_text",
+                                                                                     "text": "mock responses ok"}]}],
+                                                            "usage": usage_echo(model)}},
+            ]
+            self._send_sse(events)
+            return
+        self._send_json(200, {
+            "id": "resp_mock", "object": "response", "created_at": int(time.time()), "model": model,
+            "status": "completed",
+            "output": [{"type": "message", "id": "msg_mock", "role": "assistant", "status": "completed",
+                        "content": [{"type": "output_text", "text": "mock responses ok", "annotations": []}]}],
+            "usage": usage_echo(model),
+        })
+
+    # ---- Anthropic Messages ----
+    def _messages(self, model, stream):
+        if stream:
+            self._send_sse([
+                {"type": "message_start", "message": {"id": "msg_mock", "type": "message", "role": "assistant",
+                                                      "model": model, "content": [], "stop_reason": None,
+                                                      "usage": {"input_tokens": 11, "output_tokens": 0}}},
+                {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+                {"type": "content_block_delta", "index": 0,
+                 "delta": {"type": "text_delta", "text": "mock messages ok"}},
+                {"type": "content_block_stop", "index": 0},
+                {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 7}},
+                {"type": "message_stop"},
+            ])
+            return
+        self._send_json(200, {
+            "id": "msg_mock", "type": "message", "role": "assistant", "model": model,
+            "content": [{"type": "text", "text": "mock messages ok"}],
+            "stop_reason": "end_turn", "stop_sequence": None,
+            "usage": {"input_tokens": 11, "output_tokens": 7},
+        })
+
+
+if __name__ == "__main__":
+    if os.path.exists(LOG_PATH):
+        os.remove(LOG_PATH)
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    print(f"mock upstream listening on 127.0.0.1:{PORT} slow={SLOW_SECONDS}s log={LOG_PATH}", flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        sys.exit(0)
