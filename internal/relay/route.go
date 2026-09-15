@@ -319,6 +319,8 @@ func pickGroupItemByMode(group model.Group, deps routeDeps, balanceEnabled bool)
 		return pickGroupItemQualityFirst(group, deps.quality)
 	case group.Mode == model.GroupModeLowestLatency:
 		return pickGroupItemLowestLatency(group, deps.latency)
+	case group.Mode == model.GroupModeWeighted:
+		return pickGroupItemWeighted(group, deps)
 	case group.Mode == model.GroupModeLeastBusy:
 		return pickGroupItemLeastBusy(group, deps.busy)
 	case group.Mode == model.GroupModeLowestTpmRpm:
