@@ -32,7 +32,7 @@ func TestPickGroupItemSkipsCoolingLeaf(t *testing.T) {
 		t.Fatalf("first pick = %d, want 11", got.ID)
 	}
 	// 成员 11 一轮失败即冷却 (max attempts = 1)。
-	if !recordRouteFailure(group, 11, 1) {
+	if !recordRouteFailure(group, 11, 1, 0) {
 		t.Fatal("failure 11 did not cool down")
 	}
 	if got := PickGroupItem(group, flat); got.ID != 12 {
@@ -55,12 +55,12 @@ func TestPickGroupItemAffinityKeepsFailoverTarget(t *testing.T) {
 	if got := PickGroupItem(group, flat); got.ID != 21 {
 		t.Fatalf("first pick = %d, want 21", got.ID)
 	}
-	recordRouteFailure(group, 21, 1)
+	recordRouteFailure(group, 21, 1, 0)
 	if got := PickGroupItem(group, flat); got.ID != 22 {
 		t.Fatalf("failover pick = %d, want 22", got.ID)
 	}
 	// 备用叶子成功一次即按配置建立亲和窗口。
-	recordRouteSuccess(group, 22)
+	recordRouteSuccess(group, 22, 0)
 	// 即便 21 的冷却被人工解除, 亲和期内仍沿用 22。
 	if got := PickGroupItem(group, flat); got.ID != 22 {
 		t.Fatalf("affinity pick = %d, want 22 (still on failover target)", got.ID)
