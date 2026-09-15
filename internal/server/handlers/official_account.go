@@ -38,6 +38,15 @@ func init() {
 		AddRoute(
 			router.NewRoute("/usage/:id", http.MethodPost).
 				Handle(officialAccountUsage),
+		).
+		AddRoute(
+			// 号池同步（T-pool-002）：把官方账号物化成号池渠道凭据，凭据侧改动需运维显式触发。
+			router.NewRoute("/pool/sync", http.MethodPost).
+				Handle(officialPoolSync),
+		).
+		AddRoute(
+			router.NewRoute("/pool/list", http.MethodGet).
+				Handle(officialPoolList),
 		)
 }
 
@@ -114,4 +123,46 @@ func officialAccountUsage(c *gin.Context) {
 		return
 	}
 	resp.Success(c, account)
+}
+
+// officialPoolSync 把官方账号物化成号池渠道凭据（T-pool-002）。
+// 请求体可省：省略即同步全部服务商，带 provider 只同步该服务商。
+// 这是运维按一下的动作，故不要求请求体，也不校验 Content-Type。
+func officialPoolSync(c *gin.Context) {
+	var req model.OfficialPoolSyncRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+			return
+		}
+	}
+	providers := []model.OfficialAccountProvider{
+		model.OfficialAccountProviderOpenAI,
+		model.OfficialAccountProviderGemini,
+		model.OfficialAccountProviderClaude,
+	}
+	if req.Provider != "" {
+		providers = []model.OfficialAccountProvider{req.Provider}
+	}
+
+	items := make([]model.OfficialPoolSyncResult, 0, len(providers))
+	for _, provider := range providers {
+		result, err := op.OfficialPoolSync(nil, provider)
+		if err != nil {
+			// 一家出错不吞掉其余结果：失败原因挂在它自己的条目上，界面能直接看出是哪家。
+			result.Notes = append(result.Notes, err.Error())
+		}
+		items = append(items, result)
+	}
+	resp.Success(c, gin.H{"items": items, "total": len(items)})
+}
+
+// officialPoolList 返回各服务商号池的当前映射快照。
+func officialPoolList(c *gin.Context) {
+	statuses, err := op.OfficialPoolStatusList(nil)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, resp.ErrInternalServer)
+		return
+	}
+	resp.Success(c, gin.H{"items": statuses, "total": len(statuses)})
 }
