@@ -509,6 +509,10 @@
     },
     "log": {
         "list": {
+                "export": "匯出 CSV",
+                "exported": "已開始下載匯出檔案",
+                "exportEmpty": "目前篩選沒有可匯出的記錄",
+                "exportFailed": "匯出失敗",
             "empty": "暫無日誌",
             "disconnected": "日誌連線已中斷，正在重新連線",
             "filtered": "已篩選 {shown}/{total}",

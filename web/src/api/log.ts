@@ -64,6 +64,36 @@ export function useRelayHistory(filter: RelayHistoryFilter) {
     });
 }
 
+// exportRelayLogs 把当前筛选条件下的请求级明细导出成 CSV（U-key-001 余项）。
+// 与历史查询同一套查询参数，但不分页：后端逐行流式写出，前端下载为文件。
+export async function exportRelayLogs(filter: RelayHistoryFilter) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+        // limit/offset 属于分页语义，导出不带它们（导出就是"当前筛选的全量"）。
+        if (key === 'limit' || key === 'offset') continue;
+        if (value !== undefined && value !== '') params.set(key, String(value));
+    }
+    const response = await fetch(`/api/v1/log/export?${params.toString()}`, { credentials: 'include' });
+    if (!response.ok) {
+        throw new Error(`export failed: HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const url = URL.createObjectURL(blob);
+    try {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `octopus-relay-logs-${stamp}.csv`;
+        document.body.appendChild(anchor);
+        anchor.click();
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+    return blob.size;
+}
+
 // RelayLogOverview 是请求状态流发送的完整进程内请求状态。
 export interface RelayLogOverview {
     id: number;

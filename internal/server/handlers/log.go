@@ -12,6 +12,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
+	"github.com/charmbracelet/log"
 	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 )
@@ -43,6 +44,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/history", http.MethodGet).
 				Handle(listHistory),
+		).
+		AddRoute(
+			router.NewRoute("/export", http.MethodGet).
+				Handle(exportHistory),
 		)
 }
 
@@ -104,6 +109,34 @@ func listHistory(c *gin.Context) {
 		Offset:  offset,
 	})
 	resp.Success(c, gin.H{"items": logs, "total": total})
+}
+
+// exportHistory 把同一套筛选条件下的请求级明细导成 CSV (U-key-001 余项)。
+// 查询参数与 /history 一致 (status/model/channel/apikey/q), 但不分页: 导出就是"把当前筛选的结果全给出去"。
+// 逐行流式写出, 内存不随条数增长; 首行前的 UTF-8 BOM 让 Excel 正确识别中文表头。
+func exportHistory(c *gin.Context) {
+	filter := model.RelayLogFilter{
+		Status:  c.Query("status"),
+		Model:   c.Query("model"),
+		Channel: c.Query("channel"),
+		APIKey:  c.Query("apikey"),
+		Q:       c.Query("q"),
+	}
+	filename := "octopus-relay-logs-" + time.Now().Format("20060102150405") + ".csv"
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+	// 导出可能很大: 显式禁用中间层缓冲, 让浏览器尽早开始落盘。
+	c.Header("X-Accel-Buffering", "no")
+
+	written, err := op.RelayLogExportCSV(c.Writer, filter)
+	if err != nil {
+		// 正文可能已经写出了一部分, 此时改不了状态码; 只能记日志, 让截断的 CSV 明确地不完整。
+		log.Errorf("relay log export failed after %d rows: %v", written, err)
+		return
+	}
+	if written >= op.RelayLogExportMaxRows {
+		log.Warnf("relay log export truncated at %d rows", written)
+	}
 }
 
 // streamOverview 逐条发送建立连接时的概览及后续请求更新。

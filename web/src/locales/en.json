@@ -546,6 +546,10 @@
     },
     "log": {
         "list": {
+                "export": "Export CSV",
+                "exported": "Export download started",
+                "exportEmpty": "Nothing to export for the current filter",
+                "exportFailed": "Export failed",
             "empty": "No logs yet",
             "disconnected": "Log stream disconnected, reconnecting",
             "filtered": "Filtered {shown}/{total}",
