@@ -101,13 +101,12 @@ def relay_stream(model, timeout=60):
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             first = None
             while True:
-                chunk = resp.read(128)
+                chunk = resp.read(256)
                 if not chunk:
                     break
                 if first is None and b"data:" in chunk:
                     first = round(time.time() - started, 1)
-                if first is not None:
-                    break
+                # 读到底: 让服务端这笔请求正常收尾, 否则审计套件会看到"仍在途"的日志行。
             return resp.status, first, round(time.time() - started, 1)
     except urllib.error.HTTPError as e:
         return e.code, None, round(time.time() - started, 1)
