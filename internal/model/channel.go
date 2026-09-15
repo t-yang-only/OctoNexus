@@ -1,5 +1,9 @@
 package model
 
+import (
+	"strings"
+)
+
 // 渠道支持的上游线协议, 以位掩码存储, 一条渠道授权可同时支持多个协议。
 type Protocol uint8
 
@@ -42,7 +46,7 @@ type ChannelConfig struct {
 
 // 单个上游渠道的共享配置; 路径按协议分别配置, 凭据由 ChannelKey 提供。
 type Channel struct {
-	ID            int            `json:"id" gorm:"primaryKey"`                                      // 渠道主键。
+	ID            int            `json:"id" gorm:"primaryKey"` // 渠道主键。
 	ChannelConfig                // 可编辑配置, 平铺为 channels 的各列。
 	Keys          []ChannelKey   `json:"-" gorm:"foreignKey:ChannelID;constraint:OnDelete:CASCADE"` // 渠道下的上游凭据; 不出 JSON, 读取走 ChannelDetail。
 	Models        []ChannelModel `json:"-" gorm:"foreignKey:ChannelID;constraint:OnDelete:CASCADE"` // 渠道提供的模型; 不出 JSON, 读取走 ChannelDetail。
@@ -89,7 +93,7 @@ type ChannelGrant struct {
 // 凭据与模型只给界面用得上的字段: 两者在渠道内按名称唯一, 提交时也按名称引用, 主键与统计都无从使用。
 // 集合字段恒为数组, 读取侧承诺不为 null。
 type ChannelDetail struct {
-	ID            int                  `json:"id"`     // 渠道主键; 创建时提交 0, 由数据库分配。
+	ID            int                  `json:"id"` // 渠道主键; 创建时提交 0, 由数据库分配。
 	ChannelConfig                      // 渠道自身的可编辑配置。
 	Keys          []ChannelKeyConfig   `json:"keys"`   // 渠道下的上游凭据。
 	Models        []string             `json:"models"` // 渠道提供的上游模型名称。
@@ -167,4 +171,92 @@ type ChannelFetchModel struct {
 	Name      string                 `json:"name"`             // 上游模型名称。
 	Protocols Protocol               `json:"protocols"`        // 协议位掩码; 实测模式下只含实测通过的位。
 	Probes    []ChannelProtocolProbe `json:"probes,omitempty"` // 各协议实测明细; 未开启实测时不返回。
+}
+
+// 上游地址与端点路径的拼接口径（NM-DS-004）。
+// BaseURL 有三种常见写法：https://host、https://host/v1、https://host/api/v1，
+// 而各协议端点路径（默认 /v1/chat/completions 等）本身就带版本段。直接相加会把
+// 把版本段写进 BaseURL 的渠道拼成 https://host/v1/v1/chat/completions —— 表现就是
+// 模型拉取报 /v1/v1/models、转发打不中端点。故规定：BaseURL 末尾段与端点路径首段是
+// 同一个版本段时，去掉 BaseURL 末尾那段；其余写法一律原样（只规范尾斜杠与首斜杠）。
+
+// IsAPIVersionSegment 报告一个路径段是否是 API 版本段（v1 / v12 / v1beta / v2alpha）。
+// 纯字母段（vip、v）不算，避免把主机名或普通路径段误判成版本。
+func IsAPIVersionSegment(segment string) bool {
+	if len(segment) < 2 || (segment[0] != 'v' && segment[0] != 'V') {
+		return false
+	}
+	seenDigit := false
+	for _, r := range segment[1:] {
+		switch {
+		case r >= '0' && r <= '9':
+			seenDigit = true
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+		default:
+			return false
+		}
+	}
+	return seenDigit
+}
+
+// EndpointPathOrDefault 返回渠道配置的端点路径；留空（或只有空白）时落回该协议的默认路径，
+// 与库列默认值同值，供拼接与出站转换器共用同一份口径。
+func EndpointPathOrDefault(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+// ChannelBaseURL 返回与端点路径配对的基地址：BaseURL 末尾的版本段与端点路径首段的版本段
+// 相同时去掉 BaseURL 末尾那段，并统一去掉末尾斜杠。只处理主机名之后确实带路径段的情形，
+// 形如 https://v1 的纯主机名不动。
+func ChannelBaseURL(baseURL, endpointPath string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return ""
+	}
+	first := firstPathSegment(endpointPath)
+	if !IsAPIVersionSegment(first) {
+		return base
+	}
+	hostStart := 0
+	if i := strings.Index(base, "://"); i >= 0 {
+		hostStart = i + 3
+	}
+	if !strings.Contains(base[hostStart:], "/") {
+		return base // 纯主机名（例如 https://v1），末段不是路径段
+	}
+	lastSlash := strings.LastIndex(base, "/")
+	if !strings.EqualFold(base[lastSlash+1:], first) {
+		return base
+	}
+	return strings.TrimRight(base[:lastSlash], "/")
+}
+
+// JoinUpstreamURL 把渠道基地址与端点路径拼成最终请求地址：先按 ChannelBaseURL 去掉重复版本段，
+// 再保证两者之间恰好一个斜杠。路径为空时返回基地址本身。
+func JoinUpstreamURL(baseURL, endpointPath string) string {
+	path := strings.TrimSpace(endpointPath)
+	base := ChannelBaseURL(baseURL, path)
+	if path == "" {
+		return base
+	}
+	path = "/" + strings.TrimLeft(path, "/")
+	if base == "" {
+		return path
+	}
+	return base + path
+}
+
+// firstPathSegment 取端点路径的首段（忽略开头的斜杠），空路径返回空串。
+func firstPathSegment(endpointPath string) string {
+	trimmed := strings.TrimLeft(strings.TrimSpace(endpointPath), "/")
+	if trimmed == "" {
+		return ""
+	}
+	if i := strings.Index(trimmed, "/"); i >= 0 {
+		return trimmed[:i]
+	}
+	return trimmed
 }
