@@ -527,6 +527,7 @@ export function GroupEditor({
                                     <SelectItem value="manual">{t('form.manual')}</SelectItem>
                                     <SelectItem value="failover">{t('form.failover')}</SelectItem>
                                     <SelectItem value="lowest_cost">{t('form.lowest_cost')}</SelectItem>
+                                    <SelectItem value="quality_first">{t('form.quality_first')}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </Field>
