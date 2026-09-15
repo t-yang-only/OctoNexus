@@ -59,6 +59,7 @@ SUITES = [
     ("busy", "run_busy_test.py", "最空闲选路（并发摊分）", "instance,mock"),
     ("rpm", "run_rpm_test.py", "近期消耗最低选路（60s 窗口 + token 优先 + 窗口过期）", "instance,mock,db"),
     ("hedge", "run_hedge_test.py", "首字竞速（触发条件/快者胜出/落选不计失败/宽度校验）", "instance,mock,db"),
+    ("weighted", "run_weighted_test.py", "加权综合选路（换权重换选择 / 全 0 退化 priority / 越界权重拒绝）", "instance,mock,db"),
     ("hotapply", "hot_apply_check.py", "设置热生效（改完无需重启）", "instance"),
     ("display", "check_display.js", "日志卡片字段容错解析（纯函数自检）", "node,esbuild"),
     ("reallog", "check_real_logs.js", "日志卡片真实数据等价性", "node,db"),

@@ -13,16 +13,23 @@ type SettingKey string
 
 const (
 	SettingKeyProxyURL                SettingKey = "proxy_url"
-	SettingKeyStatsSaveInterval       SettingKey = "stats_save_interval"          // 将统计信息写入数据库的周期(分钟)
-	SettingKeyModelInfoUpdateInterval SettingKey = "model_info_update_interval"   // 模型信息更新间隔(小时)
-	SettingKeyCORSAllowOrigins        SettingKey = "cors_allow_origins"           // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
-	SettingKeyModelFilter             SettingKey = "model_filter"                 // 渠道获取模型时的全局过滤表达式; 留空表示不过滤
-	SettingKeyQuotaScanInterval       SettingKey = "quota_scan_interval"          // 余额采集扫描周期(分钟), T-quota-001; 0 表示停用扫描任务
-	SettingKeyQuotaAlertThreshold     SettingKey = "quota_alert_threshold"        // 余额告警阈值(额度点), 剩余额度低于该值记告警事件; 留空或<=0 表示不告警 (归零停用不受其影响, 恒按 remaining<=0 判定)
-	SettingKeyRouteBalanceEnabled     SettingKey = "route_balance_enabled"        // 故障转移分组是否用加权轮询定序候选 (T-route-002); 默认关闭, 走原有优先级选路
-	SettingKeyAlertWebhookURL         SettingKey = "alert_webhook_url"            // 告警事件 webhook 地址, 留空不推送; 余额告警/归零停用等事件 POST JSON 到该地址
-	SettingKeyRouteProbeEnabled       SettingKey = "route_probe_enabled"          // 冷却成员主动探活开关 (R-probe-001); 默认关闭: 每次探测都是一次真实计费请求
-	SettingKeyRouteProbeInterval      SettingKey = "route_probe_interval_seconds" // 主动探活周期(秒), 0 表示停用探活任务; 默认 300
+	SettingKeyStatsSaveInterval       SettingKey = "stats_save_interval"        // 将统计信息写入数据库的周期(分钟)
+	SettingKeyModelInfoUpdateInterval SettingKey = "model_info_update_interval" // 模型信息更新间隔(小时)
+	SettingKeyCORSAllowOrigins        SettingKey = "cors_allow_origins"         // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
+	SettingKeyModelFilter             SettingKey = "model_filter"               // 渠道获取模型时的全局过滤表达式; 留空表示不过滤
+	SettingKeyQuotaScanInterval       SettingKey = "quota_scan_interval"        // 余额采集扫描周期(分钟), T-quota-001; 0 表示停用扫描任务
+	// 加权综合选路（weighted 模式）的维度权重, 取值 0..100, 全部缺省时用下面这组保守默认值。
+	// 留成设置项是为了让「哪一维更重要」由用户决定, 不写死在代码里。
+	SettingKeyRouteWeightCost     SettingKey = "route_weight_cost"            // 成本（价表 input+output）
+	SettingKeyRouteWeightQuality  SettingKey = "route_weight_quality"         // 质量（成员近期成功率）
+	SettingKeyRouteWeightLatency  SettingKey = "route_weight_latency"         // 延迟（成员最近一次尝试耗时）
+	SettingKeyRouteWeightBusy     SettingKey = "route_weight_busy"            // 在途（该成员此刻并发数）
+	SettingKeyRouteWeightLoad     SettingKey = "route_weight_load"            // 近期消耗（60s 窗口 token/请求）
+	SettingKeyQuotaAlertThreshold SettingKey = "quota_alert_threshold"        // 余额告警阈值(额度点), 剩余额度低于该值记告警事件; 留空或<=0 表示不告警 (归零停用不受其影响, 恒按 remaining<=0 判定)
+	SettingKeyRouteBalanceEnabled SettingKey = "route_balance_enabled"        // 故障转移分组是否用加权轮询定序候选 (T-route-002); 默认关闭, 走原有优先级选路
+	SettingKeyAlertWebhookURL     SettingKey = "alert_webhook_url"            // 告警事件 webhook 地址, 留空不推送; 余额告警/归零停用等事件 POST JSON 到该地址
+	SettingKeyRouteProbeEnabled   SettingKey = "route_probe_enabled"          // 冷却成员主动探活开关 (R-probe-001); 默认关闭: 每次探测都是一次真实计费请求
+	SettingKeyRouteProbeInterval  SettingKey = "route_probe_interval_seconds" // 主动探活周期(秒), 0 表示停用探活任务; 默认 300
 
 	// 通知渠道 (R-alert-001 余项): 一个事件同时投递到全部启用渠道。
 	// 密钥口径: 三个群机器人的 webhook 地址本身即凭据(与既有 alert_webhook_url 同性质, 面板可见可编辑);
@@ -65,6 +72,13 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyAlertSMTPUser, Value: ""},
 		{Key: SettingKeyAlertSMTPFrom, Value: ""},
 		{Key: SettingKeyAlertSMTPTo, Value: ""},
+		// 加权综合选路（weighted 模式）的维度权重: 保守默认 —— 成本与质量最重, 延迟/在途次之, 近期消耗最轻。
+		// 这三行把「哪一维更重要」留给用户: 想要"贵但稳"就把质量调高, 想要"能用最便宜的"就把成本拉满。
+		{Key: SettingKeyRouteWeightCost, Value: "30"},
+		{Key: SettingKeyRouteWeightQuality, Value: "30"},
+		{Key: SettingKeyRouteWeightLatency, Value: "15"},
+		{Key: SettingKeyRouteWeightBusy, Value: "15"},
+		{Key: SettingKeyRouteWeightLoad, Value: "10"},
 	}
 }
 
@@ -130,6 +144,14 @@ func (s *Setting) Validate() error {
 		seconds, err := strconv.Atoi(s.Value)
 		if err != nil || seconds < 0 {
 			return fmt.Errorf("route probe interval must be a non-negative integer (seconds)")
+		}
+		return nil
+	case SettingKeyRouteWeightCost, SettingKeyRouteWeightQuality, SettingKeyRouteWeightLatency,
+		SettingKeyRouteWeightBusy, SettingKeyRouteWeightLoad:
+		// 权重只接受 0..100: 越界直接报错而不是静默夹紧, 免得用户以为自己改成了 500。
+		weight, err := strconv.Atoi(s.Value)
+		if err != nil || weight < 0 || weight > 100 {
+			return fmt.Errorf("route weight must be an integer between 0 and 100")
 		}
 		return nil
 	case SettingKeyAlertWebhookURL:
