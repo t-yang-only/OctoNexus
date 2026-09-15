@@ -12,14 +12,16 @@ type SettingKey string
 
 const (
 	SettingKeyProxyURL                SettingKey = "proxy_url"
-	SettingKeyStatsSaveInterval       SettingKey = "stats_save_interval"        // 将统计信息写入数据库的周期(分钟)
-	SettingKeyModelInfoUpdateInterval SettingKey = "model_info_update_interval" // 模型信息更新间隔(小时)
-	SettingKeyCORSAllowOrigins        SettingKey = "cors_allow_origins"         // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
-	SettingKeyModelFilter             SettingKey = "model_filter"               // 渠道获取模型时的全局过滤表达式; 留空表示不过滤
-	SettingKeyQuotaScanInterval       SettingKey = "quota_scan_interval"        // 余额采集扫描周期(分钟), T-quota-001; 0 表示停用扫描任务
-	SettingKeyQuotaAlertThreshold     SettingKey = "quota_alert_threshold"      // 余额告警阈值(额度点), 剩余额度低于该值记告警事件; 留空或<=0 表示不告警 (归零停用不受其影响, 恒按 remaining<=0 判定)
-	SettingKeyRouteBalanceEnabled     SettingKey = "route_balance_enabled"      // 故障转移分组是否用加权轮询定序候选 (T-route-002); 默认关闭, 走原有优先级选路
-	SettingKeyAlertWebhookURL         SettingKey = "alert_webhook_url"          // 告警事件 webhook 地址, 留空不推送; 余额告警/归零停用等事件 POST JSON 到该地址
+	SettingKeyStatsSaveInterval       SettingKey = "stats_save_interval"          // 将统计信息写入数据库的周期(分钟)
+	SettingKeyModelInfoUpdateInterval SettingKey = "model_info_update_interval"   // 模型信息更新间隔(小时)
+	SettingKeyCORSAllowOrigins        SettingKey = "cors_allow_origins"           // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
+	SettingKeyModelFilter             SettingKey = "model_filter"                 // 渠道获取模型时的全局过滤表达式; 留空表示不过滤
+	SettingKeyQuotaScanInterval       SettingKey = "quota_scan_interval"          // 余额采集扫描周期(分钟), T-quota-001; 0 表示停用扫描任务
+	SettingKeyQuotaAlertThreshold     SettingKey = "quota_alert_threshold"        // 余额告警阈值(额度点), 剩余额度低于该值记告警事件; 留空或<=0 表示不告警 (归零停用不受其影响, 恒按 remaining<=0 判定)
+	SettingKeyRouteBalanceEnabled     SettingKey = "route_balance_enabled"        // 故障转移分组是否用加权轮询定序候选 (T-route-002); 默认关闭, 走原有优先级选路
+	SettingKeyAlertWebhookURL         SettingKey = "alert_webhook_url"            // 告警事件 webhook 地址, 留空不推送; 余额告警/归零停用等事件 POST JSON 到该地址
+	SettingKeyRouteProbeEnabled       SettingKey = "route_probe_enabled"          // 冷却成员主动探活开关 (R-probe-001); 默认关闭: 每次探测都是一次真实计费请求
+	SettingKeyRouteProbeInterval      SettingKey = "route_probe_interval_seconds" // 主动探活周期(秒), 0 表示停用探活任务; 默认 300
 )
 
 type Setting struct {
@@ -38,6 +40,8 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyQuotaAlertThreshold, Value: ""},       // 默认不设告警阈值; 归零停用恒生效, 不经该阈值
 		{Key: SettingKeyRouteBalanceEnabled, Value: "false"},  // 加权轮询热路径默认关闭, 行为与既有优先级选路一致
 		{Key: SettingKeyAlertWebhookURL, Value: ""},           // 告警 webhook 默认不推送
+		{Key: SettingKeyRouteProbeEnabled, Value: "false"},    // 主动探活默认关闭: 探测是真实计费请求, 开不开由用户决定
+		{Key: SettingKeyRouteProbeInterval, Value: "300"},     // 探活默认 5 分钟一轮 (低频, 冷却期通常远大于它)
 	}
 }
 
@@ -92,6 +96,17 @@ func (s *Setting) Validate() error {
 		threshold, err := strconv.ParseFloat(s.Value, 64)
 		if err != nil || threshold < 0 {
 			return fmt.Errorf("quota alert threshold must be empty or a non-negative number")
+		}
+		return nil
+	case SettingKeyRouteProbeEnabled:
+		if _, err := strconv.ParseBool(s.Value); err != nil {
+			return fmt.Errorf("route probe enabled must be a boolean")
+		}
+		return nil
+	case SettingKeyRouteProbeInterval:
+		seconds, err := strconv.Atoi(s.Value)
+		if err != nil || seconds < 0 {
+			return fmt.Errorf("route probe interval must be a non-negative integer (seconds)")
 		}
 		return nil
 	case SettingKeyAlertWebhookURL:

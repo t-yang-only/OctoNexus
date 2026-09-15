@@ -47,6 +47,7 @@ SUITES = [
     ("lossless", "run_lossless_tests.py", "跨协议无损转化（3 客户端协议 × 3 上游协议）", "instance,mock"),
     ("real", "run_real_tests.py", "真实上游调用（成本与价表逐项对照）", "instance,db"),
     ("failover", "run_failover_tests.py", "超时切换与故障转移（重试/冷却/切成员/整响应与首事件超时）", "instance,mock"),
+    ("probe", "run_probe_test.py", "冷却成员主动探活（恢复即提前解除冷却 + 探测失败不改冷却）", "instance,mock,db"),
     ("stats", "check_stats.py", "后台统计审计（日志/缓存/daily/usage 与 relay_logs 对照）", "instance"),
     ("pool", "run_pool_audit.py", "号池统一视图（谷歌/GPT/Claude 合并视图 + 同步契约 + 鉴权）", "instance,db"),
     ("apikey", "run_apikey_audit.py", "Key 级审计（限流/过期/禁用/额度/越权/登录/流/中止）", "instance,mock"),

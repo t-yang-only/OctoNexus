@@ -187,10 +187,11 @@ def main():
     items = hist.get("items") or []
     record("usage detail is not empty (usage_rows/usage_hourlies fix)",
            len(items_u) > 0, f"items={len(items_u)}")
+    # 当前整点: 后面两处对照都以它为窗口, 与本进程的存活期对齐(更早整点的内存桶属于被杀的进程)。
+    cur = datetime.datetime.now().strftime("%Y%m%d%H")
     if items_u:
         # 只在"本进程存活期内"的整点做严格对照: 用量桶是内存增量桶, 进程被硬杀时未到落库周期的窗口
         # 不会进库, 于是更早的整点必然对不齐 —— 那是进程级丢失(与统计缓存同性质), 不是记账错误。
-        cur = datetime.datetime.now().strftime("%Y%m%d%H")
         u = (sum(i.get("request_success", 0) or 0 for i in items_u if i.get("hour") == cur),
              sum(i.get("request_failed", 0) or 0 for i in items_u if i.get("hour") == cur),
              sum(i.get("input_token", 0) or 0 for i in items_u if i.get("hour") == cur),
@@ -245,14 +246,18 @@ def main():
     if mine:
         models = mine[0].get("models") or []
         succ = sum(m.get("request_success", 0) or 0 for m in models)
-        usage_sum = sum(i.get("request_success", 0) or 0 for i in items_u if i.get("channel_name") == "DS-TEST-mock")
-        # 渠道统计是自建渠道以来的累计值, 用量明细只覆盖查询窗口, 故只能验证"累计 >= 窗口"与模型维度齐全。
+        # 口径: 渠道统计是"自建渠道以来的累计值", 用量明细只覆盖查询窗口, 故只能验"累计 >= 窗口"。
+        # 窗口取**当前整点**而不是全部返回的整点: 渠道统计的累计值在进程重启后从落库值重新开始累积,
+        # 而用量明细里更早的整点属于上一个进程 —— 拿全部整点求和会得到"窗口 > 累计"的假失败
+        # (实测: 累计 182 vs 全部整点 215, 而当前整点只有 58, 差值正是跨进程的历史窗口)。
+        usage_sum = sum(i.get("request_success", 0) or 0 for i in items_u
+                        if i.get("channel_name") == "DS-TEST-mock" and i.get("hour") == cur)
         present = {m.get("model_name") for m in models}
-        record("channel stats cover every model and are >= the hour's usage (cumulative vs window)",
+        record("channel stats cover every model and are >= the current hour's usage (cumulative vs window)",
                succ >= usage_sum and {"mock-good", "mock-chatonly", "mock-slow"} <= present,
-               f"channel_cumulative_success={succ} hour_usage_success={usage_sum} models={sorted(present)}")
+               f"channel_cumulative_success={succ} current_hour_usage_success={usage_sum} models={sorted(present)}")
     else:
-        record("channel stats cover every model and are >= the hour's usage (cumulative vs window)",
+        record("channel stats cover every model and are >= the current hour's usage (cumulative vs window)",
                False, "DS-TEST-mock missing from stats")
 
     failed = [n for n, ok, _ in RESULTS if not ok]

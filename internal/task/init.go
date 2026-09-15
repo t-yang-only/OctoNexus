@@ -16,6 +16,7 @@ const (
 	TaskRelayLogClean = "relay_log_clean"
 	TaskCleanLLM      = "clean_llm"
 	TaskQuotaScan     = "quota_scan"
+	TaskRouteProbe    = "route_probe"
 )
 
 func Init() {
@@ -48,4 +49,8 @@ func Init() {
 
 	// 注册余额采集扫描任务 (T-quota-001): 默认 5 分钟, quota_scan_interval 可配, 0 表示停用 (Register 自动跳过)。
 	Register(TaskQuotaScan, op.QuotaScanInterval(), false, quotaScanOnce)
+
+	// 注册冷却成员主动探活任务 (R-probe-001): 周期按秒配置, 默认 300 秒, 0 表示停用;
+	// 任务本身恒注册, 开关 route_probe_enabled 每轮读取, 用户改开关无需重启。
+	Register(TaskRouteProbe, op.RouteProbeInterval(), false, routeProbeOnce)
 }

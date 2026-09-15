@@ -18,6 +18,8 @@ export const SettingKey = {
     QuotaScanInterval: 'quota_scan_interval',
     QuotaAlertThreshold: 'quota_alert_threshold',
     RouteBalanceEnabled: 'route_balance_enabled',
+    RouteProbeEnabled: 'route_probe_enabled',
+    RouteProbeInterval: 'route_probe_interval_seconds',
     AlertWebhookURL: 'alert_webhook_url',
 } as const;
 
