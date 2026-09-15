@@ -3,6 +3,7 @@ package op
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,12 +14,40 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// 本文件是 NM-DS-002 修的三个用量明细缺陷的回归守卫。
+//
+// 隔离口径（NM-DS-004 修偶发失败时定稿）：内存桶与库句柄都是包级全局，用例之间会互相污染——
+// 曾出现「用例 A 落库的 mock-good 行出现在用例 B 的结果里」的偶发失败。故：
+//  1. 每个用例的模型名都带自己的用例名前缀，断言只按自己的键过滤，别家的行进不来；
+//  2. 每条用例前后都清空内存桶（t.Cleanup 保证失败退出也清）；
+//  3. 内存库按用例名命名（而非时间戳），同一用例内复用同一块库，跨用例不共享。
+
+// testKey 返回本用例独占的模型名。
+func testKey(t *testing.T, suffix string) string {
+	t.Helper()
+	return t.Name() + "-" + suffix
+}
+
+// rowsForTest 只保留本用例自己的行，避免兄弟用例的残留桶/行影响断言。
+func rowsForTest(t *testing.T, rows []UsageRow) []UsageRow {
+	t.Helper()
+	prefix := t.Name() + "-"
+	out := make([]UsageRow, 0, len(rows))
+	for _, row := range rows {
+		if strings.HasPrefix(row.ModelName, prefix) {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // openUsageTestDB 打开一块内存 SQLite 并建出用量明细表。
 // 与业务同驱动 (glebarez/sqlite 纯 Go), 不依赖 cgo; 库名按用例名隔离, 避免
 // cache=shared 让同一进程内的用例互相看到对方的数据。
 func openUsageTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:usage_%d?mode=memory&cache=shared", time.Now().UnixNano())
+	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	dsn := fmt.Sprintf("file:usage_%s?mode=memory&cache=shared", name)
 	conn, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -27,7 +56,11 @@ func openUsageTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate usage_hourlies: %v", err)
 	}
 	restore := db.SetDBForTest(conn)
-	t.Cleanup(restore)
+	resetUsageBucketsForTest()
+	t.Cleanup(func() {
+		resetUsageBucketsForTest()
+		restore()
+	})
 	return conn
 }
 
@@ -43,19 +76,19 @@ func resetUsageBucketsForTest() {
 // 恒返回空明细 —— 已落库的桶必须查得到。
 func TestUsageQueryReadsPersistedBuckets(t *testing.T) {
 	openUsageTestDB(t)
-	resetUsageBucketsForTest()
 	ctx := context.Background()
 	hour := model.UsageHourKey(time.Now())
+	name := testKey(t, "persisted")
 
-	LogUsageHourly("mock-good", "chan-a", model.StatsMetrics{RequestSuccess: 2, InputToken: 20, OutputToken: 14})
+	LogUsageHourly(name, "chan-a", model.StatsMetrics{RequestSuccess: 2, InputToken: 20, OutputToken: 14})
 	UsageSaveDB(ctx)
 
-	rows := UsageQuery(ctx, model.UsageRange24h)
+	rows := rowsForTest(t, UsageQuery(ctx, model.UsageRange24h))
 	if len(rows) != 1 {
-		t.Fatalf("query after save returned %d rows, want 1 (usage_rows/usage_hourlies mix-up?)", len(rows))
+		t.Fatalf("query after save returned %d own rows, want 1 (usage_rows/usage_hourlies mix-up?)", len(rows))
 	}
 	got := rows[0]
-	if got.Hour != hour || got.ModelName != "mock-good" || got.ChannelName != "chan-a" {
+	if got.Hour != hour || got.ModelName != name || got.ChannelName != "chan-a" {
 		t.Fatalf("bucket key mismatch: %+v", got)
 	}
 	if got.RequestSuccess != 2 || got.InputToken != 20 || got.OutputToken != 14 {
@@ -63,7 +96,8 @@ func TestUsageQueryReadsPersistedBuckets(t *testing.T) {
 	}
 
 	// 落库后内存桶已清空: 上面的结果只能来自库表, 再查一次锁死"库内可读"。
-	if again := UsageQuery(ctx, model.UsageRange24h); len(again) != 1 || again[0].RequestSuccess != 2 {
+	again := rowsForTest(t, UsageQuery(ctx, model.UsageRange24h))
+	if len(again) != 1 || again[0].RequestSuccess != 2 {
 		t.Fatalf("second query returned %+v, want the persisted bucket", again)
 	}
 }
@@ -72,28 +106,29 @@ func TestUsageQueryReadsPersistedBuckets(t *testing.T) {
 // 内存桶曾被"先整批追加、再按键并入"各算一次, 于是未落库的当小时用量翻倍且出现重复行。
 func TestUsageQueryCountsMemoryAndStoredBucketsOnce(t *testing.T) {
 	openUsageTestDB(t)
-	resetUsageBucketsForTest()
 	ctx := context.Background()
+	memOnly := testKey(t, "mem-only")
+	mergeMe := testKey(t, "merge-me")
 
 	// 只有内存桶 (尚未到保存周期): 必须原值出现一次。
-	LogUsageHourly("mem-only", "chan-a", model.StatsMetrics{RequestSuccess: 3, InputToken: 30})
-	rows := UsageQuery(ctx, model.UsageRange24h)
-	if len(rows) != 1 || rows[0].ModelName != "mem-only" {
-		t.Fatalf("memory-only bucket returned %d rows: %+v", len(rows), rows)
+	LogUsageHourly(memOnly, "chan-a", model.StatsMetrics{RequestSuccess: 3, InputToken: 30})
+	rows := rowsForTest(t, UsageQuery(ctx, model.UsageRange24h))
+	if len(rows) != 1 || rows[0].ModelName != memOnly {
+		t.Fatalf("memory-only bucket returned %d own rows: %+v", len(rows), rows)
 	}
 	if rows[0].RequestSuccess != 3 || rows[0].InputToken != 30 {
 		t.Fatalf("memory-only bucket doubled: %+v", rows[0].StatsMetrics)
 	}
 
 	// 同键库内行 + 内存增量: 合并成一行且合计正确。
-	LogUsageHourly("merge-me", "chan-b", model.StatsMetrics{RequestSuccess: 5, InputToken: 50})
+	LogUsageHourly(mergeMe, "chan-b", model.StatsMetrics{RequestSuccess: 5, InputToken: 50})
 	UsageSaveDB(ctx)
-	LogUsageHourly("merge-me", "chan-b", model.StatsMetrics{RequestSuccess: 1, InputToken: 3})
-	merged := UsageQuery(ctx, model.UsageRange24h)
+	LogUsageHourly(mergeMe, "chan-b", model.StatsMetrics{RequestSuccess: 1, InputToken: 3})
+	merged := rowsForTest(t, UsageQuery(ctx, model.UsageRange24h))
 	var found *UsageRow
 	count := 0
 	for i := range merged {
-		if merged[i].ModelName == "merge-me" {
+		if merged[i].ModelName == mergeMe {
 			count++
 			found = &merged[i]
 		}
@@ -111,39 +146,40 @@ func TestUsageQueryCountsMemoryAndStoredBucketsOnce(t *testing.T) {
 // 第一个周期的用量抹掉, 明细于是比真实流量少。
 func TestUsageSaveDBAccumulatesAcrossFlushes(t *testing.T) {
 	openUsageTestDB(t)
-	resetUsageBucketsForTest()
 	ctx := context.Background()
+	accumulated := testKey(t, "accumulated")
+	other := testKey(t, "other")
 
-	LogUsageHourly("mock-good", "chan-a", model.StatsMetrics{RequestSuccess: 3, InputToken: 30, OutputToken: 21})
+	LogUsageHourly(accumulated, "chan-a", model.StatsMetrics{RequestSuccess: 3, InputToken: 30, OutputToken: 21})
 	UsageSaveDB(ctx)
-	LogUsageHourly("mock-good", "chan-a", model.StatsMetrics{RequestSuccess: 2, InputToken: 20, OutputToken: 14})
+	LogUsageHourly(accumulated, "chan-a", model.StatsMetrics{RequestSuccess: 2, InputToken: 20, OutputToken: 14})
 	UsageSaveDB(ctx)
 
-	rows := UsageQuery(ctx, model.UsageRange24h)
+	rows := rowsForTest(t, UsageQuery(ctx, model.UsageRange24h))
 	if len(rows) != 1 {
-		t.Fatalf("two flushes produced %d rows, want 1: %+v", len(rows), rows)
+		t.Fatalf("two flushes produced %d own rows, want 1: %+v", len(rows), rows)
 	}
 	if rows[0].RequestSuccess != 5 || rows[0].InputToken != 50 || rows[0].OutputToken != 35 {
 		t.Fatalf("second flush overwrote the first window: %+v", rows[0].StatsMetrics)
 	}
 
 	// 失败计数与第三个周期同样要累加, 且不同键各自独立成行。
-	LogUsageHourly("mock-good", "chan-a", model.StatsMetrics{RequestSuccess: 1, RequestFailed: 2})
-	LogUsageHourly("other-model", "chan-b", model.StatsMetrics{RequestSuccess: 7})
+	LogUsageHourly(accumulated, "chan-a", model.StatsMetrics{RequestSuccess: 1, RequestFailed: 2})
+	LogUsageHourly(other, "chan-b", model.StatsMetrics{RequestSuccess: 7})
 	UsageSaveDB(ctx)
 
-	rows = UsageQuery(ctx, model.UsageRange24h)
+	rows = rowsForTest(t, UsageQuery(ctx, model.UsageRange24h))
 	if len(rows) != 2 {
-		t.Fatalf("third flush produced %d rows, want 2: %+v", len(rows), rows)
+		t.Fatalf("third flush produced %d own rows, want 2: %+v", len(rows), rows)
 	}
 	byKey := map[string]UsageRow{}
 	for _, r := range rows {
 		byKey[r.ModelName] = r
 	}
-	if got := byKey["mock-good"]; got.RequestSuccess != 6 || got.RequestFailed != 2 {
+	if got := byKey[accumulated]; got.RequestSuccess != 6 || got.RequestFailed != 2 {
 		t.Fatalf("counters not accumulated: %+v", got.StatsMetrics)
 	}
-	if got := byKey["other-model"]; got.RequestSuccess != 7 {
+	if got := byKey[other]; got.RequestSuccess != 7 {
 		t.Fatalf("unrelated key wrong: %+v", got.StatsMetrics)
 	}
 }
@@ -151,18 +187,22 @@ func TestUsageSaveDBAccumulatesAcrossFlushes(t *testing.T) {
 // TestUsageSaveDBRestoresBucketsOnFailure 落库失败时桶要放回内存, 供下一轮重试。
 func TestUsageSaveDBRestoresBucketsOnFailure(t *testing.T) {
 	conn := openUsageTestDB(t)
-	resetUsageBucketsForTest()
+	name := testKey(t, "restored")
 
 	if err := conn.Migrator().DropTable(&model.UsageHourly{}); err != nil {
 		t.Fatalf("drop table: %v", err)
 	}
-	LogUsageHourly("mock-good", "chan-a", model.StatsMetrics{RequestSuccess: 2, InputToken: 20})
+	LogUsageHourly(name, "chan-a", model.StatsMetrics{RequestSuccess: 2, InputToken: 20})
 	UsageSaveDB(context.Background())
 
 	usageBucketsLock.Lock()
-	restored := len(usageBuckets)
+	restored := 0
 	var success int64
-	for _, bucket := range usageBuckets {
+	for key, bucket := range usageBuckets {
+		if key.model != name {
+			continue
+		}
+		restored++
 		success += bucket.RequestSuccess
 	}
 	usageBucketsLock.Unlock()
@@ -174,28 +214,29 @@ func TestUsageSaveDBRestoresBucketsOnFailure(t *testing.T) {
 // TestUsageQueryFiltersByWindow 窗口外的旧桶不出现在结果里, 且无归属请求不进桶。
 func TestUsageQueryFiltersByWindow(t *testing.T) {
 	conn := openUsageTestDB(t)
-	resetUsageBucketsForTest()
 	ctx := context.Background()
+	oldModel := testKey(t, "old")
 
 	old := time.Now().AddDate(0, 0, -40)
 	if err := conn.Create(&model.UsageHourly{
-		Hour: model.UsageHourKey(old), ModelName: "old-model", ChannelName: "chan-a",
+		Hour: model.UsageHourKey(old), ModelName: oldModel, ChannelName: "chan-a",
 		StatsMetrics: model.StatsMetrics{RequestSuccess: 9},
 	}).Error; err != nil {
 		t.Fatalf("seed old bucket: %v", err)
 	}
 
-	if rows := UsageQuery(ctx, model.UsageRange24h); len(rows) != 0 {
+	if rows := rowsForTest(t, UsageQuery(ctx, model.UsageRange24h)); len(rows) != 0 {
 		t.Fatalf("24h window leaked %d rows: %+v", len(rows), rows)
 	}
-	if rows := UsageQuery(ctx, model.UsageRange30d); len(rows) != 0 {
+	if rows := rowsForTest(t, UsageQuery(ctx, model.UsageRange30d)); len(rows) != 0 {
 		t.Fatalf("30d window leaked %d rows: %+v", len(rows), rows)
 	}
 
+	// 无归属请求(缺模型名或缺渠道名)不进桶: 这里断言的是"本用例没有产生任何可见行"。
 	LogUsageHourly("", "chan-a", model.StatsMetrics{RequestFailed: 1})
-	LogUsageHourly("some-model", "", model.StatsMetrics{RequestFailed: 1})
+	LogUsageHourly(testKey(t, "nochan"), "", model.StatsMetrics{RequestFailed: 1})
 	UsageSaveDB(ctx)
-	if rows := UsageQuery(ctx, model.UsageRange24h); len(rows) != 0 {
+	if rows := rowsForTest(t, UsageQuery(ctx, model.UsageRange24h)); len(rows) != 0 {
 		t.Fatalf("unattributed request entered usage detail: %+v", rows)
 	}
 }

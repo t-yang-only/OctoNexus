@@ -37,13 +37,20 @@ func buildOutbound(channel model.Channel, grant model.ChannelGrant, channelKey m
 	key := auth.NewStaticKeyProvider(channelKey.Key)
 	switch protocol {
 	case model.ProtocolOpenAIChatCompletion:
-		outbound, err := openai.NewOutboundTransformerWithConfig(&openai.Config{PlatformType: openai.PlatformOpenAI, BaseURL: channel.BaseURL, EndpointPath: channel.OpenAIChatCompletionPath, APIKeyProvider: key})
+		outbound, err := openai.NewOutboundTransformerWithConfig(&openai.Config{PlatformType: openai.PlatformOpenAI,
+			// 基地址按端点路径去重版本段: 用户把 /v1 写进 BaseURL 时不再拼出 /v1/v1/...（NM-DS-004）。
+			BaseURL:      model.ChannelBaseURL(channel.BaseURL, model.EndpointPathOrDefault(channel.OpenAIChatCompletionPath, "/v1/chat/completions")),
+			EndpointPath: channel.OpenAIChatCompletionPath, APIKeyProvider: key})
 		return outbound, protocol, passthrough, err
 	case model.ProtocolOpenAIResponse:
-		outbound, err := responses.NewOutboundTransformerWithConfig(&responses.Config{BaseURL: channel.BaseURL, EndpointPath: channel.OpenAIResponsePath, APIKeyProvider: key})
+		outbound, err := responses.NewOutboundTransformerWithConfig(&responses.Config{
+			BaseURL:      model.ChannelBaseURL(channel.BaseURL, model.EndpointPathOrDefault(channel.OpenAIResponsePath, "/v1/responses")),
+			EndpointPath: channel.OpenAIResponsePath, APIKeyProvider: key})
 		return outbound, protocol, passthrough, err
 	case model.ProtocolAnthropicMessage:
-		outbound, err := anthropic.NewOutboundTransformerWithConfig(&anthropic.Config{Type: anthropic.PlatformDirect, BaseURL: channel.BaseURL, EndpointPath: channel.AnthropicMessagePath, APIKeyProvider: key})
+		outbound, err := anthropic.NewOutboundTransformerWithConfig(&anthropic.Config{Type: anthropic.PlatformDirect,
+			BaseURL:      model.ChannelBaseURL(channel.BaseURL, model.EndpointPathOrDefault(channel.AnthropicMessagePath, "/v1/messages")),
+			EndpointPath: channel.AnthropicMessagePath, APIKeyProvider: key})
 		return outbound, protocol, passthrough, err
 	default:
 		return nil, 0, false, fmt.Errorf("channel grant %d supports no known protocol: %d", grant.ID, grant.Protocols)

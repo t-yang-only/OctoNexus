@@ -236,11 +236,11 @@ func fetchModel(c *gin.Context) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		openaiModels, openaiErr = fetchOpenAIModels(httpClient, ctx, target, request.Key, modelsURL(target.BaseURL, target.OpenAIResponsePath))
+		openaiModels, openaiErr = fetchOpenAIModels(httpClient, ctx, target, request.Key, modelsURL(target.BaseURL, model.EndpointPathOrDefault(target.OpenAIResponsePath, "/v1/responses")))
 	}()
 	go func() {
 		defer wg.Done()
-		anthropicModels, anthropicErr = fetchAnthropicModels(httpClient, ctx, target, request.Key, modelsURL(target.BaseURL, target.AnthropicMessagePath))
+		anthropicModels, anthropicErr = fetchAnthropicModels(httpClient, ctx, target, request.Key, modelsURL(target.BaseURL, model.EndpointPathOrDefault(target.AnthropicMessagePath, "/v1/messages")))
 	}()
 	wg.Wait()
 
@@ -446,7 +446,7 @@ func probeOpenAIChatCompletion(httpClient *http.Client, ctx context.Context, tar
 		"max_tokens": 1,
 	})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(target.BaseURL, "/")+probeEndpointPath(target.OpenAIChatCompletionPath, "/v1/chat/completions"), bytes.NewReader(payload))
+		model.JoinUpstreamURL(target.BaseURL, probeEndpointPath(target.OpenAIChatCompletionPath, "/v1/chat/completions")), bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -469,7 +469,7 @@ func probeOpenAIResponse(httpClient *http.Client, ctx context.Context, target mo
 		"max_output_tokens": 16,
 	})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(target.BaseURL, "/")+probeEndpointPath(target.OpenAIResponsePath, "/v1/responses"), bytes.NewReader(payload))
+		model.JoinUpstreamURL(target.BaseURL, probeEndpointPath(target.OpenAIResponsePath, "/v1/responses")), bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -491,7 +491,7 @@ func probeAnthropicMessage(httpClient *http.Client, ctx context.Context, target 
 		"max_tokens": 1,
 	})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(target.BaseURL, "/")+probeEndpointPath(target.AnthropicMessagePath, "/v1/messages"), bytes.NewReader(payload))
+		model.JoinUpstreamURL(target.BaseURL, probeEndpointPath(target.AnthropicMessagePath, "/v1/messages")), bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -530,7 +530,7 @@ func modelsURL(baseURL, protocolPath string) string {
 	if parent == "." || parent == "/" {
 		parent = ""
 	}
-	return strings.TrimRight(baseURL, "/") + parent + "/models"
+	return model.JoinUpstreamURL(baseURL, parent+"/models")
 }
 
 // refer: https://platform.openai.com/docs/api-reference/models/list
