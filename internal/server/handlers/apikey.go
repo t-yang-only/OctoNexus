@@ -49,20 +49,35 @@ func init() {
 		)
 }
 
+// createAPIKeyRequest 是新建 Key 的入参。
+// Enabled 用指针: 模型上的 default:true 已移除(带默认值标签的零值字段会被 GORM 整列改写成 DEFAULT,
+// 调用方传 false 反而建成启用 Key), 零值从此即 false, 只有指针能区分"没传"(按约定启用)与"传 false"(停用)。
+// 其余字段沿用 model.APIKey 的 JSON 形状, 故直接内嵌。
+type createAPIKeyRequest struct {
+	model.APIKey
+	Enabled *bool `json:"enabled"`
+}
+
 func createAPIKey(c *gin.Context) {
-	var req model.APIKey
+	var req createAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
 		return
 	}
-	if strings.TrimSpace(req.APIKey) == "" {
-		req.APIKey = auth.GenerateAPIKey()
+	key := req.APIKey
+	if req.Enabled != nil {
+		key.Enabled = *req.Enabled
+	} else {
+		key.Enabled = true
 	}
-	if err := op.APIKeyCreate(&req, c.Request.Context()); err != nil {
+	if strings.TrimSpace(key.APIKey) == "" {
+		key.APIKey = auth.GenerateAPIKey()
+	}
+	if err := op.APIKeyCreate(&key, c.Request.Context()); err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	resp.Success(c, req)
+	resp.Success(c, key)
 }
 
 func listAPIKey(c *gin.Context) {

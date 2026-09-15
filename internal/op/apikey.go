@@ -13,8 +13,14 @@ import (
 var apiKeyCache = cache.New[int, model.APIKey](16)
 var apiKeyIDMap = cache.New[string, int](16)
 
+// APIKeyCreate 新建一条 API Key 并同步两个索引缓存。
+// 显式列出列名: Enabled 带 `gorm:"default:true"`, 默认的 Create 会把零值字段排除在 INSERT 之外
+// (改写成 DEFAULT), 于是调用方传 enabled=false 会被静默落成数据库默认的 true —— 想建禁用 Key
+// 反而建出启用 Key。显式列出这些列后按入参原样落库。
 func APIKeyCreate(key *model.APIKey, ctx context.Context) error {
-	if err := db.GetDB().WithContext(ctx).Create(key).Error; err != nil {
+	if err := db.GetDB().WithContext(ctx).
+		Select("name", "api_key", "enabled", "expire_at", "max_cost", "rpm", "tpm", "supported_models").
+		Create(key).Error; err != nil {
 		return fmt.Errorf("failed to create API key: %w", err)
 	}
 	apiKeyCache.Set(key.ID, *key)
