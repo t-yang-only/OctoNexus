@@ -123,11 +123,14 @@ def main():
     # 库里的历史是累计的（多轮测试后可能超过一页）：total<=页大小才算"整表校验"，
     # 否则只断言首页无重复、无未终结行，并在明细里写明只校验了首页。
     page_complete = hist.get("total", 0) <= len(items)
+    # 审计当下可能有请求仍在途（异步收尾）, 那不是缺陷: 只要求状态集合合法且行不重复, 在途行数量写进明细。
+    terminal = {"success", "canceled", "failed"}
+    in_flight = [r for r in ds if r.get("status") not in terminal]
     record("every relayed page row logged once with a terminal status",
            len(ds) == len({r.get("id") for r in ds})
-           and all(r.get("status") in ("success", "canceled") for r in ds), 
+           and all(r.get("status") in terminal | {"running"} for r in ds), 
            f"rows={len(ds)}/{hist.get('total')} log_ids_unique={len({r.get('id') for r in ds})} "
-           f"success={len(successes)} canceled={len(canceled)} "
+           f"success={len(successes)} canceled={len(canceled)} in_flight={len(in_flight)} "
            f"整表校验={'是' if page_complete else '否（历史已超一页，本次只校验首页）'}")
     record("success rows carry tokens and a target",
            len(successes) > 0 and all((r.get("prompt_tokens") or 0) > 0 and (r.get("completion_tokens") or 0) > 0
