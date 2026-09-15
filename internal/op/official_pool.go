@@ -181,6 +181,8 @@ func OfficialPoolStatusList(conn *gorm.DB) ([]model.OfficialPoolStatus, error) {
 		err = target.Where("name = ?", status.ChannelName).First(&channel).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 尚无号池渠道也照常返回一行：界面据此显示"未建立"，无需另行判空。
+			// 明细照旧给出（凭据不存在），这样"有账号但还没同步"与"根本没账号"在界面上能区分。
+			status.Members = officialPoolMembers(accounts, nil)
 			statuses = append(statuses, status)
 			continue
 		}
@@ -193,11 +195,15 @@ func OfficialPoolStatusList(conn *gorm.DB) ([]model.OfficialPoolStatus, error) {
 		if err != nil {
 			return nil, err
 		}
+		// 号池凭据以账号的 ExternalName 命名（见 OfficialPoolSync），故按名称建索引即可对齐。
+		keyByName := make(map[string]model.ChannelKey, len(keys))
 		for _, key := range keys {
+			keyByName[key.Name] = key
 			if key.Enabled {
 				status.ActiveKeys++
 			}
 		}
+		status.Members = officialPoolMembers(accounts, keyByName)
 		if status.Models, err = officialPoolModelCount(target, channel.ID); err != nil {
 			return nil, err
 		}
@@ -207,6 +213,31 @@ func OfficialPoolStatusList(conn *gorm.DB) ([]model.OfficialPoolStatus, error) {
 		statuses = append(statuses, status)
 	}
 	return statuses, nil
+}
+
+// officialPoolMembers 把账号与号池凭据对齐成统一视图的行; keyByName 为空表示该服务商尚未建号池渠道。
+func officialPoolMembers(accounts []model.OfficialAccount, keyByName map[string]model.ChannelKey) []model.OfficialPoolMember {
+	members := make([]model.OfficialPoolMember, 0, len(accounts))
+	for _, account := range accounts {
+		member := model.OfficialPoolMember{
+			AccountID:    account.ID,
+			ExternalName: account.ExternalName,
+			Status:       account.Status,
+			ExpiresAt:    account.ExpiresAt,
+			PlanTier:     account.PlanTier,
+			Window5H:     account.Window5H,
+			Window7D:     account.Window7D,
+			Healthy:      account.Healthy,
+			LastError:    account.LastError,
+		}
+		if key, ok := keyByName[account.ExternalName]; ok {
+			member.KeyName = key.Name
+			member.KeyEnabled = key.Enabled
+			member.KeyExists = true
+		}
+		members = append(members, member)
+	}
+	return members
 }
 
 // officialPoolEnsureChannel 取或建号池渠道：已存在则原样返回，绝不覆盖操作者在渠道页改过的地址与路径。

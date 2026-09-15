@@ -72,18 +72,37 @@ type OfficialPoolSyncRequest struct {
 // 字段给的是操作者判断"号池能不能用"所需的最小集: 凭据侧物化了几条、
 // 有多少因账号失活被停用、刷新了几条临期 token; 模型与授权数是既有拉取流程的产物, 一并回显。
 type OfficialPoolSyncResult struct {
-	Provider    OfficialAccountProvider `json:"provider"`     // 服务商。
-	ChannelID   int                     `json:"channel_id"`   // 号池渠道主键; 0 表示尚未建立。
-	ChannelName string                  `json:"channel_name"` // 号池渠道名。
-	Keys        int                     `json:"keys"`         // 本轮结束时该渠道下启用的凭据数。
-	Disabled    int                     `json:"disabled"`     // 本轮被停用的凭据数(账号非 active)。
-	Refreshed   int                     `json:"refreshed"`    // 本轮成功刷新 access token 的账号数。
-	Models      int                     `json:"models"`       // 号池渠道已有模型数(拉取模型流程产出)。
-	Grants      int                     `json:"grants"`       // 号池渠道已有授权数(模型×凭据组合)。
+	Provider    OfficialAccountProvider `json:"provider"`        // 服务商。
+	ChannelID   int                     `json:"channel_id"`      // 号池渠道主键; 0 表示尚未建立。
+	ChannelName string                  `json:"channel_name"`    // 号池渠道名。
+	Keys        int                     `json:"keys"`            // 本轮结束时该渠道下启用的凭据数。
+	Disabled    int                     `json:"disabled"`        // 本轮被停用的凭据数(账号非 active)。
+	Refreshed   int                     `json:"refreshed"`       // 本轮成功刷新 access token 的账号数。
+	Models      int                     `json:"models"`          // 号池渠道已有模型数(拉取模型流程产出)。
+	Grants      int                     `json:"grants"`          // 号池渠道已有授权数(模型×凭据组合)。
 	Notes       []string                `json:"notes,omitempty"` // 跳过或需人工处理的事项, 逐条说明原因。
 }
 
+// OfficialPoolMember 是统一号池视图里的一行: 一个账号与它物化出的那条凭据。
+// 只回凭据名称与启用状态, 绝不回显凭据内容(密文/明文都不出接口)。
+type OfficialPoolMember struct {
+	AccountID    int                   `json:"account_id"`    // 账号主键。
+	ExternalName string                `json:"external_name"` // 官方侧账号标识。
+	Status       OfficialAccountStatus `json:"status"`        // 账号接入状态。
+	ExpiresAt    *time.Time            `json:"expires_at"`    // 访问凭据过期时间。
+	PlanTier     string                `json:"plan_tier"`     // 套餐档位快照。
+	Window5H     string                `json:"window_5h"`     // 5 小时窗口余量快照。
+	Window7D     string                `json:"window_7d"`     // 7 天窗口余量快照。
+	Healthy      bool                  `json:"healthy"`       // 最近一次健康检查是否通过。
+	LastError    string                `json:"last_error"`    // 最近一次失败原因。
+	KeyName      string                `json:"key_name"`      // 凭据名称; 空表示尚未物化。
+	KeyExists    bool                  `json:"key_exists"`    // 是否已物化凭据行(非活跃账号只停用不删行)。
+	KeyEnabled   bool                  `json:"key_enabled"`   // 该凭据当前是否启用。
+}
+
 // OfficialPoolStatus 是号池当前映射的只读快照, 供界面核对"哪个账号映射成了哪条凭据"。
+// Members 是逐账号明细: 界面拿这一个接口即可画出统一号池视图(openai/gemini/claude 同一张表),
+// 无需再自己把账号表与渠道凭据表 join 起来。
 type OfficialPoolStatus struct {
 	Provider    OfficialAccountProvider `json:"provider"`     // 服务商。
 	ChannelID   int                     `json:"channel_id"`   // 号池渠道主键; 0 表示尚未建立。
@@ -92,6 +111,7 @@ type OfficialPoolStatus struct {
 	ActiveKeys  int                     `json:"active_keys"`  // 已物化的启用凭据数。
 	Models      int                     `json:"models"`       // 已有模型数。
 	Grants      int                     `json:"grants"`       // 已有授权数。
+	Members     []OfficialPoolMember    `json:"members"`      // 逐账号明细(账号 → 凭据映射)。
 }
 
 // ValidateOfficialAccountProvider 校验服务商取值在三类官方账号范围内。
