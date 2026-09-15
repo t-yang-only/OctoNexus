@@ -43,6 +43,7 @@ type RequestState struct {
 	TargetModel    string         `json:"target_model"`     // 最新一轮实际请求上游的模型名称。
 	TargetProtocol model.Protocol `json:"target_protocol"`  // 最新一轮实际请求上游的协议, 与 Protocol 不同即本轮做了跨协议转换; 0 表示尚未选出。
 	Sending        bool           `json:"sending"`          // 最新一轮是否仍在等待上游响应。
+	TargetItemID   int            `json:"-"`                // 最新一轮选中的成员行 ID（GroupItem.ID）; 仅供 least_busy 统计在途, 不进状态流与日志对外结构。
 	Error          string         `json:"error,omitempty"`  // 最新一轮的失败原因, 请求结束后即为最终错误。
 
 	body          string                                     // 客户端原始请求体, 体积大故不进状态流, 由独立接口按需拉取。
@@ -101,12 +102,13 @@ func AttachUsageRecorder(ctx context.Context, requestID uint64, recorder func(pr
 }
 
 // startRound 记录本轮选中的目标并进入上游请求, cancel 供人工中止本轮, 返回递增的轮次序号。
-func (r *RequestState) startRound(cancel context.CancelFunc, channel, modelName string, protocol model.Protocol) int {
+func (r *RequestState) startRound(cancel context.CancelFunc, itemID int, channel, modelName string, protocol model.Protocol) int {
 	mu.Lock()
 	defer mu.Unlock()
 
 	r.Round++
 	r.RoundStartedAt = time.Now()
+	r.TargetItemID = itemID
 	r.TargetChannel = channel
 	r.TargetModel = modelName
 	r.TargetProtocol = protocol
@@ -126,6 +128,26 @@ func (r *RequestState) finishRound(errText string) {
 	r.Error = errText
 	r.cancel = nil
 	publishRequestLocked(r)
+}
+
+// memberBusyCount 统计"当前仍在等这个成员响应"的请求数（NM-DS-006：least_busy 的数据来源）。
+// 口径：只数 Sending 为真的请求，即从发起上游请求到本轮结束（提交 / 失败 / 取消）之间；
+// 因为直接从活动请求注册表派生，不存在"计数漏释放"导致成员被永久当成忙的风险。
+// 人工中止那一轮会停在 Sending 为真的状态直到下一轮开始，是已知的轻微高估（人工操作且下一轮即刻修正）。
+func memberBusyCount(itemID int) int {
+	if itemID == 0 {
+		return 0
+	}
+	mu.Lock()
+	defer mu.Unlock()
+
+	count := 0
+	for _, request := range requests {
+		if request.Sending && request.TargetItemID == itemID {
+			count++
+		}
+	}
+	return count
 }
 
 // Interrupt 中止指定请求仍在等待响应且轮次匹配的上游请求; 轮次不匹配说明该轮已结束, 不影响后续轮次。

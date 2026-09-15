@@ -105,6 +105,7 @@ type routeDeps struct {
 	cost    CostProvider
 	quality MemberQualityProvider
 	latency LatencyProvider
+	busy    BusyProvider
 }
 
 // NM-DS-004 迭代：质量优先（quality_first）选路定序。
@@ -220,6 +221,65 @@ func pickGroupItemLowestLatency(group model.Group, latency LatencyProvider) mode
 	routeMu.Unlock()
 
 	ranked, err := rankByLatency(group.Items, cooldowns, time.Now().UnixMilli(), nil, latency)
+	if err != nil || len(ranked) == 0 {
+		return model.GroupItem{}
+	}
+	return pickGroupItem(group.WithItems(ranked))
+}
+
+// NM-DS-006 迭代：最空闲（least_busy）选路定序。
+// 与其它策略共用同一套过滤与冷却口径（partitionCandidates），只换排序键：
+// 在途请求数升序 → priority 升序 → ID 升序。
+// 在途 = 该成员"正在被等待响应"的请求数（见 state.go 的 memberBusyCount）：并发打进来时，
+// 已有一个请求压在某个成员上就不再叠加第二个，把并发摊到空闲成员上；
+// provider 未接线（nil）时全部按 0 参与，于是退化为 priority 定序。
+
+// rankByBusy 对候选做最空闲定序：首个即"当前最闲的可用成员"。
+func rankByBusy(items []model.GroupItem, cooldowns map[int]int64, nowMs int64, zeroBalanceGrantIDs map[int]bool, busy BusyProvider) ([]model.GroupItem, error) {
+	eligible, cooling, err := partitionCandidates(items, cooldowns, nowMs, zeroBalanceGrantIDs)
+	if err != nil {
+		return nil, err
+	}
+	ranked := append([]model.GroupItem(nil), eligible...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		bi := memberBusyScore(busy, ranked[i])
+		bj := memberBusyScore(busy, ranked[j])
+		if bi != bj {
+			return bi < bj // 在途少的在前
+		}
+		if ranked[i].Priority != ranked[j].Priority {
+			return ranked[i].Priority < ranked[j].Priority
+		}
+		return ranked[i].ID < ranked[j].ID
+	})
+	return append(ranked, cooling...), nil
+}
+
+// memberBusyScore 取成员在途数；provider 未接线时按 0（全部平手，退化为 priority 定序）。
+func memberBusyScore(busy BusyProvider, item model.GroupItem) int {
+	if busy == nil {
+		return 0
+	}
+	count := busy(item.ID)
+	if count < 0 {
+		return 0
+	}
+	return count
+}
+
+// pickGroupItemLeastBusy 在最空闲定序下选出本轮目标；只改"本轮先试谁"的顺序,
+// 亲和/冷却/探测/上限语义仍归 pickGroupItem 既有链路。
+func pickGroupItemLeastBusy(group model.Group, busy BusyProvider) model.GroupItem {
+	routeMu.Lock()
+	route := routes[group.ID]
+	if route == nil {
+		route = &RouteState{GroupID: group.ID, Cooldowns: make(map[int]int64)}
+		routes[group.ID] = route
+	}
+	cooldowns := maps.Clone(route.Cooldowns)
+	routeMu.Unlock()
+
+	ranked, err := rankByBusy(group.Items, cooldowns, time.Now().UnixMilli(), nil, busy)
 	if err != nil || len(ranked) == 0 {
 		return model.GroupItem{}
 	}

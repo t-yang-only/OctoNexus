@@ -166,7 +166,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			cancelRound := func() {
 				cancelRoundCause(context.Canceled)
 			}
-			request.startRound(cancelRound, channel.Name, channelModel.Name, targetProtocol)
+			request.startRound(cancelRound, item.ID, channel.Name, channelModel.Name, targetProtocol)
 
 			roundStartedAt := time.Now() // 本轮上游调用的开始时间, 用于统计首个有效响应耗时。
 
