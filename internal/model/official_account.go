@@ -62,6 +62,38 @@ type OfficialAccountCallbackRequest struct {
 	State       string `json:"state" binding:"required"`         // 防 CSRF 的 state, 必须与发起时签发的一致。
 }
 
+// OfficialPoolSyncRequest 是号池同步请求: provider 留空表示同步全部服务商。
+// 同步只物化/刷新凭据侧映射, 不拉模型也不改协议位: 那是渠道拉取模型流程的职责。
+type OfficialPoolSyncRequest struct {
+	Provider OfficialAccountProvider `json:"provider"` // 服务商; 留空同步全部三类。
+}
+
+// OfficialPoolSyncResult 是单个服务商一次号池同步的结论, 同时充当同步响应条目。
+// 字段给的是操作者判断"号池能不能用"所需的最小集: 凭据侧物化了几条、
+// 有多少因账号失活被停用、刷新了几条临期 token; 模型与授权数是既有拉取流程的产物, 一并回显。
+type OfficialPoolSyncResult struct {
+	Provider    OfficialAccountProvider `json:"provider"`     // 服务商。
+	ChannelID   int                     `json:"channel_id"`   // 号池渠道主键; 0 表示尚未建立。
+	ChannelName string                  `json:"channel_name"` // 号池渠道名。
+	Keys        int                     `json:"keys"`         // 本轮结束时该渠道下启用的凭据数。
+	Disabled    int                     `json:"disabled"`     // 本轮被停用的凭据数(账号非 active)。
+	Refreshed   int                     `json:"refreshed"`    // 本轮成功刷新 access token 的账号数。
+	Models      int                     `json:"models"`       // 号池渠道已有模型数(拉取模型流程产出)。
+	Grants      int                     `json:"grants"`       // 号池渠道已有授权数(模型×凭据组合)。
+	Notes       []string                `json:"notes,omitempty"` // 跳过或需人工处理的事项, 逐条说明原因。
+}
+
+// OfficialPoolStatus 是号池当前映射的只读快照, 供界面核对"哪个账号映射成了哪条凭据"。
+type OfficialPoolStatus struct {
+	Provider    OfficialAccountProvider `json:"provider"`     // 服务商。
+	ChannelID   int                     `json:"channel_id"`   // 号池渠道主键; 0 表示尚未建立。
+	ChannelName string                  `json:"channel_name"` // 号池渠道名。
+	Accounts    int                     `json:"accounts"`     // 该服务商已接入的账号数(含非 active)。
+	ActiveKeys  int                     `json:"active_keys"`  // 已物化的启用凭据数。
+	Models      int                     `json:"models"`       // 已有模型数。
+	Grants      int                     `json:"grants"`       // 已有授权数。
+}
+
 // ValidateOfficialAccountProvider 校验服务商取值在三类官方账号范围内。
 func ValidateOfficialAccountProvider(provider OfficialAccountProvider) error {
 	switch provider {
