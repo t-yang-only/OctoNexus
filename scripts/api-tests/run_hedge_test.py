@@ -88,6 +88,33 @@ def relay(model, timeout=90):
         return 0, round(time.time() - started, 1), {"_raw": "%s: %s" % (type(e).__name__, e)}
 
 
+def relay_stream(model, timeout=60):
+    """流式: 量到首个 SSE 数据块的时间（首字竞速在流式下同样应在提交前生效）。"""
+    key = relay_api_key()
+    payload = {"model": model, "max_tokens": 8, "stream": True,
+               "messages": [{"role": "user", "content": "ping"}]}
+    req = urllib.request.Request(RELAY + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", "Bearer " + key)
+    started = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            first = None
+            while True:
+                chunk = resp.read(128)
+                if not chunk:
+                    break
+                if first is None and b"data:" in chunk:
+                    first = round(time.time() - started, 1)
+                if first is not None:
+                    break
+            return resp.status, first, round(time.time() - started, 1)
+    except urllib.error.HTTPError as e:
+        return e.code, None, round(time.time() - started, 1)
+    except Exception as e:  # noqa: BLE001
+        return 0, None, round(time.time() - started, 1)
+
+
 def grant_ids():
     c = conn()
     rows = dict(c.execute("select m.name, g.id from channel_grants g join channel_models m on m.id=g.channel_model_id "
@@ -157,6 +184,7 @@ def main():
     ensure_group("DS-TEST-hedge", grants, True)
     ensure_group("DS-TEST-hedgef", grants, False)
     ensure_group("DS-TEST-hedgepeak", grants, True, width=2, after_ms=0, peak=1)
+    ensure_group("DS-TEST-hedgestream", grants, True, width=2, after_ms=800, peak=0)
 
     # T1 竞速开启: 首选慢成员在 800ms 后被追加竞速, 快成员胜出。
     offset = mock_window_log_size()
@@ -201,6 +229,14 @@ def main():
     status, resp = call("POST", "/api/v1/group/create",
                         group_payload("DS-TEST-hedge-badwidth", grants, True, width=9, after_ms=800, peak=0))
     record("T5 hedge_width 越界被拒", status == 400, "HTTP %d %s" % (status, str(resp.get("message"))[:80]))
+
+    # T6 流式同样生效: 首个 SSE 数据块应由竞速胜出的快成员给出（慢成员上游 sleep 15s）。
+    offset = mock_window_log_size()
+    status, first, total = relay_stream("DS-TEST-hedgestream", timeout=60)
+    attempts = mock_models_since(offset)
+    record("T6 流式竞速: 首个 SSE 块远快于慢成员",
+           status == 200 and first is not None and first < 8 and SLOW in attempts and FAST in attempts,
+           "HTTP %s 首块 %ss 总 %ss 上游收到 %s" % (status, first, total, attempts))
 
     # 清理本套件装置（保留 DS-TEST-mock 渠道与两条成员供其它套件使用）。
     _, listing = call("GET", "/api/v1/group/list")
