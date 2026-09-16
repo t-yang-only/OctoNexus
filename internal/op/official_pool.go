@@ -115,7 +115,11 @@ func OfficialPoolSync(conn *gorm.DB, provider model.OfficialAccountProvider) (mo
 			if key.Key != access {
 				updates["key"] = access
 			}
-			if !key.Enabled {
+			if key.OperatorDisabled {
+				// 人工停用是操作者的决定，不是账号的当前状态：同步只补凭据内容，不把 enabled 改回来，
+				// 否则"停掉一条坏凭据"会在下一次同步时被静默撤销。
+				result.Held++
+			} else if !key.Enabled {
 				updates["enabled"] = true
 			}
 			if len(updates) == 0 {
@@ -233,6 +237,7 @@ func officialPoolMembers(accounts []model.OfficialAccount, keyByName map[string]
 		if key, ok := keyByName[account.ExternalName]; ok {
 			member.KeyName = key.Name
 			member.KeyEnabled = key.Enabled
+			member.KeyOperatorDisabled = key.OperatorDisabled
 			member.KeyExists = true
 		}
 		members = append(members, member)

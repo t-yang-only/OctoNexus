@@ -32,9 +32,9 @@ func (officialAdapter) Info() AdapterInfo {
 		Kind:  officialKind,
 		Title: "官方账号池",
 		// 能力位只声明真的有的：探活是 op.OfficialAccountReadUsage、刷新与物化是 op.OfficialPoolSync、
-		// 新建是 authorize/callback 流程。人工启停（toggle）目前没有渠道凭据级启停的现成 op，
-		// 由同步逻辑按账号状态收敛——因此**不声明**，接口层会明确回答"这个后端不支持"。
-		Capabilities: []Capability{CapList, CapGet, CapProbe, CapRefresh, CapProvision, CapSync},
+		// 新建是 authorize/callback 流程。人工启停（toggle）走 op.SetChannelKeyEnabled —— 它把
+		// "运维要不要用这条凭据"与"账号当前能不能用"分开记，所以号池同步不会撤销人工停用。
+		Capabilities: []Capability{CapList, CapGet, CapProbe, CapRefresh, CapToggle, CapProvision, CapSync},
 		Builtin:      true,
 		Since:        "R-pool-ext-001",
 		Fields: []FieldSpec{
@@ -75,19 +75,20 @@ func (officialAdapter) Entries(ctx context.Context) ([]Entry, error) {
 					"channel":  status.ChannelName,
 				},
 				Detail: map[string]any{
-					"account_id":    member.AccountID,
-					"channel_id":    status.ChannelID,
-					"channel_name":  status.ChannelName,
-					"key_name":      member.KeyName,
-					"key_exists":    member.KeyExists,
-					"key_enabled":   member.KeyEnabled,
-					"window_5h":     member.Window5H,
-					"window_7d":     member.Window7D,
-					"models":        status.Models,
-					"grants":        status.Grants,
-					"is_active":     member.Status == model.OfficialAccountStatusActive,
-					"account_total": status.Accounts,
-					"active_keys":   status.ActiveKeys,
+					"account_id":        member.AccountID,
+					"channel_id":        status.ChannelID,
+					"channel_name":      status.ChannelName,
+					"key_name":          member.KeyName,
+					"key_exists":        member.KeyExists,
+					"key_enabled":       member.KeyEnabled,
+					"operator_disabled": member.KeyOperatorDisabled,
+					"window_5h":         member.Window5H,
+					"window_7d":         member.Window7D,
+					"models":            status.Models,
+					"grants":            status.Grants,
+					"is_active":         member.Status == model.OfficialAccountStatusActive,
+					"account_total":     status.Accounts,
+					"active_keys":       status.ActiveKeys,
 				},
 			})
 		}
@@ -210,6 +211,50 @@ func (a officialAdapter) Refresh(ctx context.Context, id string) (Entry, error) 
 		entry.Detail["notes"] = result.Notes
 	}
 	return entry, nil
+}
+
+// SetEnabled 人工启停某个账号对应的凭据（toggle），再回读这一条。
+//
+// 与号池同步的分工：同步回答"账号此刻能不能用"，这里回答"运维要不要用"。
+// 停用会同时落下"人工停用"标记，所以下一次同步不会把它改回启用（见 op.SetChannelKeyEnabled）。
+// 账号存在但还没物化出凭据时回 ErrConflict（409）：等同步跑完再来，而不是当成"这条不存在"。
+func (a officialAdapter) SetEnabled(ctx context.Context, id string, enabled bool) (Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return Entry{}, err
+	}
+	provider, accountID, err := officialEntryID(id)
+	if err != nil {
+		return Entry{}, err
+	}
+
+	// 账号 → 渠道凭据的映射与列表同源（op.OfficialPoolStatusList），避免启停走另一套口径。
+	statuses, err := op.OfficialPoolStatusList(nil)
+	if err != nil {
+		return Entry{}, err
+	}
+	for _, status := range statuses {
+		if status.Provider != provider {
+			continue
+		}
+		for _, member := range status.Members {
+			if member.AccountID != accountID {
+				continue
+			}
+			if status.ChannelID <= 0 || member.KeyName == "" {
+				return Entry{}, fmt.Errorf(
+					"%w: 账号 %s 尚未物化出渠道凭据，先同步号池再启停", ErrConflict, member.ExternalName)
+			}
+			found, err := op.SetChannelKeyEnabled(nil, status.ChannelID, member.KeyName, enabled)
+			if err != nil {
+				return Entry{}, fmt.Errorf("set enabled=%v for %s: %w", enabled, id, err)
+			}
+			if !found {
+				return Entry{}, fmt.Errorf("%w: 凭据 %s", ErrEntryNotFound, member.KeyName)
+			}
+			return a.Get(ctx, id)
+		}
+	}
+	return Entry{}, fmt.Errorf("%w: %s", ErrEntryNotFound, id)
 }
 
 // Sync 把三个服务商的官方账号逐个物化到转发层，汇总成一份结论。

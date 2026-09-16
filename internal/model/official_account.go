@@ -77,6 +77,7 @@ type OfficialPoolSyncResult struct {
 	ChannelName string                  `json:"channel_name"`    // 号池渠道名。
 	Keys        int                     `json:"keys"`            // 本轮结束时该渠道下启用的凭据数。
 	Disabled    int                     `json:"disabled"`        // 本轮被停用的凭据数(账号非 active)。
+	Held        int                     `json:"held"`            // 本轮因人工停用而保持停用的凭据数(同步不推翻这一决定)。
 	Refreshed   int                     `json:"refreshed"`       // 本轮成功刷新 access token 的账号数。
 	Models      int                     `json:"models"`          // 号池渠道已有模型数(拉取模型流程产出)。
 	Grants      int                     `json:"grants"`          // 号池渠道已有授权数(模型×凭据组合)。
@@ -98,6 +99,9 @@ type OfficialPoolMember struct {
 	KeyName      string                `json:"key_name"`      // 凭据名称; 空表示尚未物化。
 	KeyExists    bool                  `json:"key_exists"`    // 是否已物化凭据行(非活跃账号只停用不删行)。
 	KeyEnabled   bool                  `json:"key_enabled"`   // 该凭据当前是否启用。
+	// KeyOperatorDisabled 表示这条凭据是被人工停用的: 与"因账号失活被停用"不同,
+	// 它不会被号池同步重新启用, 只有人工再启停一次才会解开。
+	KeyOperatorDisabled bool `json:"key_operator_disabled"`
 }
 
 // OfficialPoolStatus 是号池当前映射的只读快照, 供界面核对"哪个账号映射成了哪条凭据"。

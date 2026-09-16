@@ -47,6 +47,9 @@ var (
 	ErrUnsupported = fmt.Errorf("capability not supported by this pool kind")
 	// ErrEntryNotFound 表示条目不存在。
 	ErrEntryNotFound = fmt.Errorf("pool entry not found")
+	// ErrConflict 表示条目存在、但当前状态不允许这个操作（例如账号还没有物化出凭据，无从启停）：
+	// 与"不存在"分开，外部工具才不会把"等它同步完再来"误判成"这条是错的"。
+	ErrConflict = fmt.Errorf("pool entry state does not allow this operation")
 )
 
 // Get 取单条：先查能力位，再查实现。

@@ -190,10 +190,24 @@ def main():
         record("P9 探活失败是干净失败（无真实请求 / 不泄漏 / 不崩栈）",
                clean, "HTTP %s body=%s" % (status, raw[:140]))
 
-        # P10 能力位放行的反例：官方账号池没声明 toggle，启停必须回 501 并点名缺哪个能力位。
+        # P10 启停（toggle）：官方号池现在声明了这项能力，契约是"凭据没物化出来就别启停"。
+        #     预期按夹具自己的 detail.key_exists 分岔，两个分支都只用 enable 方向 ——
+        #     万一夹具名恰好撞上某条真实凭据，也只会把它启用，不会关掉别人的凭据。
         status, payload, raw = call("POST", "/api/v1/pool/entries/official/%s/enable" % active_id)
-        record("P10 未声明的能力位回 501（而不是假装成功）",
-               status == 501 and "capability not supported" in raw,
+        _, fixture_detail, _ = call("GET", "/api/v1/pool/entries/official/" + str(active_id))
+        key_exists = bool((fixture_detail or {}).get("detail", {}).get("key_exists"))
+        if key_exists:
+            toggle_ok = status == 200 and (payload or {}).get("enabled") is True
+            toggle_why = "已物化凭据 → 期望 200 且启用"
+        else:
+            toggle_ok = status == 409 and "does not allow" in raw and FAKE_CIPHER not in raw
+            toggle_why = "凭据尚未物化 → 期望 409 conflict"
+        record("P10 启停按状态分岔（%s）" % toggle_why,
+               toggle_ok, "HTTP %s body=%s" % (status, raw[:130]))
+
+        status, _, raw = call("POST", "/api/v1/pool/entries/official/9999999/disable")
+        record("P10b 未知条目的启停 404（不是静默成功）",
+               status == 404 and "not found" in raw,
                "HTTP %s body=%s" % (status, raw[:110]))
 
         # P11 kind 级同步的未知 kind 也要明确报错。
@@ -204,14 +218,14 @@ def main():
                "HTTP %s body=%s" % (status, raw[:90]))
 
         # ===== 第三批：查询面（过滤 / 汇总 / 导出）与机器可读的操作清单 =====
-        # P12 操作清单由能力位推导：有 probe/refresh/sync 的路由，没有 enable/disable（没声明 toggle）。
+        # P12 操作清单由能力位推导：声明了的（probe/refresh/sync/toggle）都要有路由。
         ops = (official or {}).get("operations") or []
         op_keys = {"%s %s" % (o.get("method"), o.get("path")) for o in ops}
         has_probe = any("probe" in key for key in op_keys)
         has_sync = any("/kinds/{kind}/sync" in key for key in op_keys)
         has_toggle = any(("enable" in key or "disable" in key) for key in op_keys)
-        record("P12 操作清单与能力位一致（有 probe/sync、无 enable/disable）",
-               has_probe and has_sync and not has_toggle and len(ops) >= 5,
+        record("P12 操作清单与能力位一致（probe/sync/refresh/toggle 都有路由）",
+               has_probe and has_sync and has_toggle and len(ops) >= 7,
                "操作数=%d probe=%s sync=%s toggle路由=%s" % (len(ops), has_probe, has_sync, has_toggle))
 
         # P13 过滤：状态 / 名称子串 / scanned 口径
@@ -293,12 +307,17 @@ def main():
                and FAKE_CIPHER not in raw,
                "HTTP %s total=%s failed=%s" % (status, (payload or {}).get("total"), (payload or {}).get("failed")))
 
+        # P18b 批量停用：官方号池现在声明了 toggle，所以逐条失败的原因是"状态不允许"
+        #      （夹具凭据未物化 → 409 语义），而不再是"能力位不支持"；批量本身仍要 200 且逐条带原因。
+        #      注：用 disable 方向，且夹具都是未物化凭据 —— 不会关掉任何真实凭据。
         status, payload, raw = call("POST", "/api/v1/pool/entries/batch",
                                     {"action": "disable", "kind": "official", "ids": probes[:1]})
-        record("P18b 批量里未声明能力位逐条回不支持（不是整批 400）",
-               status == 200 and (payload or {}).get("failed") == 1
-               and "capability not supported" in json.dumps((payload or {}).get("items") or []),
-               "HTTP %s items=%s" % (status, json.dumps((payload or {}).get("items") or [])[:110]))
+        items = (payload or {}).get("items") or []
+        record("P18b 批量启停逐条带原因（能力位已声明，失败原因转为状态不允许）",
+               status == 200 and (payload or {}).get("failed") == 1 and len(items) == 1
+               and items[0].get("ok") is False and "does not allow" in (items[0].get("error") or "")
+               and FAKE_CIPHER not in raw,
+               "HTTP %s items=%s" % (status, json.dumps(items)[:130]))
 
         status, _, raw = call("POST", "/api/v1/pool/entries/batch", {"action": "drop_everything", "ids": ["1"]})
         record("P18c 非法批量动作 400", status == 400 and "unknown batch action" in raw,
@@ -309,7 +328,7 @@ def main():
                status == 400 and "either ids or a filter" in raw,
                "HTTP %s body=%s" % (status, raw[:90]))
 
-        # P19 OpenAPI 文档由注册表推导：有 probe/sync 的路由，没有 toggle 的路由
+        # P19 OpenAPI 文档由注册表推导：probe/sync/toggle 的路由都要在文档里
         status, payload, raw = call("GET", "/api/v1/pool/openapi.json")
         doc_paths = (payload or {}).get("paths") or {}
         doc_schemas = ((payload or {}).get("components") or {}).get("schemas") or {}
@@ -320,7 +339,7 @@ def main():
                status == 200 and (payload or {}).get("openapi") == "3.0.3"
                and any("probe" in p for p in doc_paths)
                and any("/kinds/{kind}/sync" in p for p in doc_paths)
-               and not any(("enable" in p or "disable" in p) for p in doc_paths)
+               and any(("enable" in p or "disable" in p) for p in doc_paths)
                and "official" in enum and {"Entry", "BatchRequest", "Summary"} <= set(doc_schemas)
                and FAKE_CIPHER not in raw,
                "HTTP %s paths=%d schemas=%d enum=%s" % (status, len(doc_paths), len(doc_schemas), enum))

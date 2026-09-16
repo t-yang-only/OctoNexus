@@ -89,6 +89,9 @@ func poolErrorStatus(err error) (int, string) {
 	case errors.Is(err, pool.ErrUnsupported):
 		// 501 而不是 400/403：这不是参数错，也不是权限问题，而是这个后端没有这项能力。
 		return http.StatusNotImplemented, err.Error()
+	case errors.Is(err, pool.ErrConflict):
+		// 409：条目在，但此刻的状态不允许这个操作（例如凭据还没物化出来），与 404 区分开。
+		return http.StatusConflict, err.Error()
 	default:
 		return http.StatusBadGateway, err.Error()
 	}

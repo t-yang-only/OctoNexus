@@ -556,8 +556,16 @@ func syncChannelKeys(tx *gorm.DB, channelID int, inputs []model.ChannelKeyInput)
 	for _, requestedKey := range requested {
 		if current, ok := existingByName[requestedKey.Name]; ok {
 			if current.Key != requestedKey.Key || current.Enabled != requestedKey.Enabled {
+				// operator_disabled 与 enabled 一起写: 这两列是同一件事的两面 —— "谁把它关的"。
+				// 渠道页显式提交启用位就是对这条凭据的最新人工决定: 启用即解开人工停用
+				// (号池同步从此可以再维护它), 停用即落下人工停用 —— 否则界面上的停用会被
+				// 号池同步重新打开(实测同步对 active 账号是无条件启用的)。
 				if err := tx.Model(&model.ChannelKey{}).Where("id = ?", current.ID).
-					Updates(map[string]any{"key": requestedKey.Key, "enabled": requestedKey.Enabled}).Error; err != nil {
+					Updates(map[string]any{
+						"key":               requestedKey.Key,
+						"enabled":           requestedKey.Enabled,
+						"operator_disabled": !requestedKey.Enabled,
+					}).Error; err != nil {
 					return fmt.Errorf("failed to update channel key: %w", err)
 				}
 			}
