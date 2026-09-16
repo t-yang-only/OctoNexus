@@ -110,3 +110,5 @@
 | | 备注：P21 能力位、P22 ID 口径/站点族/探活口径、P22b 凭据不外泄、P23 官方号池渠道不重复列示、P24 探活结论、**P24b 从 mock 上游日志反证打的是 GET /api/user/self**、P25 余额 500/120/380、P26 启停写两位（直接查库）、P27 未知凭据 404 → 42/42。新夹具名刻意不含 RUN_TAG 子串，否则 P2/P13b/P17/P18b 会被名称子串过滤连带污染成假失败。mock 上游补 /api/user/self。| 2026-09-16 13:45:00 |
 | T-test-012 | 夹具清理方式修正：渠道删除接口只认 DELETE（POST 打不到，残留回不了头）| scripts/api-tests | done |
 | | 备注：实证 POST /channel/delete/:id → 404、DELETE → 200 且库里该行消失；套件清理与"建前删旧"统一改 DELETE，并清掉历史残留 3 条，重跑后查库零残留。教训：夹具清理本身要验证——"调了删除接口"不等于"真删了"。| 2026-09-16 14:05:00 |
+| T-alert-002 | 通知渠道新增 Server酱（ServerChan/Turbo³）：表单推送 + 业务错误码判定 + 凭据不外显（R-alert-002）| internal/notify, internal/model, web | done |
+| | 备注：入口 `POST <base>/<SendKey>.send`，正文表单 title/desp/tags（故新增 postForm）；应答看顶层 code 与 data.errno；SendKey 环境变量 `OCTOPUS_SERVERCHAN_SENDKEY` 优先、设置表 `alert_serverchan_sendkey` 回落；测试缝 `OCTOPUS_SERVERCHAN_BASE_URL` 让套件打本地桩。验证：serverchan_test 6 例 + 活体套件 +3 用例（5→6）+ 一次性真实推送。| 2026-09-16 14:40:00 |

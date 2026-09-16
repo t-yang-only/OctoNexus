@@ -40,15 +40,16 @@ const (
 	// 通知渠道 (R-alert-001 余项): 一个事件同时投递到全部启用渠道。
 	// 密钥口径: 三个群机器人的 webhook 地址本身即凭据(与既有 alert_webhook_url 同性质, 面板可见可编辑);
 	// SMTP 密码不进设置表, 只从环境变量 OCTOPUS_SMTP_PASSWORD 读——避免把邮箱密码写进库与备份转储。
-	SettingKeyAlertChannels        SettingKey = "alert_channels"         // 启用的通知渠道, 逗号分隔: webhook,feishu,dingtalk,wecom,smtp; 默认 webhook
-	SettingKeyAlertFeishuWebhook   SettingKey = "alert_feishu_webhook"   // 飞书群机器人 webhook 地址
-	SettingKeyAlertDingTalkWebhook SettingKey = "alert_dingtalk_webhook" // 钉钉群机器人 webhook 地址
-	SettingKeyAlertWeComWebhook    SettingKey = "alert_wecom_webhook"    // 企业微信群机器人 webhook 地址
-	SettingKeyAlertSMTPHost        SettingKey = "alert_smtp_host"        // SMTP 服务器地址 (不含端口)
-	SettingKeyAlertSMTPPort        SettingKey = "alert_smtp_port"        // SMTP 端口: 465 走隐式 TLS, 其余走 STARTTLS/明文
-	SettingKeyAlertSMTPUser        SettingKey = "alert_smtp_user"        // SMTP 登录用户; 留空表示不做认证
-	SettingKeyAlertSMTPFrom        SettingKey = "alert_smtp_from"        // 发件人地址
-	SettingKeyAlertSMTPTo          SettingKey = "alert_smtp_to"          // 收件人地址, 多个用逗号分隔
+	SettingKeyAlertChannels          SettingKey = "alert_channels"           // 启用的通知渠道, 逗号分隔: webhook,feishu,dingtalk,wecom,smtp; 默认 webhook
+	SettingKeyAlertFeishuWebhook     SettingKey = "alert_feishu_webhook"     // 飞书群机器人 webhook 地址
+	SettingKeyAlertDingTalkWebhook   SettingKey = "alert_dingtalk_webhook"   // 钉钉群机器人 webhook 地址
+	SettingKeyAlertWeComWebhook      SettingKey = "alert_wecom_webhook"      // 企业微信群机器人 webhook 地址
+	SettingKeyAlertServerChanSendKey SettingKey = "alert_serverchan_sendkey" // Server酱(Turbo/³)的 SendKey; 它本身即凭据, 接口不回显, 也可用环境变量 OCTOPUS_SERVERCHAN_SENDKEY 替代
+	SettingKeyAlertSMTPHost          SettingKey = "alert_smtp_host"          // SMTP 服务器地址 (不含端口)
+	SettingKeyAlertSMTPPort          SettingKey = "alert_smtp_port"          // SMTP 端口: 465 走隐式 TLS, 其余走 STARTTLS/明文
+	SettingKeyAlertSMTPUser          SettingKey = "alert_smtp_user"          // SMTP 登录用户; 留空表示不做认证
+	SettingKeyAlertSMTPFrom          SettingKey = "alert_smtp_from"          // 发件人地址
+	SettingKeyAlertSMTPTo            SettingKey = "alert_smtp_to"            // 收件人地址, 多个用逗号分隔
 )
 
 type Setting struct {
@@ -73,6 +74,7 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyAlertFeishuWebhook, Value: ""},
 		{Key: SettingKeyAlertDingTalkWebhook, Value: ""},
 		{Key: SettingKeyAlertWeComWebhook, Value: ""},
+		{Key: SettingKeyAlertServerChanSendKey, Value: ""},
 		{Key: SettingKeyAlertSMTPHost, Value: ""},
 		{Key: SettingKeyAlertSMTPPort, Value: "587"}, // 587 是 STARTTLS 的通行端口; 465 会走隐式 TLS
 		{Key: SettingKeyAlertSMTPUser, Value: ""},
@@ -182,10 +184,14 @@ func (s *Setting) Validate() error {
 		return validateHTTPURL(s.Value, "dingtalk webhook URL")
 	case SettingKeyAlertWeComWebhook:
 		return validateHTTPURL(s.Value, "wecom webhook URL")
+	case SettingKeyAlertServerChanSendKey:
+		// SendKey 会被拼进推送地址的路径段, 出现空白/斜杠/查询符就得当场拒绝,
+		// 否则等到真出事故时收到的是一条 404, 而不是告警。
+		return validateSendKey(s.Value)
 	case SettingKeyAlertChannels:
 		for _, kind := range splitNotifyChannels(s.Value) {
 			if !isNotifyChannel(kind) {
-				return fmt.Errorf("unknown alert channel %q (want webhook, feishu, dingtalk, wecom or smtp)", kind)
+				return fmt.Errorf("unknown alert channel %q (want webhook, feishu, dingtalk, wecom, smtp or serverchan)", kind)
 			}
 		}
 		return nil
@@ -229,6 +235,17 @@ func validateHTTPURL(value, name string) error {
 	return nil
 }
 
+// validateSendKey 校验 Server酱的 SendKey: 留空合法(表示未配置), 否则必须是一个能放进 URL 路径的令牌。
+func validateSendKey(value string) error {
+	if value == "" {
+		return nil
+	}
+	if strings.ContainsAny(value, " \t/?#&") {
+		return fmt.Errorf("serverchan sendkey must not contain spaces, slashes or query characters")
+	}
+	return nil
+}
+
 // splitNotifyChannels 切分渠道设置并去空白; 空串切成空表(表示一个渠道都不发)。
 func splitNotifyChannels(value string) []string {
 	parts := strings.Split(value, ",")
@@ -244,7 +261,7 @@ func splitNotifyChannels(value string) []string {
 
 func isNotifyChannel(kind string) bool {
 	switch kind {
-	case "webhook", "feishu", "dingtalk", "wecom", "smtp":
+	case "webhook", "feishu", "dingtalk", "wecom", "smtp", "serverchan":
 		return true
 	}
 	return false

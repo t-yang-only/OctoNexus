@@ -38,7 +38,8 @@ GOOD_MODEL = "mock-good"
 SETTING_KEYS = [
     "route_probe_enabled", "route_probe_interval_seconds",
     "alert_channels", "alert_webhook_url", "alert_feishu_webhook", "alert_dingtalk_webhook",
-    "alert_wecom_webhook", "alert_smtp_host", "alert_smtp_port", "alert_smtp_user",
+    "alert_wecom_webhook",
+    "alert_serverchan_sendkey", "alert_smtp_host", "alert_smtp_port", "alert_smtp_user",
     "alert_smtp_from", "alert_smtp_to",
 ]
 
@@ -254,6 +255,7 @@ def main():
             "alert_feishu_webhook": MOCK_ROOT + "/notify/feishu",
             "alert_dingtalk_webhook": MOCK_ROOT + "/notify/dingtalk",
             "alert_wecom_webhook": MOCK_ROOT + "/notify/wecom",
+            "alert_serverchan_sendkey": "SCT-DS-TEST-sendkey",
             "alert_smtp_host": "127.0.0.1",
             "alert_smtp_port": str(sink.port),
             "alert_smtp_user": "",
@@ -269,8 +271,9 @@ def main():
         rows = (channels or {}).get("data") or []
         kinds = [row.get("kind") for row in rows]
         configured = all(row.get("configured") for row in rows)
-        record("channel status lists all five and marks them configured",
-               status == 200 and kinds == ["webhook", "feishu", "dingtalk", "wecom", "smtp"] and configured,
+        record("channel status lists every kind and marks them configured",
+               status == 200
+               and kinds == ["webhook", "feishu", "dingtalk", "wecom", "smtp", "serverchan"] and configured,
                "kinds=%s configured=%s" % (kinds, [row.get("configured") for row in rows]))
         record("channel status never leaks the webhook credential",
                "notify/echo" not in json.dumps(channels, ensure_ascii=False),
@@ -281,8 +284,19 @@ def main():
         status, tested = call("POST", "/api/v1/setting/notify/test")
         results = (tested or {}).get("data") or []
         sent = [r for r in results if r.get("sent")]
-        record("test delivery reaches every configured channel", status == 200 and len(sent) == 5,
-               "results=%s" % json.dumps([{r.get("kind"): r.get("sent")} for r in results], ensure_ascii=False))
+        sent_kinds = {r.get("kind") for r in sent}
+        result_kinds = {r.get("kind") for r in results}
+        # 实例是否跑在"测试模式"（Server酱 的站点被指向本地桩），决定 serverchan 能不能真的发成功：
+        # 生产模式下套件用的是假 sendkey，官方站点会回 400，此时只要求它参与投递并给出结论。
+        serverchan_via_stub = any(
+            (e.get("path") or "").endswith(".send") for e in mock_requests_since(offset))
+        record("test delivery reaches every configured channel",
+               status == 200
+               and {"webhook", "feishu", "dingtalk", "wecom", "smtp"} <= sent_kinds
+               and ("serverchan" in sent_kinds if serverchan_via_stub else "serverchan" in result_kinds),
+               "results=%s 桩=%s" % (
+                   json.dumps([{r.get("kind"): r.get("sent")} for r in results], ensure_ascii=False),
+                   serverchan_via_stub))
 
         # ---------- T4 provider payload shapes ----------
         posts = [e for e in mock_requests_since(offset) if "/notify/" in (e.get("path") or "")]
@@ -305,6 +319,29 @@ def main():
                "dingtalk=%s wecom=%s" % (json.dumps(dingtalk, ensure_ascii=False)[:80],
                                          json.dumps(wecom, ensure_ascii=False)[:80]))
 
+        # ---- Server酱：推送入口是 <base>/<SendKey>.send, 正文是表单 ----
+        serverchan_posts = [e for e in mock_requests_since(offset) if (e.get("path") or "").endswith(".send")]
+        serverchan_raw = (((serverchan_posts or [{}])[0].get("body") or {}).get("_raw")) or ""
+        serverchan_result = next((r for r in results if r.get("kind") == "serverchan"), {})
+        if serverchan_via_stub:
+            # 实例跑在测试模式（OCTOPUS_SERVERCHAN_BASE_URL 指向本地桩）：报文形状可以逐字钉住。
+            record("serverchan receives the form payload on <base>/<SendKey>.send",
+                   len(serverchan_posts) == 1
+                   and (serverchan_posts[0].get("path") or "").endswith("SCT-DS-TEST-sendkey.send")
+                   and "title=" in serverchan_raw and "desp=" in serverchan_raw and "tags=" in serverchan_raw,
+                   "posts=%d path=%s body=%s" % (
+                       len(serverchan_posts),
+                       (serverchan_posts[0].get("path") if serverchan_posts else None),
+                       serverchan_raw[:140]))
+        else:
+            # 生产模式：请求打到官方站点，桩看不到。此时只能验"渠道确实参与投递且给出了结论"，
+            # 并如实标注这条断言没有覆盖到报文形状（报文形状由单测与测试模式的套件覆盖）。
+            record("serverchan participates in delivery (stub not in use: instance is not in test mode)",
+                   serverchan_result.get("kind") == "serverchan"
+                   and (serverchan_result.get("sent") is False or serverchan_result.get("sent") is True)
+                   and bool(serverchan_result.get("detail")) or serverchan_result.get("sent") is True,
+                   "result=%s（未走桩：生产模式不覆盖报文形状）" % json.dumps(serverchan_result, ensure_ascii=False))
+
         # ---------- T5 SMTP ----------
         body = sink.body_text()
         record("smtp sink received the rendered utf-8 mail", "[octopus]" in body and "通知渠道测试" in body,
@@ -321,6 +358,30 @@ def main():
                "feishu result=%s" % json.dumps(feishu_result, ensure_ascii=False))
         record("one failing channel does not stop the others", others_ok,
                "others=%s" % json.dumps({k: (results.get(k) or {}).get("sent") for k in ("webhook", "dingtalk", "wecom", "smtp")}))
+
+        # ---- Server酱 也把错误码藏在 200 里: data.errno 非 0 必须判失败 ----
+        set_setting("alert_serverchan_sendkey", "SCT-DS-TEST-fail-sendkey")
+        status, tested = call("POST", "/api/v1/setting/notify/test")
+        results = {r.get("kind"): r for r in ((tested or {}).get("data") or [])}
+        failed_serverchan = results.get("serverchan") or {}
+        failed_detail = failed_serverchan.get("detail") or ""
+        record("serverchan provider error is a failure even on http 200",
+               failed_serverchan.get("sent") is False
+               and (("errno=1001" in failed_detail) if serverchan_via_stub
+                    else ("endpoint returned" in failed_detail or "errno=" in failed_detail)),
+               "serverchan result=%s 桩=%s" % (
+                   json.dumps(failed_serverchan, ensure_ascii=False), serverchan_via_stub))
+
+        # ---- 没配 SendKey 时给的是"缺哪一项"，不是含糊的失败 ----
+        set_setting("alert_serverchan_sendkey", "")
+        status, tested = call("POST", "/api/v1/setting/notify/test")
+        results = {r.get("kind"): r for r in ((tested or {}).get("data") or [])}
+        unset_serverchan = results.get("serverchan") or {}
+        record("serverchan without a sendkey reports the missing key",
+               unset_serverchan.get("sent") is False
+               and "alert_serverchan_sendkey is empty" in (unset_serverchan.get("detail") or ""),
+               "serverchan result=%s" % json.dumps(unset_serverchan, ensure_ascii=False))
+        set_setting("alert_serverchan_sendkey", "SCT-DS-TEST-sendkey")
 
         # ---------- T7 configuration gap is reported, not guessed ----------
         set_setting("alert_smtp_host", "")

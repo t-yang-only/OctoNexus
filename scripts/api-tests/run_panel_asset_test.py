@@ -99,6 +99,14 @@ def main():
         "缺 %s" % (missing_batch or "无"),
     )
 
+    notify_markers = ["alert_serverchan_sendkey", "Server酱推送", "ServerChan push"]
+    missing_notify = [marker for marker in notify_markers if marker not in bundle]
+    record(
+        "P6 Server酱 通知渠道进了产物（设置键 + 三语文案）",
+        not missing_notify,
+        "缺 %s" % (missing_notify or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(

@@ -25,6 +25,7 @@ export const SettingKey = {
     AlertFeishuWebhook: 'alert_feishu_webhook',
     AlertDingTalkWebhook: 'alert_dingtalk_webhook',
     AlertWeComWebhook: 'alert_wecom_webhook',
+    AlertServerChanSendKey: 'alert_serverchan_sendkey',
     AlertSMTPHost: 'alert_smtp_host',
     AlertSMTPPort: 'alert_smtp_port',
     AlertSMTPUser: 'alert_smtp_user',
@@ -46,7 +47,7 @@ export const SettingKey = {
  * 通知渠道状态与发送前真实测试（R-alert-001）
  */
 export interface NotifyChannelStatus {
-    kind: 'webhook' | 'feishu' | 'dingtalk' | 'wecom' | 'smtp';
+    kind: 'webhook' | 'feishu' | 'dingtalk' | 'wecom' | 'smtp' | 'serverchan';
     enabled: boolean;
     configured: boolean;
     hint: string;

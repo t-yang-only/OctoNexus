@@ -189,9 +189,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._responses(model, stream)
         if self.path.endswith("/messages"):
             return self._messages(model, stream)
+        if self.path.endswith(".send"):
+            return self._serverchan_sink()
         if "/notify/" in self.path:
             return self._notify_sink()
         self._send_json(404, {"error": {"message": "unknown path " + self.path}})
+
+    # ---- Server酱(Turbo/³) 推送桩: 正文是表单, 应答里的 data.errno 才是真结论 ----
+    # sendkey 里带 fail 时回一个业务错误, 用来验证"HTTP 200 也判失败"。
+    def _serverchan_sink(self):
+        if "fail" in self.path:
+            return self._send_json(200, {"code": 0, "message": "",
+                                         "data": {"errno": 1001, "error": "bad sendkey"}})
+        return self._send_json(200, {"code": 0, "message": "",
+                                     "data": {"pushid": "mock", "readkey": "mock",
+                                              "errno": 0, "error": "SUCCESS"}})
 
     # ---- 通知渠道桩 (R-alert-001): 按各家协议返回成功/失败应答, 请求体已由 do_POST 落盘 ----
     def _notify_sink(self):
