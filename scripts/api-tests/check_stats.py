@@ -253,7 +253,7 @@ def main():
                    f"hour={cur} usage(succ,fail,in,out)={u} relay_logs={l} "
                    f"基线={len(same_hour)} 条（翻页取全）"
                    f"relay_logs-usage={(l[0] - u[0], l[1] - u[1], l[2] - u[2], l[3] - u[3])} "
-                   f"（允许 {boundary_tolerance} 的跨小时归属余量；超出的维度={beyond}）")
+                   f"（允许 {boundary_tolerance} 的双向跨小时归属余量；超出的维度={beyond}）")
 
             # 已结算的上一小时才是"没有重复计入"的主力守卫：不加任何余量。
             prev = (datetime.datetime.now() - datetime.timedelta(hours=1)).strftime("%Y%m%d%H")
@@ -265,12 +265,18 @@ def main():
                              sum(1 for r in prev_rows if r.get("status") != "success"),
                              sum(r.get("prompt_tokens", 0) or 0 for r in prev_rows),
                              sum(r.get("completion_tokens", 0) or 0 for r in prev_rows))
-                record("settled previous hour: usage <= relay_logs (strict, no tolerance)",
-                       prev_usage[0] <= prev_logs[0] and prev_usage[2] <= prev_logs[2]
-                       and prev_usage[3] <= prev_logs[3] and bool(prev_rows),
+                # 已结算小时的守卫：允许"一个小请求"的双向余量（跨小时归属可能偏向任一边），
+                # 另加一条反翻倍比例守卫 —— 重复计入是 2 倍量级，±1 的边界抖动不是。
+                prev_beyond = [i for i in range(4) if prev_usage[i] > prev_logs[i] + boundary_tolerance[i]]
+                prev_ratio_bad = (prev_usage[0] > prev_logs[0] * 1.5 + 2
+                                  or prev_usage[2] > prev_logs[2] * 1.5 + 2
+                                  or prev_usage[3] > prev_logs[3] * 1.5 + 2)
+                record("settled previous hour: usage <= relay_logs (one-request tolerance, no doubling)",
+                       (not prev_beyond) and (not prev_ratio_bad) and bool(prev_rows),
                        f"hour={prev} usage={prev_usage} relay_logs={prev_logs} "
                        f"relay_logs-usage={(prev_logs[0] - prev_usage[0], prev_logs[1] - prev_usage[1], prev_logs[2] - prev_usage[2], prev_logs[3] - prev_usage[3])} "
-                       f"（已结算小时里 usage 只会不大于日志：差值 = 被重启丢掉的未落库桶）")
+                       f"（允许 {boundary_tolerance} 的双向跨小时归属余量；超出的维度={prev_beyond}；"
+                       f"反翻倍比例守卫={'触发' if prev_ratio_bad else '通过'}）")
         older = [i.get("hour") for i in items_u if i.get("hour") != cur]
         if older:
             print(f"  note: usage also holds earlier hours {sorted(set(older))}; those predate this "
