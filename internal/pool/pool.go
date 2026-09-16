@@ -62,6 +62,9 @@ type AdapterInfo struct {
 	Fields       []FieldSpec  `json:"fields,omitempty"`
 	Builtin      bool         `json:"builtin"`
 	Since        string       `json:"since,omitempty"` // 引入版本/阶段标记，便于外部工具做兼容判断
+	// Operations 是该后端支持的具体 HTTP 调用（由能力位推导，见 query.go）。
+	// 外部工具照这份清单渲染按钮即可，不必读 octopus 源码、也不必硬编码路径。
+	Operations []Operation `json:"operations,omitempty"`
 }
 
 // Entry 是统一号池视图的一行，与具体后端无关。
@@ -186,7 +189,12 @@ func Kinds() []AdapterInfo {
 	defer registry.mu.RUnlock()
 	infos := make([]AdapterInfo, 0, len(registry.order))
 	for _, kind := range registry.order {
-		infos = append(infos, registry.adapters[kind].Info())
+		info := registry.adapters[kind].Info()
+		// 操作清单在这里统一回填：适配器只声明能力位，路由清单由能力位推导，二者不可能漂移。
+		if info.Operations == nil {
+			info.Operations = operationsOf(info.Capabilities)
+		}
+		infos = append(infos, info)
 	}
 	return infos
 }

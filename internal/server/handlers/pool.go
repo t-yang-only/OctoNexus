@@ -1,7 +1,11 @@
 package handlers
 
 import (
+	"encoding/csv"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/pool"
 	"github.com/bestruirui/octopus/internal/server/middleware"
@@ -34,6 +38,14 @@ func init() {
 		AddRoute(
 			router.NewRoute("/stats", http.MethodGet).
 				Handle(poolStats),
+		).
+		AddRoute(
+			router.NewRoute("/summary", http.MethodGet).
+				Handle(poolSummary),
+		).
+		AddRoute(
+			router.NewRoute("/export", http.MethodGet).
+				Handle(poolExport),
 		).
 		AddRoute(
 			router.NewRoute("/kinds/:kind/sync", http.MethodPost).
@@ -74,22 +86,68 @@ func poolKinds(c *gin.Context) {
 // 单个后端取不到数据时不算失败：错误进 warnings[], 其余照回，接口仍 200——
 // 号池是排查现场的地方，一个坏后端把整张表变成 500 只会让人更难定位。
 func poolEntries(c *gin.Context) {
-	kind := c.Query("kind")
-	entries, failures, err := pool.Entries(c.Request.Context(), kind)
+	filter, err := pool.ParseFilter(
+		c.Query("kind"), c.Query("provider"), c.Query("status"), c.Query("q"),
+		c.Query("enabled"), c.Query("healthy"), c.Query("expiring_within"), c.Query("has_expiry"),
+	)
 	if err != nil {
 		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if entries == nil {
-		entries = []pool.Entry{}
+	result, err := pool.List(c.Request.Context(), filter, time.Now())
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
 	}
-	warnings := make([]pool.KindError, 0, len(failures))
-	warnings = append(warnings, failures...)
+	if result.Items == nil {
+		result.Items = []pool.Entry{}
+	}
+	// scanned 与 total 都回：调用方一眼看出"是过滤掉了"还是"后端本来就空"。
 	resp.Success(c, gin.H{
-		"items":    entries,
-		"total":    len(entries),
-		"kind":     kind,
-		"warnings": warnings,
+		"items":    result.Items,
+		"total":    result.Total,
+		"scanned":  result.Scanned,
+		"kind":     filter.Kind,
+		"warnings": result.Warnings,
+	})
+}
+
+// poolSummary 返回汇总视图：总数/启用/健康/带错/临期/过期 + 分后端/分服务商/分状态。
+//
+// 与 /stats 的区别：stats 只数个数；summary 按状态与到期窗口切分，并显式列出取不到数据的后端，
+// 让"池子是空的"与"某个后端坏了"可以区分开。
+func poolSummary(c *gin.Context) {
+	resp.Success(c, pool.SummaryOf(c.Request.Context(), time.Now()))
+}
+
+// poolExport 导出统一视图（不含任何凭据字段）。
+//
+// format=json（默认）给外部工具直接吃；format=csv 给人/表格软件看。
+func poolExport(c *gin.Context) {
+	rows, failures, err := pool.ExportRows(c.Request.Context(), c.Query("kind"))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.EqualFold(c.Query("format"), "csv") {
+		c.Header("Content-Type", "text/csv; charset=utf-8")
+		c.Header("Content-Disposition", "attachment; filename=pool-entries.csv")
+		writer := csv.NewWriter(c.Writer)
+		_ = writer.Write([]string{"kind", "id", "name", "provider", "status", "enabled", "healthy", "plan_tier", "expires_at", "last_error"})
+		for _, row := range rows {
+			_ = writer.Write([]string{
+				row.Kind, row.ID, row.Name, row.Provider, row.Status,
+				strconv.FormatBool(row.Enabled), strconv.FormatBool(row.Healthy),
+				row.PlanTier, row.ExpiresAt, row.LastError,
+			})
+		}
+		writer.Flush()
+		return
+	}
+	resp.Success(c, gin.H{
+		"items":    rows,
+		"total":    len(rows),
+		"warnings": failures,
 	})
 }
 
