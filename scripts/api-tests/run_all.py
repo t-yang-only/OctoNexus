@@ -52,6 +52,8 @@ SUITES = [
     ("export", "run_log_export_audit.py", "请求级明细导出（CSV 形状/字段等价/筛选/鉴权/下载响应头）", "instance,mock,db"),
     ("stats", "check_stats.py", "后台统计审计（日志/缓存/daily/usage 与 relay_logs 对照）", "instance"),
     ("pool", "run_pool_audit.py", "号池统一视图（谷歌/GPT/Claude 合并视图 + 同步契约 + 鉴权）", "instance,db"),
+    ("notifyproblem", "run_notify_problem_test.py",
+     "告警链路（Runner 失败自动推送 / 自检可达 / 绿时不打扰 / 凭据不回显）", "instance,mock"),
     ("poolapi", "run_pool_api_test.py", "号池扩展层（后端自描述 / 统一视图 / 凭据不泄漏 / 计数一致）", "instance,db"),
     ("panel", "run_panel_asset_test.py", "面板静态资源（页面随二进制发布 / 三语文案齐全）", "instance"),
     ("apikey", "run_apikey_audit.py", "Key 级审计（限流/过期/禁用/额度/越权/登录/流/中止）", "instance,mock"),
@@ -209,6 +211,24 @@ def run_step(command, cwd=HERE):
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
+def notify_problem(title, desp):
+    """把问题推给用户（Server酱）。
+
+    刻意做成"另外开一个进程"：告警脚本自己带凭据读取、退出码与 dry-run 语义，
+    运行器只负责在失败时叫它一声 —— 推送失败绝不能改变矩阵本身的结论。
+    """
+    script = os.path.join(HERE, "notify_problem.py")
+    try:
+        proc = subprocess.run([sys.executable, script, "--title", title, "--desp", desp],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except Exception as exc:  # 连脚本都没跑起来：只记一笔，不影响退出码
+        log("告警推送未能启动：%s" % exc)
+        return False
+    first_line = (proc.stdout or "").strip().splitlines()
+    log("告警推送 exit=%d %s" % (proc.returncode, first_line[0] if first_line else "(无输出)"))
+    return proc.returncode == 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="octopus 本地 API 测试总运行器")
     parser.add_argument("--only", help="只跑指定套件，逗号分隔（见 --list）")
@@ -216,7 +236,22 @@ def main():
     parser.add_argument("--keep-mock", action="store_true", help="跑完不停止本运行器启动的 mock")
     parser.add_argument("--with-real", action="store_true",
                         help="允许跑会打真实上游、会产生费用的套件（real / costmode）；默认跳过")
+    parser.add_argument("--notify", action="store_true",
+                        help="有套件失败时用 Server酱 推一条告警（也可用 OCTOPUS_NOTIFY_PROBLEM=1）")
+    parser.add_argument("--notify-selftest", action="store_true",
+                        help="只发一条「告警通道自检」并退出：用来验证“出问题真的能通知到我”这条链路是通的")
     args = parser.parse_args()
+
+    if args.notify_selftest:
+        # 自检不需要实例、不需要 mock：它验证的是"问题能不能到人手上"。
+        ok = notify_problem(
+            "告警通道自检",
+            "这是一条自检消息：如果你看到它，说明 octopus 出问题时这条推送链路是通的。\n\n"
+            "- 触发方：`scripts/api-tests/run_all.py --notify-selftest`\n"
+            "- 用途：测试套件失败时也会走同一条链路（`--notify` 或 `OCTOPUS_NOTIFY_PROBLEM=1`）\n"
+            "- 凭据：只从 `OCTOPUS_SERVERCHAN_SENDKEY` 读，不落仓库",
+        )
+        return 0 if ok else 1
 
     if args.list:
         for key, script, desc, needs in SUITES:
@@ -307,6 +342,23 @@ def main():
         print("%-10s %-34s %s" % (key, desc[:34], verdict))
     print("--------------------------------------------------")
     print("套件 %d 个，未通过 %d 个" % (len(results), bad))
+    if bad:
+        # 失败时主动告知（"遇到问题通知我"）：默认不开，--notify 或 OCTOPUS_NOTIFY_PROBLEM=1 才推，
+        # 免得每次本地小跑都往人手机上发消息。推送成功与否都不改变退出码。
+        notify_enabled = args.notify or os.environ.get("OCTOPUS_NOTIFY_PROBLEM") == "1"
+        if notify_enabled:
+            failed_lines = []
+            for key, desc, total, passed, failed, note in results:
+                if (total is None and ("FAIL" in note or "依赖失败" in note)) or (failed or 0) > 0:
+                    failed_lines.append("- %s：%s" % (key, note if total is None else "%d/%d" % (passed, total)))
+            notify_problem(
+                "测试套件失败 %d 个" % bad,
+                "octopus 本地测试矩阵有套件未通过。\n\n" + "\n".join(failed_lines) +
+                "\n\n- 共 %d 个套件，未通过 %d 个\n- 复现：`python scripts/api-tests/run_all.py`"
+                % (len(results), bad),
+            )
+        else:
+            log("有套件未通过；需要时用 --notify 或 OCTOPUS_NOTIFY_PROBLEM=1 让它推送到手机")
     return 0 if bad == 0 else 1
 
 

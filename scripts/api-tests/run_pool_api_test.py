@@ -19,6 +19,7 @@ import os
 import sqlite3
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ADMIN = os.environ.get("OCTOPUS_ADMIN_URL", "http://127.0.0.1:13303")
@@ -351,6 +352,30 @@ def main():
         record("P15c CSV 带 BOM 且每行列数与表头一致",
                status == 200 and has_bom and len(header) == 10 and widths == {len(header)},
                "BOM=%s 表头列数=%d 各行列数=%s" % (has_bom, len(header), sorted(widths)))
+
+        # P15d 导出口径 = 列表口径（同一筛选、同一排序：面板"按当前筛选导出"必须与屏幕一致）
+        status, payload, _ = call("GET", "/api/v1/pool/entries?q=" + RUN_TAG + "&sort=name&desc=1")
+        listed = [(item or {}).get("id") for item in ((payload or {}).get("items") or [])]
+        listed_names = [(item or {}).get("name") for item in ((payload or {}).get("items") or [])]
+        status, payload, _ = call("GET", "/api/v1/pool/export?q=" + RUN_TAG + "&sort=name&desc=1")
+        exported = [(row or {}).get("id") for row in ((payload or {}).get("items") or [])]
+        record("P15d 导出与列表逐条同序（同筛选 + 同排序）",
+               status == 200 and len(listed) == 3 and exported == listed,
+               "HTTP %s 列表=%s 导出=%s" % (status, listed, exported))
+
+        if listed_names:
+            needle = urllib.parse.quote(listed_names[0])
+            status, payload, _ = call("GET", "/api/v1/pool/export?q=" + needle)
+            picked = [(row or {}).get("name") for row in ((payload or {}).get("items") or [])]
+            record("P15e 导出遵守 q 过滤（只留匹配的那条，不是无脑全量）",
+                   status == 200 and picked == [listed_names[0]] and entry_count > 1,
+                   "HTTP %s 命中=%s（池内共 %d 条）" % (status, picked, entry_count))
+
+            status, _, raw = call("GET", "/api/v1/pool/export?format=csv&q=" + needle)
+            csv_lines = [line for line in raw.lstrip("\ufeff").splitlines() if line.strip()]
+            record("P15f CSV 导出同样遵守筛选（表头 + 恰好一行数据）",
+                   status == 200 and len(csv_lines) == 2,
+                   "HTTP %s 行数=%d" % (status, len(csv_lines)))
 
         # ===== 第四批：单 kind 详情 / 分页排序 / 批量动作 / OpenAPI =====
         # P16 单个后端的详情（外部工具点进某个后端时才拿这一份，不用先拉全部再筛）

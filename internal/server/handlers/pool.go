@@ -134,8 +134,15 @@ func poolSummary(c *gin.Context) {
 // poolExport 导出统一视图（不含任何凭据字段）。
 //
 // format=json（默认）给外部工具直接吃；format=csv 给人/表格软件看。
+// 筛选参数与 /pool/entries 完全同一套（同一个 pool.ParseFilter），面板才能"按当前筛选导出"。
+// 注意导出不分页：limit/offset 会被忽略，导出就是把当前筛选结果整个拿走。
 func poolExport(c *gin.Context) {
-	rows, failures, err := pool.ExportRows(c.Request.Context(), c.Query("kind"))
+	filter, err := pool.ParseFilter(queryParams(c))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	rows, failures, err := pool.ExportRows(c.Request.Context(), filter, time.Now())
 	if err != nil {
 		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
