@@ -52,6 +52,19 @@ func init() {
 				Handle(poolSyncKind),
 		).
 		AddRoute(
+			router.NewRoute("/kinds/:kind", http.MethodGet).
+				Handle(poolKind),
+		).
+		AddRoute(
+			router.NewRoute("/openapi.json", http.MethodGet).
+				Handle(poolOpenAPI),
+		).
+		AddRoute(
+			router.NewRoute("/entries/batch", http.MethodPost).
+				Use(middleware.RequireJSON()).
+				Handle(poolBatch),
+		).
+		AddRoute(
 			router.NewRoute("/entries/:kind/:id", http.MethodGet).
 				Handle(poolGetEntry),
 		).
@@ -86,10 +99,7 @@ func poolKinds(c *gin.Context) {
 // 单个后端取不到数据时不算失败：错误进 warnings[], 其余照回，接口仍 200——
 // 号池是排查现场的地方，一个坏后端把整张表变成 500 只会让人更难定位。
 func poolEntries(c *gin.Context) {
-	filter, err := pool.ParseFilter(
-		c.Query("kind"), c.Query("provider"), c.Query("status"), c.Query("q"),
-		c.Query("enabled"), c.Query("healthy"), c.Query("expiring_within"), c.Query("has_expiry"),
-	)
+	filter, err := pool.ParseFilter(queryParams(c))
 	if err != nil {
 		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -106,6 +116,7 @@ func poolEntries(c *gin.Context) {
 	resp.Success(c, gin.H{
 		"items":    result.Items,
 		"total":    result.Total,
+		"returned": result.Returned,
 		"scanned":  result.Scanned,
 		"kind":     filter.Kind,
 		"warnings": result.Warnings,
@@ -154,4 +165,72 @@ func poolExport(c *gin.Context) {
 // poolStats 返回号池聚合计数（总数/启用/健康/分后端）。
 func poolStats(c *gin.Context) {
 	resp.Success(c, pool.Snapshot(c.Request.Context()))
+}
+
+// poolAPIVersion 是号池接口面自己的版本号（能力位/路由变化时递增）。
+const poolAPIVersion = "1.0.0"
+
+// queryParams 把查询参数压成 map 交给 pool.ParseFilter（参数越加越多，不再用长参数列表）。
+// 同名参数取第一个：接口语义是"标量参数"，取第一个比取最后一个更符合直觉。
+func queryParams(c *gin.Context) map[string]string {
+	params := map[string]string{}
+	for key, values := range c.Request.URL.Query() {
+		if len(values) > 0 {
+			params[key] = values[0]
+		}
+	}
+	return params
+}
+
+// poolKind 取单个号池后端的自描述；未注册回 404（与其它未知 kind 一致）。
+func poolKind(c *gin.Context) {
+	kind := c.Param("kind")
+	for _, info := range pool.Kinds() {
+		if info.Kind == kind {
+			resp.Success(c, info)
+			return
+		}
+	}
+	resp.Error(c, http.StatusNotFound, "unknown pool kind: "+kind)
+}
+
+// poolBatch 批量动作：逐条独立，一条失败不影响其余。
+//
+// 需要 ids 或 filter+max —— 不允许"不写条件就全量打一遍"：那是运维事故而不是功能。
+func poolBatch(c *gin.Context) {
+	var body struct {
+		Action string            `json:"action" binding:"required"`
+		Kind   string            `json:"kind"`
+		IDs    []string          `json:"ids"`
+		Filter map[string]string `json:"filter"`
+		Max    int               `json:"max"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		return
+	}
+	request := pool.BatchRequest{Action: body.Action, Kind: body.Kind, IDs: body.IDs, Max: body.Max}
+	if len(body.Filter) > 0 {
+		filter, err := pool.ParseFilter(body.Filter)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		// 批量按条件取目标时必须显式给 kind 或让 filter 自己带 kind，避免误伤整个号池。
+		if filter.Kind == "" {
+			filter.Kind = body.Kind
+		}
+		request.Filter = &filter
+	}
+	result, err := pool.Batch(c.Request.Context(), request, time.Now())
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, result)
+}
+
+// poolOpenAPI 返回号池接口的 OpenAPI 文档（由注册表推导：注册了新后端，文档自动跟着长）。
+func poolOpenAPI(c *gin.Context) {
+	resp.Success(c, pool.OpenAPIDocument(poolAPIVersion))
 }
