@@ -129,12 +129,20 @@ def main():
     body = form_text(rows[0].get("body") if rows else "")
     record("N3 投递成功时退出 0，且桩收到 title/desp/tags 表单",
            code == 0 and "NOTIFY_PROBLEM ok=True" in out and len(rows) == 1
-           and (rows[0].get("path") or "").endswith(GOOD_KEY + ".send")
+           and (rows[0].get("path") or "").endswith(".send")
+           and GOOD_KEY not in (rows[0].get("path") or "")
            and "title" in body and "desp" in body and "tags" in body,
            "exit=%s posts=%d path=%s" % (code, len(rows), rows[0].get("path") if rows else None))
 
     record("N3b 凭据不出现在输出里（脚本不回显 SendKey）",
            GOOD_KEY not in out, "输出里是否含 SendKey：%s" % (GOOD_KEY in out))
+
+    # N3c 桩日志也不许留凭据：Server酱 的凭据整段就在路径里，落盘前必须换成指纹
+    #     （本轮真的踩到：产品的真实告警走桩时把真 SendKey 写进了 requests.jsonl）
+    record("N3c 桩日志里的 SendKey 已被脱敏（凭据不落盘）",
+           len(rows) == 1 and GOOD_KEY not in (rows[0].get("path") or "")
+           and "…" in (rows[0].get("path") or ""),
+           "path=%s" % (rows[0].get("path") if rows else None))
 
     # N4 业务错误码：HTTP 200 包着 errno 非 0 也必须算失败（退出 2）
     code, out = run([NOTIFY, "--title", "业务错误", "--desp", "正文"],

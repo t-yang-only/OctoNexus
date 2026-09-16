@@ -32,6 +32,7 @@ and arrives at /v1/chat/completions).
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -60,8 +61,26 @@ def _redact(value):
     return kind + hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
+def redact_path(path):
+    """路径里可能整段就是凭据（Server酱 的 /<SendKey>.send）—— 落盘前一律换成指纹。
+
+    这里刻意做成 log_request 的唯一入口：调用方忘了脱敏也不会泄露，
+    因为"凭据不进测试日志"这件事只能有一个实施点。
+    """
+    if not path:
+        return path
+    match = re.search(r"/([A-Za-z0-9_.\-]{12,})\.send(\?|$)", path)
+    if not match:
+        return path
+    secret = match.group(1)
+    masked = "%s…%s" % (secret[:4], hashlib.sha256(secret.encode("utf-8")).hexdigest()[:8])
+    return path[:match.start(1)] + masked + ".send" + (match.group(2) if match.group(2) != "?" else "")
+
+
 def log_request(entry):
     entry["ts"] = time.strftime("%H:%M:%S")
+    if isinstance(entry.get("path"), str):
+        entry["path"] = redact_path(entry["path"])
     with _lock:
         with open(LOG_PATH, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
