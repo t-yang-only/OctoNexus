@@ -213,8 +213,14 @@ export function poolBatch(request: { action: string; kind?: string; ids?: string
 }
 
 // poolExportURL 导出统一视图的地址（json 给工具，csv 给人）；用链接直接下载，走浏览器的登录态。
-export function poolExportURL(format: 'json' | 'csv', kind?: string): string {
-    const params = new URLSearchParams({ format });
-    if (kind) params.set('kind', kind);
+// 带上当前筛选条件：导出与屏幕上的列表必须是同一口径（后端与 /pool/entries 共用同一份 Filter 解析）。
+// limit/offset 故意不下发：导出是"把当前筛选结果整个拿走"，分页只属于列表页。
+export function poolExportURL(format: 'json' | 'csv', filter?: PoolEntryFilter): string {
+    // 显式白名单：只带筛选与排序，不带分页（limit/offset 不属于导出）。
+    const { kind, q, provider, status, enabled, healthy, hasExpiry, expiringWithin, sort, desc } = filter ?? {};
+    const params = new URLSearchParams(
+        poolQueryString({ kind, q, provider, status, enabled, healthy, hasExpiry, expiringWithin, sort, desc }),
+    );
+    params.set('format', format);
     return `/api/v1/pool/export?${params.toString()}`;
 }

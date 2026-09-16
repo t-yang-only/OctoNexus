@@ -112,3 +112,6 @@
 | | 备注：实证 POST /channel/delete/:id → 404、DELETE → 200 且库里该行消失；套件清理与"建前删旧"统一改 DELETE，并清掉历史残留 3 条，重跑后查库零残留。教训：夹具清理本身要验证——"调了删除接口"不等于"真删了"。| 2026-09-16 14:05:00 |
 | T-alert-002 | 通知渠道新增 Server酱（ServerChan/Turbo³）：表单推送 + 业务错误码判定 + 凭据不外显（R-alert-002）| internal/notify, internal/model, web | done |
 | | 备注：入口 `POST <base>/<SendKey>.send`，正文表单 title/desp/tags（故新增 postForm）；应答看顶层 code 与 data.errno；SendKey 环境变量 `OCTOPUS_SERVERCHAN_SENDKEY` 优先、设置表 `alert_serverchan_sendkey` 回落；测试缝 `OCTOPUS_SERVERCHAN_BASE_URL` 让套件打本地桩。验证：serverchan_test 6 例 + 活体套件 +3 用例（5→6）+ 一次性真实推送。| 2026-09-16 14:40:00 |
+| T-pool-ext-010 | 号池导出口径与列表一致（ExportRows 收 Filter、共用比较器、面板带筛选导出） | done |
+| T-alert-003 | 告警链路：notify_problem.py + run_all --notify/--notify-selftest + notifyproblem 套件 | done |
+| T-test-013 | 导出口径活体用例 P15d/P15e/P15f；告警链路套件 10 例（含真实 400 应答口径单测） | done |

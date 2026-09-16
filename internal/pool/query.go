@@ -111,26 +111,39 @@ func List(ctx context.Context, filter Filter, now time.Time) (ListResult, error)
 }
 
 // sortEntries 稳定排序；未知排序字段按 kind 处理（外部工具传错字段不该让整请求失败）。
+// 默认（与 "kind"）用 kind→provider→name 三键：列表与导出共用同一个比较器，
+// 这样"面板看到的顺序"与"导出拿走的顺序"永远一致，diff 也稳定。
 func sortEntries(items []Entry, sortBy string, desc bool) {
-	less := func(i, j int) bool { return items[i].Kind < items[j].Kind }
+	less := lessByKindProviderName
 	switch strings.ToLower(sortBy) {
 	case "name":
-		less = func(i, j int) bool { return items[i].Name < items[j].Name }
+		less = func(items []Entry, i, j int) bool { return items[i].Name < items[j].Name }
 	case "provider":
-		less = func(i, j int) bool { return items[i].Provider < items[j].Provider }
+		less = func(items []Entry, i, j int) bool { return items[i].Provider < items[j].Provider }
 	case "status":
-		less = func(i, j int) bool { return items[i].Status < items[j].Status }
+		less = func(items []Entry, i, j int) bool { return items[i].Status < items[j].Status }
 	case "enabled":
-		less = func(i, j int) bool { return !items[i].Enabled && items[j].Enabled }
+		less = func(items []Entry, i, j int) bool { return !items[i].Enabled && items[j].Enabled }
 	case "expires":
-		less = func(i, j int) bool { return expiryKey(items[i]) < expiryKey(items[j]) }
+		less = func(items []Entry, i, j int) bool { return expiryKey(items[i]) < expiryKey(items[j]) }
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if desc {
-			return less(j, i)
+			return less(items, j, i)
 		}
-		return less(i, j)
+		return less(items, i, j)
 	})
+}
+
+// lessByKindProviderName 是默认排序：kind → provider → name（导出工具最爱的稳定三键）。
+func lessByKindProviderName(items []Entry, i, j int) bool {
+	if items[i].Kind != items[j].Kind {
+		return items[i].Kind < items[j].Kind
+	}
+	if items[i].Provider != items[j].Provider {
+		return items[i].Provider < items[j].Provider
+	}
+	return items[i].Name < items[j].Name
 }
 
 // expiryKey 把可空时间转成可比较的字符串：没有到期时间的排在最后。
@@ -273,14 +286,30 @@ type ExportRow struct {
 	LastError string `json:"last_error"`
 }
 
-// ExportRows 生成导出行；按 kind/provider/name 稳定排序，便于 diff 与比对。
-func ExportRows(ctx context.Context, kind string) ([]ExportRow, []KindError, error) {
-	entries, failures, err := Entries(ctx, kind)
+// ExportRows 生成导出行：筛选与排序口径与统一视图完全一致（同一份 Filter、同一个 matches/sortEntries），
+// 只在最后一层换成"扁平行"的字段形状 —— 否则面板看到的和导出拿走会是两套口径。
+//
+// 导出**不分页**：导出就是"把当前筛选结果整个拿走"，Limit/Offset 在这里被忽略（列表页要翻页，导出不要）。
+func ExportRows(ctx context.Context, filter Filter, now time.Time) ([]ExportRow, []KindError, error) {
+	entries, failures, err := Entries(ctx, filter.Kind)
 	if err != nil {
 		return nil, nil, err
 	}
-	rows := make([]ExportRow, 0, len(entries))
+	picked := make([]Entry, 0, len(entries))
 	for _, entry := range entries {
+		if !filter.matches(entry, now) {
+			continue
+		}
+		picked = append(picked, entry)
+	}
+	if filter.Sort == "" {
+		// 默认排序与列表共用同一个比较器（kind → provider → name），保证两边顺序一致。
+		sortEntries(picked, "", false)
+	} else {
+		sortEntries(picked, filter.Sort, filter.Desc)
+	}
+	rows := make([]ExportRow, 0, len(picked))
+	for _, entry := range picked {
 		expires := ""
 		if entry.ExpiresAt != nil {
 			expires = entry.ExpiresAt.Format(time.RFC3339)
@@ -291,15 +320,6 @@ func ExportRows(ctx context.Context, kind string) ([]ExportRow, []KindError, err
 			PlanTier: entry.PlanTier, ExpiresAt: expires, LastError: entry.LastError,
 		})
 	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Kind != rows[j].Kind {
-			return rows[i].Kind < rows[j].Kind
-		}
-		if rows[i].Provider != rows[j].Provider {
-			return rows[i].Provider < rows[j].Provider
-		}
-		return rows[i].Name < rows[j].Name
-	})
 	return rows, failures, nil
 }
 

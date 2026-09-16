@@ -151,7 +151,7 @@ func TestExportRowsNoCredentialFields(t *testing.T) {
 	now := time.Now()
 	withFake(t, fakeAdapter{kind: "e", entries: fixedEntries(now)})
 
-	rows, _, err := ExportRows(context.Background(), "e")
+	rows, _, err := ExportRows(context.Background(), Filter{Kind: "e"}, now)
 	if err != nil || len(rows) != 3 {
 		t.Fatalf("ExportRows = %d 行 / %v", len(rows), err)
 	}
@@ -169,6 +169,59 @@ func TestExportRowsNoCredentialFields(t *testing.T) {
 	// 排序稳定：kind 相同则按 provider 再按 name。
 	if rows[0].Provider != "claude" || rows[1].Provider != "gemini" || rows[2].Provider != "openai" {
 		t.Fatalf("导出排序不稳定: %+v", rows)
+	}
+}
+
+func TestExportRowsHonoursTheSameFilterAsList(t *testing.T) {
+	now := time.Now()
+	withFake(t, fakeAdapter{kind: "e", entries: fixedEntries(now)})
+
+	enabled := false
+	hasExpiry := true
+	cases := []struct {
+		name   string
+		filter Filter
+	}{
+		{"按名称子串", Filter{Kind: "e", Query: "beta"}},
+		{"按状态", Filter{Kind: "e", Status: "active"}},
+		{"按启用位", Filter{Kind: "e", Enabled: &enabled}},
+		{"按有无到期时间", Filter{Kind: "e", HasExpiry: &hasExpiry}},
+		{"按临期窗口", Filter{Kind: "e", Expiring: time.Hour, HasExpiry: &hasExpiry}},
+		{"按服务商", Filter{Kind: "e", Provider: "gemini"}},
+		{"排序与列表一致", Filter{Kind: "e", Sort: "name", Desc: true}},
+	}
+	for _, testCase := range cases {
+		result, err := List(context.Background(), testCase.filter, now)
+		if err != nil {
+			t.Fatalf("%s: List: %v", testCase.name, err)
+		}
+		rows, _, err := ExportRows(context.Background(), testCase.filter, now)
+		if err != nil {
+			t.Fatalf("%s: ExportRows: %v", testCase.name, err)
+		}
+		// 导出与列表必须逐条同序同内容 —— 面板"按当前筛选导出"才拿得到与屏幕一致的结果。
+		if len(rows) != len(result.Items) {
+			t.Fatalf("%s: 导出 %d 行 / 列表 %d 条", testCase.name, len(rows), len(result.Items))
+		}
+		for i, entry := range result.Items {
+			if rows[i].ID != entry.ID {
+				t.Fatalf("%s: 第 %d 行导出 %q / 列表 %q", testCase.name, i, rows[i].ID, entry.ID)
+			}
+		}
+	}
+
+	// 导出不分页：limit/offset 只影响列表页，不影响导出（导出=把当前筛选结果整个拿走）。
+	paged := Filter{Kind: "e", Limit: 1, Offset: 1}
+	result, err := List(context.Background(), paged, now)
+	if err != nil {
+		t.Fatalf("List(分页): %v", err)
+	}
+	rows, _, err := ExportRows(context.Background(), paged, now)
+	if err != nil {
+		t.Fatalf("ExportRows(分页): %v", err)
+	}
+	if result.Returned != 1 || len(rows) != 3 {
+		t.Fatalf("分页语义错：列表 returned=%d（应 1），导出 %d 行（应 3）", result.Returned, len(rows))
 	}
 }
 
