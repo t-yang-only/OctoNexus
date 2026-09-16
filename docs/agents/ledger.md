@@ -76,3 +76,6 @@
 
 | T-pool-ext-001 | 号池扩展层第一批接口：适配器注册表 + 统一视图 + 只读 API（R-pool-ext-001）| pool/api | done |
 | | 备注：用户 2026-09-16 指令「号池加入高度扩展性，可基于已有的开发大量 API 接口，后面好做各种反代工具包的扩展」。新增 internal/pool（Adapter/Registry/Capability/FieldSpec/Entry + 内置官方账号池适配器 + safeEntries 的 panic 兜底），官方账号池适配器只投影既有 op.OfficialPoolStatusList（不新增表、不动选路）；新增 GET /api/v1/pool/{kinds,entries,stats}（Admin+Auth；单后端失败进 warnings 且仍 200）；单测 6/6、活体套件 run_pool_api_test.py 8/8（含凭据泄漏探针：往库里写可识别串并断言不出现在响应里）；矩阵扩到 23 套件。设计文档 docs/requirements/2026-09-16-号池扩展性-design.md §4 给出后续批次（单条详情/生命周期操作/运行时声明式适配器注册），§6 列出四个待用户拍板的取舍。已提交。 | 2026-09-16 09:44:00 |
+
+| T-pool-ext-002 | 号池扩展层第二批：按能力位放行的生命周期操作（R-pool-ext-001）| pool/api | done |
+| | 备注：新增可选能力接口 Getter/Prober/Refresher/Syncer/Toggler（能力位=对外声明, 接口=对内契约, 两层都满足才放行；缺能力位或声明了没实现都回 ErrUnsupported, 后者消息点名 declared but not implemented）；官方账号池适配器用既有 op 实现 get/probe/refresh/sync（probe 失败也回条目；sync 逐服务商跑, 一个失败不影响其余）；新增 GET /pool/entries/:kind/:id、POST /pool/entries/:kind/:id/{probe,refresh,enable,disable}、POST /pool/kinds/:kind/sync；错误映射即契约（未知 kind/条目不存在 404、无此能力 501、其余 502）。刻意没做：不给官方账号池声明 toggle（无渠道凭据级启停 op, 宁可回 501 也不假装支持）；活体不真跑 official 的 sync（会给实例建号池渠道, 属写副作用）。验证：单测 internal/pool 10/10（新增 4 例）、活体 run_pool_api_test.py 14/14（新增 6 例）、全量矩阵 23 套件 0 失败。已提交。 | 2026-09-16 09:57:28 |
