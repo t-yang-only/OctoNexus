@@ -87,3 +87,8 @@
 
 | T-pool-ext-004 | 号池扩展层第四批：分页排序 + 批量动作 + 单 kind 详情 + OpenAPI 文档（R-pool-ext-001）| pool/api | done |
 | | 备注：query.go 加分页/排序（total 与 returned 分开回、越界回空、未知排序字段回退不报错）；新增 internal/pool/batch.go（逐条独立、未声明能力逐条回不支持、需要 ids 或 filter+max、默认 50/硬上限 200、超出计 skipped）；新增 internal/pool/openapi.go（由注册表推导 paths 与 kind 枚举、12 个组件 schema）；路由新增 GET /kinds/:kind、GET /openapi.json、POST /entries/batch。验证：internal/pool 单测 23 例全绿（新增 8 例）、活体 run_pool_api_test.py 30/30（新增 9 条断言）、全量矩阵 23 套件 0 失败。已提交。 | 2026-09-16 10:47:08 |
+
+| T-pool-ext-005 | 号池适配器契约自检工具包 + 适配器开发指南（R-pool-ext-001）| pool/docs | done |
+| | 备注：新增 internal/pool/pooltest（Run/Check 七类契约检查：身份/能力位/声明即实现/字段/条目身份/凭据不外泄/列表详情一致/panic 兜底），配套单测 12 例（每条规则都有反例）与可执行示例适配器 example_adapter_test.go；给 internal/pool 加公开助手 KnownCapability/AllCapabilities；新增 docs/guides/号池适配器开发指南.md（九节：定位图/最小适配器/能力位对照/自检/注册/错误语义/常见坑）。本批无行为变更（不重启实例）。验证：pooltest 12 例、pool 23 例、go test ./... 12 包全绿、build/vet 0、gofmt 干净、活体矩阵回归无失败。已提交。 | 2026-09-16 10:59:40 |
+| T-test-007 | stats 套件「已结算上一小时」过强断言修复（测试装置自身缺陷）| scripts/api-tests | done |
+| | 备注：根因是我上一批自己写下的判据过强——"已结算小时 usage 只会不大于日志（差值=被重启丢掉的未落库桶）"不成立，跨小时归属是**双向**的（骑在小时边界上的请求在 usage 桶与 relay_logs 里按不同时间戳归属），上一批自己的实证证据 hour09=(−1,0,−11,−7)、hour10=(+1,0,+11,+7) 已经两种方向都出现过。修复：settled 小时改用与当前小时同一条双向余量 boundary_tolerance=(1,1,20,20)，并追加**反翻倍比例守卫**（usage 请求数/token 不得超过日志的 1.5 倍＋2 —— 重复计入是 2 倍量级，±1 的边界抖动抓不住它）。实证：修复前 FAIL hour=2026091610 usage=(284,14,5071,3158) vs relay_logs=(283,14,5060,3151)；修复后 14/14 通过（同一读数落在余量内、反翻倍守卫通过）。| 2026-09-16 11:05:00 |

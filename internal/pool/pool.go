@@ -45,6 +45,14 @@ var allCapabilities = map[Capability]bool{
 	CapToggle: true, CapProvision: true, CapRevoke: true, CapSync: true,
 }
 
+// KnownCapability 判断能力位是否是本层认识的值（适配器契约自检 / 外部工具校验用）。
+func KnownCapability(capability Capability) bool { return allCapabilities[capability] }
+
+// AllCapabilities 返回全部合法能力位（按固定顺序，供文档与界面枚举）。
+func AllCapabilities() []Capability {
+	return []Capability{CapList, CapGet, CapProbe, CapRefresh, CapToggle, CapProvision, CapRevoke, CapSync}
+}
+
 // FieldSpec 描述条目上的一个字段，供界面与外部工具渲染，不必硬编码字段名。
 type FieldSpec struct {
 	Name     string `json:"name"`
