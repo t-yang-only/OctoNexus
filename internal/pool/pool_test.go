@@ -40,15 +40,20 @@ func withFake(t *testing.T, adapter Adapter) {
 
 // withoutBuiltin 在"枚举全部 kind"的用例里临时摘掉内置适配器。
 //
-// 内置的官方账号池适配器要读数据库：单测环境没有初始化 DB, 直接枚举会走到 op 层并 panic
-// （生产环境有默认 DB, 所以只有单测需要隔离）。摘掉再装回, 别的用例不受影响。
+// 内置适配器都要读数据库（官方账号池读 op 层、渠道凭据读 channels/channel_keys）：单测环境没有
+// 初始化 DB, 直接枚举会走到 db 层并 panic（生产环境有默认 DB, 所以只有单测需要隔离）。
+// 摘掉再装回, 别的用例不受影响；新增内置适配器时记得加进这个清单。
 func withoutBuiltin(t *testing.T) {
 	t.Helper()
-	if Has(officialKind) {
-		unregister(officialKind)
+	for _, adapter := range []Adapter{officialAdapter{}, stationAdapter{}} {
+		kind := adapter.Info().Kind
+		if !Has(kind) {
+			continue
+		}
+		unregister(kind)
 		t.Cleanup(func() {
-			if err := Register(officialAdapter{}); err != nil {
-				t.Fatalf("恢复内置适配器失败: %v", err)
+			if err := Register(adapter); err != nil {
+				t.Fatalf("恢复内置适配器 %s 失败: %v", kind, err)
 			}
 		})
 	}

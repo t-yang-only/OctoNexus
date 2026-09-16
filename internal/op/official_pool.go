@@ -40,6 +40,15 @@ func OfficialPoolChannelName(provider model.OfficialAccountProvider) string {
 	return officialPoolNamePrefix + string(provider)
 }
 
+// IsOfficialPoolChannelName 判断渠道名是否属于官方账号池自动物化的渠道。
+//
+// 用途：号池扩展层要列出"渠道凭据"时得把这类渠道排除掉——它们已经由 official 适配器
+// 以「账号」的口径列过一遍了，再按渠道凭据列一次就是同一条凭据两个身份。
+// 前缀由这里单一维护，避免别处复制字符串后跟着改名漂移。
+func IsOfficialPoolChannelName(name string) bool {
+	return strings.HasPrefix(name, officialPoolNamePrefix)
+}
+
 // OfficialPoolSync 把某服务商的官方账号物化成号池渠道凭据，并刷新临期 token。
 // 幂等：重复同步不产生重复凭据；账号侧的新增、失活、重新授权都在下一次同步里收敛。
 // 单条账号的凭据问题（解密失败、无刷新凭据）只记入 Notes 并跳过，不中断其余账号，

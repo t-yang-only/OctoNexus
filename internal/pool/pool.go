@@ -215,6 +215,15 @@ func Has(kind string) bool {
 	return ok
 }
 
+// Lookup 按 kind 取回适配器本体。
+//
+// 与 Has 分开是因为有些调用方要的不是"在不在"，而是那个适配器本身：
+// 契约自检工具包（internal/pool/pooltest）要拿它跑七类检查，而自检必须从外部测试包调用
+// （pooltest 依赖 pool，内部测试包再引它就成了循环），所以这里需要一个对外可见的取用入口。
+func Lookup(kind string) (Adapter, bool) {
+	return lookup(kind)
+}
+
 // Entries 取统一视图：kind 为空表示所有已注册适配器。
 //
 // 单个适配器失败时把错误收集到 KindErrors 里返回，其余适配器的条目照常给出——
