@@ -115,3 +115,4 @@
 | T-pool-ext-010 | 号池导出口径与列表一致（ExportRows 收 Filter、共用比较器、面板带筛选导出） | done |
 | T-alert-003 | 告警链路：notify_problem.py + run_all --notify/--notify-selftest + notifyproblem 套件 | done |
 | T-test-013 | 导出口径活体用例 P15d/P15e/P15f；告警链路套件 10 例（含真实 400 应答口径单测） | done |
+| T-test-014 | 装置加固：桩日志凭据脱敏（唯一实施点）+ 桩存活判据改真实应答/脱离进程组 | done |
