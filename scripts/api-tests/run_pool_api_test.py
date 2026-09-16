@@ -166,6 +166,42 @@ def main():
         # P6 未登录必须 401
         status, _, _ = call("GET", "/api/v1/pool/entries", with_cookie=False)
         record("P6 未登录访问被拒（401）", status == 401, "HTTP %s" % status)
+
+        # ===== 第二批：单条详情 + 生命周期操作（按能力位放行）=====
+        active_id = (by_name.get(RUN_TAG + "-g1@example.com") or {}).get("id")
+
+        # P7 单条详情
+        status, payload, raw = call("GET", "/api/v1/pool/entries/official/" + str(active_id))
+        record("P7 单条详情可读（与统一视图同源）",
+               status == 200 and (payload or {}).get("id") == active_id
+               and (payload or {}).get("kind") == "official",
+               "HTTP %s entry=%s" % (status, (payload or {}).get("id")))
+        record("P7b 详情同样不回显凭据", FAKE_CIPHER not in raw, "探针泄漏=%s" % (FAKE_CIPHER in raw))
+
+        # P8 不存在的条目 → 404（明确，而不是空对象）
+        status, payload, raw = call("GET", "/api/v1/pool/entries/official/nope:999999")
+        record("P8 不存在的条目 404", status == 404 and "not found" in raw,
+               "HTTP %s body=%s" % (status, raw[:90]))
+
+        # P9 探活：夹具凭据是可识别探针串 → 解密即失败（不发任何真实请求），
+        #    接口必须是"干净的失败"（有 code/message、不泄漏探针、不 500 崩栈）。
+        status, payload, raw = call("POST", "/api/v1/pool/entries/official/%s/probe" % active_id)
+        clean = status >= 400 and "code" in raw and "message" in raw and FAKE_CIPHER not in raw
+        record("P9 探活失败是干净失败（无真实请求 / 不泄漏 / 不崩栈）",
+               clean, "HTTP %s body=%s" % (status, raw[:140]))
+
+        # P10 能力位放行的反例：官方账号池没声明 toggle，启停必须回 501 并点名缺哪个能力位。
+        status, payload, raw = call("POST", "/api/v1/pool/entries/official/%s/enable" % active_id)
+        record("P10 未声明的能力位回 501（而不是假装成功）",
+               status == 501 and "capability not supported" in raw,
+               "HTTP %s body=%s" % (status, raw[:110]))
+
+        # P11 kind 级同步的未知 kind 也要明确报错。
+        #     注：这里**不**对 official 真跑同步——那会给实例建"官方账号池-<provider>"渠道，
+        #     属于对用户数据的写副作用；同步行为本身由 internal/pool 单测覆盖。
+        status, payload, raw = call("POST", "/api/v1/pool/kinds/nope/sync")
+        record("P11 未知 kind 的同步 404", status == 404 and "unknown pool kind" in raw,
+               "HTTP %s body=%s" % (status, raw[:90]))
     finally:
         cleanup_accounts()
 

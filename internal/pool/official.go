@@ -3,6 +3,8 @@ package pool
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
@@ -30,7 +32,8 @@ func (officialAdapter) Info() AdapterInfo {
 		Kind:  officialKind,
 		Title: "官方账号池",
 		// 能力位只声明真的有的：探活是 op.OfficialAccountReadUsage、刷新与物化是 op.OfficialPoolSync、
-		// 新建是 authorize/callback 流程。人工启停目前由同步逻辑按账号状态收敛，故不声明 toggle。
+		// 新建是 authorize/callback 流程。人工启停（toggle）目前没有渠道凭据级启停的现成 op，
+		// 由同步逻辑按账号状态收敛——因此**不声明**，接口层会明确回答"这个后端不支持"。
 		Capabilities: []Capability{CapList, CapGet, CapProbe, CapRefresh, CapProvision, CapSync},
 		Builtin:      true,
 		Since:        "R-pool-ext-001",
@@ -90,4 +93,154 @@ func (officialAdapter) Entries(ctx context.Context) ([]Entry, error) {
 		}
 	}
 	return entries, nil
+}
+
+// ============================ 第二批：可选能力实现 ============================
+//
+// 全部复用既有 op，不新增表、不改选路：
+//   get     ← 与 Entries 同源（统一视图里挑那一条）
+//   probe   ← op.OfficialAccountReadUsage（读官方侧套餐/窗口/健康快照）
+//   refresh ← op.OfficialPoolSync（临期 token 换新 + 重新物化凭据）
+//   sync    ← op.OfficialPoolSync（三个服务商逐个同步）
+
+// officialEntryID 拆解条目 ID（<provider>:<account_id>），三者都要能定位到具体账号。
+func officialEntryID(id string) (model.OfficialAccountProvider, int, error) {
+	provider, rawID, found := strings.Cut(id, ":")
+	if !found {
+		return "", 0, fmt.Errorf("%w: %s (want <provider>:<account_id>)", ErrEntryNotFound, id)
+	}
+	if err := model.ValidateOfficialAccountProvider(model.OfficialAccountProvider(provider)); err != nil {
+		return "", 0, fmt.Errorf("%w: %s", ErrEntryNotFound, id)
+	}
+	accountID, err := strconv.Atoi(rawID)
+	if err != nil || accountID <= 0 {
+		return "", 0, fmt.Errorf("%w: %s", ErrEntryNotFound, id)
+	}
+	return model.OfficialAccountProvider(provider), accountID, nil
+}
+
+// Get 取单条：与统一视图同源，避免"列表与详情两套口径"。
+func (a officialAdapter) Get(ctx context.Context, id string) (Entry, error) {
+	if _, _, err := officialEntryID(id); err != nil {
+		return Entry{}, err
+	}
+	entries, err := a.Entries(ctx)
+	if err != nil {
+		return Entry{}, err
+	}
+	for _, entry := range entries {
+		if entry.ID == id {
+			return entry, nil
+		}
+	}
+	return Entry{}, fmt.Errorf("%w: %s", ErrEntryNotFound, id)
+}
+
+// Probe 读一次官方侧快照并把结果并回条目。
+//
+// 失败也回条目：探活的意义就是"告诉你这条现在什么状态"，所以错误与条目一起返回，
+// 调用方按 error 判断结论、按 Entry 展示状态（接口层会把它渲染成一条 warning + 当前快照）。
+func (a officialAdapter) Probe(ctx context.Context, id string) (Entry, error) {
+	provider, accountID, err := officialEntryID(id)
+	if err != nil {
+		return Entry{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Entry{}, err
+	}
+
+	account, readErr := op.OfficialAccountReadUsage(nil, accountID)
+	// 无论成功失败都先取一次当前视图：探活失败时也能给出"现在是什么状态"。
+	entry, entryErr := a.Get(ctx, id)
+	if entryErr != nil && readErr != nil {
+		return Entry{
+			Kind: officialKind, ID: id, Name: id, Provider: string(provider),
+			Status: "unknown", LastError: readErr.Error(),
+		}, readErr
+	}
+	if readErr != nil {
+		entry.LastError = readErr.Error()
+		entry.Healthy = false
+		return entry, fmt.Errorf("probe %s: %w", id, readErr)
+	}
+	if entryErr != nil {
+		entry = Entry{Kind: officialKind, ID: id, Name: account.ExternalName, Provider: string(account.Provider)}
+	}
+	// 用读回来的最新快照覆盖：探活的价值就在于"刚读到的"。
+	entry.Status = string(account.Status)
+	entry.Healthy = account.Healthy
+	entry.PlanTier = account.PlanTier
+	entry.ExpiresAt = account.ExpiresAt
+	entry.LastError = account.LastError
+	if entry.Detail == nil {
+		entry.Detail = map[string]any{}
+	}
+	entry.Detail["window_5h"] = account.Window5H
+	entry.Detail["window_7d"] = account.Window7D
+	entry.Detail["account_id"] = account.ID
+	entry.Detail["is_active"] = account.Status == model.OfficialAccountStatusActive
+	return entry, nil
+}
+
+// Refresh 刷新该账号所属服务商的号池凭据（临期 token 换新并重新物化），再回读这一条。
+func (a officialAdapter) Refresh(ctx context.Context, id string) (Entry, error) {
+	provider, _, err := officialEntryID(id)
+	if err != nil {
+		return Entry{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Entry{}, err
+	}
+	result, err := op.OfficialPoolSync(nil, provider)
+	if err != nil {
+		return Entry{}, fmt.Errorf("refresh %s: %w", id, err)
+	}
+	entry, getErr := a.Get(ctx, id)
+	if getErr != nil {
+		// 刷新本身成功了但账号已不在池子里（例如被删）：如实说明，不假装刷到了。
+		return Entry{}, fmt.Errorf("refresh %s: %w", id, getErr)
+	}
+	if entry.Detail == nil {
+		entry.Detail = map[string]any{}
+	}
+	entry.Detail["refreshed"] = result.Refreshed
+	entry.Detail["keys"] = result.Keys
+	entry.Detail["disabled"] = result.Disabled
+	if len(result.Notes) > 0 {
+		entry.Detail["notes"] = result.Notes
+	}
+	return entry, nil
+}
+
+// Sync 把三个服务商的官方账号逐个物化到转发层，汇总成一份结论。
+//
+// 逐个同步而不是"一次全同步"：某个服务商出问题（例如某个账号凭据解不开）不应该让另外两个也白跑。
+func (a officialAdapter) Sync(ctx context.Context) (SyncReport, error) {
+	report := SyncReport{Kind: officialKind}
+	providers := []model.OfficialAccountProvider{
+		model.OfficialAccountProviderOpenAI,
+		model.OfficialAccountProviderGemini,
+		model.OfficialAccountProviderClaude,
+	}
+	var firstErr error
+	for _, provider := range providers {
+		if err := ctx.Err(); err != nil {
+			return report, err
+		}
+		result, err := op.OfficialPoolSync(nil, provider)
+		if err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s 同步失败：%v", provider, err))
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		report.Entries += result.Keys
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s：启用凭据 %d 条，停用 %d 条，刷新 %d 条，模型 %d 个，授权 %d 条",
+			provider, result.Keys, result.Disabled, result.Refreshed, result.Models, result.Grants))
+		report.Notes = append(report.Notes, result.Notes...)
+	}
+	// 部分失败不整体失败：结论里已经写明哪个服务商失败，调用方据此判断（与"一个后端坏了不打没整张表"同一考虑）。
+	return report, firstErr
 }

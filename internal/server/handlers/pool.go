@@ -34,6 +34,30 @@ func init() {
 		AddRoute(
 			router.NewRoute("/stats", http.MethodGet).
 				Handle(poolStats),
+		).
+		AddRoute(
+			router.NewRoute("/kinds/:kind/sync", http.MethodPost).
+				Handle(poolSyncKind),
+		).
+		AddRoute(
+			router.NewRoute("/entries/:kind/:id", http.MethodGet).
+				Handle(poolGetEntry),
+		).
+		AddRoute(
+			router.NewRoute("/entries/:kind/:id/probe", http.MethodPost).
+				Handle(poolProbeEntry),
+		).
+		AddRoute(
+			router.NewRoute("/entries/:kind/:id/refresh", http.MethodPost).
+				Handle(poolRefreshEntry),
+		).
+		AddRoute(
+			router.NewRoute("/entries/:kind/:id/enable", http.MethodPost).
+				Handle(poolEnableEntry),
+		).
+		AddRoute(
+			router.NewRoute("/entries/:kind/:id/disable", http.MethodPost).
+				Handle(poolDisableEntry),
 		)
 }
 
