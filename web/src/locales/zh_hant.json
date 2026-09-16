@@ -713,6 +713,17 @@
         }
     },
   "unifiedPool": {
+      "selected": "已選",
+      "currentPage": "本頁",
+      "selectAll": "全選本頁",
+      "batchProbe": "批量探活",
+      "batchEnable": "批量啟用",
+      "batchDisable": "批量停用",
+      "batchOk": "成功",
+      "batchFail": "失敗",
+      "batchSkipped": "未執行",
+      "clearSelection": "清除選擇",
+      "batchLimitHint": "單次最多 200 條，超出的會記未執行",
       "title": "統一號池",
       "subtitle": "所有號池後端的統一檢視：後端自描述能力位，頁面按能力位顯示每一項能做的操作。這裡只顯示中繼資料，任何介面都不回顯憑證。",
       "total": "總條目",

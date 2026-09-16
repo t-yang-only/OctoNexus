@@ -143,6 +143,16 @@ func poolExport(c *gin.Context) {
 	if strings.EqualFold(c.Query("format"), "csv") {
 		c.Header("Content-Type", "text/csv; charset=utf-8")
 		c.Header("Content-Disposition", "attachment; filename=pool-entries.csv")
+		// 带 BOM：CSV 这条路的用户是"人/表格软件"，少了 BOM 中文名字在 Windows 表格软件里是乱码。
+		_, _ = c.Writer.WriteString("\ufeff")
+		// CSV 里没有地方放"哪个后端这次没取到数据"，用响应头给外部工具一个机器可读的信号。
+		if len(failures) > 0 {
+			kinds := make([]string, 0, len(failures))
+			for _, failure := range failures {
+				kinds = append(kinds, failure.Kind)
+			}
+			c.Header("X-Pool-Error-Kinds", strings.Join(kinds, ","))
+		}
 		writer := csv.NewWriter(c.Writer)
 		_ = writer.Write([]string{"kind", "id", "name", "provider", "status", "enabled", "healthy", "plan_tier", "expires_at", "last_error"})
 		for _, row := range rows {

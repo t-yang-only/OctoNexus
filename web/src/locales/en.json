@@ -721,6 +721,17 @@
         }
     },
   "unifiedPool": {
+      "selected": "Selected",
+      "currentPage": "On this page",
+      "selectAll": "Select page",
+      "batchProbe": "Probe selected",
+      "batchEnable": "Enable selected",
+      "batchDisable": "Disable selected",
+      "batchOk": "succeeded",
+      "batchFail": "failed",
+      "batchSkipped": "not attempted",
+      "clearSelection": "Clear selection",
+      "batchLimitHint": "At most 200 per run; the rest are not attempted",
       "title": "Unified pool",
       "subtitle": "One view over every pool backend: each backend describes its own capabilities, and this page shows only the operations a backend actually declares. Metadata only — no endpoint ever returns credentials.",
       "total": "Entries",
