@@ -325,9 +325,12 @@ def main():
         serverchan_result = next((r for r in results if r.get("kind") == "serverchan"), {})
         if serverchan_via_stub:
             # 实例跑在测试模式（OCTOPUS_SERVERCHAN_BASE_URL 指向本地桩）：报文形状可以逐字钉住。
+            logged_path = serverchan_posts[0].get("path") or ""
             record("serverchan receives the form payload on <base>/<SendKey>.send",
                    len(serverchan_posts) == 1
-                   and (serverchan_posts[0].get("path") or "").endswith("SCT-DS-TEST-sendkey.send")
+                   and logged_path.endswith(".send")
+                   # 桩日志里 SendKey 必须已经被换成指纹（凭据整段就在路径里，不能落盘）
+                   and "SCT-DS-TEST-sendkey" not in logged_path and "\u2026" in logged_path
                    and "title=" in serverchan_raw and "desp=" in serverchan_raw and "tags=" in serverchan_raw,
                    "posts=%d path=%s body=%s" % (
                        len(serverchan_posts),

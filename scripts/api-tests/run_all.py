@@ -31,6 +31,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))  # 仓库根
@@ -106,15 +107,35 @@ def ensure_instance():
 _mock_proc = None
 
 
+def mock_alive():
+    """端口开着 ≠ mock 活着。
+
+    强杀 mock 之后端口可能还会短暂留着（残留 socket），只看 connect 会把"已经死了的 mock"
+    当成在线，于是后面所有依赖 mock 的套件一起静默失败 —— 本轮真的踩过（notify 16/17、
+    serverchan 与四家报文全 false，看起来像产品坏了，其实是桩没了）。真正的判据是它能应答。
+    """
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/v1/models" % MOCK_PORT, timeout=3) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
 def ensure_mock():
     global _mock_proc
-    if port_open("127.0.0.1", MOCK_PORT):
+    if mock_alive():
         log("mock 上游已在线：127.0.0.1:%d" % MOCK_PORT)
         return True
     env = dict(os.environ, MOCK_PORT=str(MOCK_PORT))
     out = open(os.path.join(HERE, "mock.log"), "wb")
+    # 必须让 mock 脱离本进程的进程组：否则运行器一退出（或一次命令结束），mock 会被一起收走，
+    # 于是"下一轮直接单跑某个套件"时桩已经不在了，全变成 connection refused（本轮踩过）。
+    flags = 0
+    if os.name == "nt":
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
     _mock_proc = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_upstream.py")],
-                                  stdout=out, stderr=subprocess.STDOUT, env=env, cwd=HERE)
+                                  stdout=out, stderr=subprocess.STDOUT, env=env, cwd=HERE,
+                                  creationflags=flags)
     if wait_port("127.0.0.1", MOCK_PORT):
         log("mock 上游已启动：127.0.0.1:%d（pid %d）" % (MOCK_PORT, _mock_proc.pid))
         return True
