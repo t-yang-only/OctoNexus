@@ -66,6 +66,8 @@ SUITES = [
     ("hedge", "run_hedge_test.py", "首字竞速（触发条件/快者胜出/落选不计失败/宽度校验）", "instance,mock,db"),
     ("weighted", "run_weighted_test.py", "加权综合选路（换权重换选择 / 全 0 退化 priority / 越界权重拒绝）", "instance,mock,db"),
     ("combo", "run_combo_test.py", "组合场景（加权×计费×竞速×流式×冷却×日志统计叠在一起）", "instance,mock,db"),
+    ("backup", "run_backup_import_test.py",
+     "备份隔离导入（真备份导进独立实例：计数/编辑/三协议调用 + 生产库零改动）", "instance,mock"),
     ("hotapply", "hot_apply_check.py", "设置热生效（改完无需重启）", "instance"),
     ("display", "check_display.js", "日志卡片字段容错解析（纯函数自检）", "node,esbuild"),
     ("reallog", "check_real_logs.js", "日志卡片真实数据等价性", "node,db"),

@@ -116,3 +116,9 @@
 | T-alert-003 | 告警链路：notify_problem.py + run_all --notify/--notify-selftest + notifyproblem 套件 | done |
 | T-test-013 | 导出口径活体用例 P15d/P15e/P15f；告警链路套件 10 例（含真实 400 应答口径单测） | done |
 | T-test-014 | 装置加固：桩日志凭据脱敏（唯一实施点）+ 桩存活判据改真实应答/脱离进程组 | done |
+| T-test-015 | 备份隔离导入套件：真备份导进独立实例（独立端口/独立库/脱敏副本）验证计数·编辑·三协议调用，并断言生产库指纹不变（R-test-001）| scripts/api-tests | done |
+| | 备注：`scripts/api-tests/run_backup_import_test.py` 22/22（已注册进矩阵）。隔离三层：① `octopus.exe start --config <临时配置>` 起第二实例（13304/11235 + `%TEMP%` 独立库）；② 导入的是脱敏副本——12 个渠道 base_url 全指本地 mock，其余逐字保留；③ 关掉会自己出网的后台任务（quota_scan_interval=0、route_probe_enabled=false、model_info 拉长、5 个告警目标清空）。**导入前有硬安全闸门**：先断言临时库文件确实生成，不满足立即中止绝不导入（否则备份会写进生产库）。判据修正两处：生产库 mtime 不能当"没被改动"的证据（实例自己写统计使 mtime 必变）→ 改六表计数+渠道指纹 sha256；`channel_grants` 无 channel_id 列（经 channel_model_id/channel_key_id 两侧回指渠道）→ 挑分组的 SQL 相应改写。| 2026-09-16 16:20:00 |
+| T-migrate-001 | 修掉真实缺陷：全新安装第一轮没有请求日志表（009 迁移把 AutoMigrate 刚建好的 relay_logs 删了）（R-test-001 顺带查出）| internal/db/migrate | done |
+| | 备注：009（2026-08-24）职责含"删遗留 relay_logs"，注册在 **AfterAutoMigrate**；2026-09-13 的重做日志卡片又重新引入 relay_logs 并加入 AutoMigrate 列表 → 全新库启动顺序变成 AutoMigrate 建表、009 紧跟着 DROP，且迁移记录已写、后续启动不重跑，要等再启动一次才建回空表。后果不止"页面空"：`RelayLogSave` 是 `_ = Create().Error`（忽略错误），第一轮运行期每条请求日志都被静默丢弃。证据：一次性临时库跑两轮启动，修复前 20 张表/relay_logs 不存在、第二轮 21 张/存在；修复后两轮都 21 张/存在。修法=**原地加形状判据**（表存在且含旧形状独有列 request_model_name/actual_model_name/ftut/use_time/request_content 才删）；不改阶段，因为同批 005 依赖遗留 channels.base_urls 做迁移，009 提前删列会让 005 失去输入、旧库升级丢 base_url。三路径行为：全新库保留新表、旧形状表照旧删、009 记录已在的现有库整条跳过（实测生产库 2757 行日志、列全为新格式、无旧列残留）。| 2026-09-16 16:20:00 |
+| T-test-016 | 迁移 009 回归测试 4 例 + 变异验证（去掉判据必须变红）| internal/db/migrate | done |
+| | 备注：新增 `009_test.go`——全新形状保留且**能真正落一行并读回**、旧形状被删、无表时不报错、同批 `channels.base_urls` 删列行为没被带偏。变异验证：把 `if legacyRelayLogs(db)` 改成 `if true`（等价修复前行为）→ `TestMigrate9KeepsFreshRelayLogs` 立即失败（报文即缺陷描述），还原后 4 例全绿。判据成立的前提写进注释：GORM AutoMigrate 只加列不删列，所以"旧形状独有列还在"在 AutoMigrate 前后都成立。| 2026-09-16 16:20:00 |
