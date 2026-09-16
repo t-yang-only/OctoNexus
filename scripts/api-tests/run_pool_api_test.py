@@ -75,6 +75,74 @@ def db():
     return sqlite3.connect("file:" + os.path.abspath(DB) + "?mode=ro", uri=True)
 
 
+# ---- 渠道凭据后端（kind=channel）的夹具：一条指向 mock 上游的渠道，凭据是假串 ----
+# 渠道名刻意**不含** RUN_TAG 子串：套件里几处断言按 RUN_TAG 做名称子串过滤，官方账号池夹具恰好 3 条；
+# 混进来会让那些断言变成"假失败"（口径没错，是过滤条件被污染）。
+STATION_CHANNEL = "POOLAPI-STATION-" + RUN_TAG.split("-", 1)[1]
+STATION_KEY = "sk-station-fixture-not-a-real-key"
+MOCK_BASE = os.environ.get("OCTOPUS_MOCK_BASE", "http://127.0.0.1:18099")
+MOCK_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requests.jsonl")
+
+
+def scalar(sql, args=()):
+    conn = db()
+    try:
+        value = conn.execute(sql, args).fetchone()
+        return value[0] if value else None
+    finally:
+        conn.close()
+
+
+def row(sql, args=()):
+    conn = db()
+    try:
+        return conn.execute(sql, args).fetchone()
+    finally:
+        conn.close()
+
+
+def read_mock_requests():
+    """读 mock 上游的请求日志（它只落凭据指纹，不落明文）。"""
+    if not os.path.exists(MOCK_LOG):
+        return []
+    rows = []
+    for line in io.open(MOCK_LOG, encoding="utf-8", errors="replace"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    return rows
+
+
+def seed_station_channel():
+    """建夹具渠道并返回渠道 ID。
+
+    走生产同一条写入路径（/channel/create）而不是直接写库：channels 的列多且带约束，
+    照抄一份 insert 迟早会漂移。名字带 RUN_TAG，残留也不会撞上别的套件的夹具。
+    """
+    existing = scalar("select id from channels where name=?", (STATION_CHANNEL,))
+    if existing:
+        call("POST", "/api/v1/channel/delete/%d" % existing)
+    payload = {
+        "name": STATION_CHANNEL, "dialect": "generic", "enabled": True, "base_url": MOCK_BASE,
+        "keys": [{"name": "k-on", "key": STATION_KEY, "enabled": True},
+                 {"name": "k-off", "key": STATION_KEY, "enabled": False}],
+        # models 留空：/channel/create 收的是"模型名字符串列表"这一形状，给字典会被判 Invalid JSON format；
+        # 这条夹具也不需要模型（号池只投影凭据本身）。
+        "models": [],
+    }
+    call("POST", "/api/v1/channel/create", payload)
+    return scalar("select id from channels where name=?", (STATION_CHANNEL,))
+
+
+def cleanup_station_channel(channel_id):
+    if channel_id:
+        call("POST", "/api/v1/channel/delete/%d" % channel_id)
+
+
 def seed_accounts():
     """造三条账号夹具（access/refresh 用探针串, 不含任何真实凭据）。"""
     conn = sqlite3.connect(os.path.abspath(DB))
@@ -108,6 +176,7 @@ def main():
         record("登录", False, "HTTP %s" % status)
         return 1
     names = seed_accounts()
+    station_id = seed_station_channel()
     try:
         # P1 适配器自描述
         status, payload, _ = call("GET", "/api/v1/pool/kinds")
@@ -352,9 +421,96 @@ def main():
                and any("probe" in p for p in doc_paths)
                and any("/kinds/{kind}/sync" in p for p in doc_paths)
                and any(("enable" in p or "disable" in p) for p in doc_paths)
-               and "official" in enum and {"Entry", "BatchRequest", "Summary"} <= set(doc_schemas)
+               and "official" in enum and "channel" in enum
+               and {"Entry", "BatchRequest", "Summary"} <= set(doc_schemas)
                and FAKE_CIPHER not in raw,
                "HTTP %s paths=%d schemas=%d enum=%s" % (status, len(doc_paths), len(doc_schemas), enum))
+
+        # ===== 第九批：渠道凭据后端（kind=channel） =====
+        # P21 后端清单里多了"渠道凭据"，能力位与实现一致（声明 toggle 才该有启停路由）
+        status, payload, _ = call("GET", "/api/v1/pool/kinds")
+        kind_items = (payload or {}).get("items") or []
+        channel_info = next((item for item in kind_items if item.get("kind") == "channel"), None)
+        channel_caps = set((channel_info or {}).get("capabilities") or [])
+        record("P21 渠道凭据后端自描述（list/get/probe/refresh/toggle，且不宣称 sync）",
+               status == 200 and channel_info is not None and channel_info.get("builtin") is True
+               and {"list", "get", "probe", "refresh", "toggle"} <= channel_caps and "sync" not in channel_caps,
+               "HTTP %s kinds=%s caps=%s" % (status, [i.get("kind") for i in kind_items], sorted(channel_caps)))
+
+        # P22 统一视图里能看到这条渠道的两条凭据，ID 口径是 <渠道ID>:<凭据名>
+        status, payload, raw = call("GET", "/api/v1/pool/entries?kind=channel")
+        channel_entries = (payload or {}).get("items") or []
+        station_entries = [e for e in channel_entries if (e.get("provider") or "") == STATION_CHANNEL]
+        ids = sorted(e.get("id") for e in station_entries)
+        on_entry = next((e for e in station_entries if e.get("id") == "%d:k-on" % station_id), None)
+        record("P22 渠道凭据按 <渠道ID>:<凭据名> 列示（启用位/站点族/探活口径齐备）",
+               status == 200 and len(station_entries) == 2
+               and ids == sorted(["%d:k-on" % station_id, "%d:k-off" % station_id])
+               and on_entry is not None and on_entry.get("enabled") is True
+               and on_entry.get("status") == "active"
+               and (on_entry.get("labels") or {}).get("family") == "new-api"
+               and (on_entry.get("detail") or {}).get("base_url") == MOCK_BASE
+               and (on_entry.get("detail") or {}).get("probe_kind") == "na_token",
+               "HTTP %s 条数=%d ids=%s" % (status, len(station_entries), ids))
+
+        record("P22b 渠道凭据接口绝不回显凭据（探针串未出现）",
+               STATION_KEY not in raw,
+               "探针泄漏=%s" % (STATION_KEY in raw))
+
+        # P23 官方账号池自动物化的渠道不该以"渠道凭据"的身份再出现一次
+        official_like = [e.get("provider") for e in channel_entries if (e.get("provider") or "").startswith("官方账号池-")]
+        record("P23 官方账号池渠道不在渠道凭据后端里重复列示",
+               official_like == [],
+               "命中=%s" % official_like)
+
+        # P24 探活：按 new-api 口径打站点只读自查端点，结论（健康/状态码/口径）回在 detail 里
+        status, payload, raw = call("POST", "/api/v1/pool/entries/channel/%d:k-on/probe" % station_id)
+        detail = (payload or {}).get("detail") or {}
+        record("P24 渠道凭据探活（打只读端点，回健康 + 状态码 + 探活口径）",
+               status == 200 and (payload or {}).get("healthy") is True
+               and detail.get("probe_kind") == "na_token" and detail.get("probe_status_code") == 200
+               and STATION_KEY not in raw,
+               "HTTP %s healthy=%s probe=%s" % (
+                   status, (payload or {}).get("healthy"),
+                   {k: detail.get(k) for k in ("probe_kind", "probe_status_code")}))
+
+        # P24b 从上游日志反证：打的确实是 GET /api/user/self，且日志里只有凭据指纹
+        station_calls = [r for r in read_mock_requests() if str(r.get("path", "")).endswith("/api/user/self")]
+        record("P24b 探活打的是站点只读端点（GET /api/user/self），日志里不含凭据明文",
+               any(r.get("method") == "GET" for r in station_calls)
+               and STATION_KEY not in json.dumps(station_calls, ensure_ascii=False),
+               "命中 %d 次；示例=%s" % (len(station_calls), station_calls[-1] if station_calls else None))
+
+        # P25 刷余额：quota/used/remaining 都回，同时落进渠道余额快照（加权选路的 balance 维度读它）
+        status, payload, raw = call("POST", "/api/v1/pool/entries/channel/%d:k-on/refresh" % station_id)
+        detail = (payload or {}).get("detail") or {}
+        record("P25 刷余额（500/120/380 三项齐全，且写进渠道余额快照）",
+               status == 200 and detail.get("balance_quota") == 500 and detail.get("balance_used") == 120
+               and detail.get("balance_remaining") == 380 and STATION_KEY not in raw,
+               "HTTP %s detail=%s" % (status, {k: detail.get(k) for k in
+                                               ("balance_quota", "balance_used", "balance_remaining")}))
+
+        # P26 启停：停用要同时落下"人工停用"标记，否则周期物化会把它改回启用
+        status, payload, _ = call("POST", "/api/v1/pool/entries/channel/%d:k-on/disable" % station_id)
+        flags = row("select enabled, operator_disabled from channel_keys where channel_id=? and name=?",
+                    (station_id, "k-on"))
+        record("P26 停用凭据：enabled=0 且记下人工决定",
+               status == 200 and (payload or {}).get("enabled") is False
+               and (payload or {}).get("status") == "disabled-by-operator" and flags == (0, 1),
+               "HTTP %s status=%s db=%s" % (status, (payload or {}).get("status"), flags))
+
+        status, payload, _ = call("POST", "/api/v1/pool/entries/channel/%d:k-on/enable" % station_id)
+        flags = row("select enabled, operator_disabled from channel_keys where channel_id=? and name=?",
+                    (station_id, "k-on"))
+        record("P26b 启用凭据：enabled=1 且清掉人工决定",
+               status == 200 and (payload or {}).get("enabled") is True and flags == (1, 0),
+               "HTTP %s db=%s" % (status, flags))
+
+        # P27 未知凭据的探活是干净失败（404），不是静默成功
+        status, _, raw = call("POST", "/api/v1/pool/entries/channel/%d:nope/probe" % station_id)
+        record("P27 未知凭据探活 404（不是静默成功）",
+               status == 404 and "not found" in raw,
+               "HTTP %s body=%s" % (status, raw[:90]))
 
         # P20 新路由同样在鉴权之后。
         #     注意 code=0：无 cookie 的 POST 会在服务端读完请求体前被拒，
@@ -379,6 +535,7 @@ def main():
 
     finally:
         cleanup_accounts()
+        cleanup_station_channel(station_id)
 
     print()
     total = len(RESULTS)

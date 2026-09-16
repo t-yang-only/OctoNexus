@@ -104,3 +104,7 @@
 | | 备注：口径是"选择就是 ids，绝不隐式全量"——不提供按筛选条件全量执行的入口，因为启停直接影响线上路由。一次调用只针对一种后端（选中键按第一个冒号切 kind，id 自身可能含冒号）；跑完只保留失败/未执行项，避免重复提交已成功的。验证：tsc 0、eslint 0、产物标记（panel P5 断言 批量探活/Probe selected/batchDisable）、poolapi 32/32。踩坑：React Compiler 不接受手工记忆化的 Map/Set（preserve-manual-memoization），改直接算。| 2026-09-16 15:05:00 |
 | T-test-010 | CSV 导出契约：BOM + 每行列数（poolapi P15b/P15c）+ 面板批量界面进产物（panel P5）| scripts/api-tests | done |
 | | 备注：给表格软件用的 CSV 补了 BOM（否则中文乱码），并把"哪个后端没取到数据"用 X-Pool-Error-Kinds 响应头报出来。加 BOM 会让原 P15b 的表头断言变红 —— 不是回归，是断言要跟着契约走，已改为先剥 BOM；新增 P15c 用标准库 csv 解析校验列数一致（列错位比缺行更难发现）。| 2026-09-16 15:05:00 |
+| T-pool-ext-009 | 内置第二个适配器 `channel`：把既有渠道凭据投影成号池条目（R-pool-ext-002）| internal/pool | done |
+| | 备注：条目 = (渠道, 凭据)，ID `<channel_id>:<key_name>`；排除官方账号池自动物化的渠道（同一条凭据不两个身份）；能力位 list/get/probe/refresh/toggle，不声明 sync/provision/revoke（没有东西需要物化）。probe 走 health.ProbeToken（按站点族选口径，口径回写 detail.probe_kind）、refresh 走 health.FetchBalance + op.RecordChannelBalance（余额顺带喂给加权选路的 balance 维度）、toggle 走 op.SetChannelKeyEnabled。验证：station_test 8 例 + station_contract_test 用 pooltest 自检 + 活体套件 42/42；为让 pooltest 能取到内置适配器，pool.go 新增 Lookup(kind)。踩坑：/channel/create 的 models 必须是字符串列表。| 2026-09-16 13:45:00 |
+| T-test-011 | 号池活体套件新增渠道凭据用例（P21-P27）并修正夹具命名污染（R-pool-ext-002）| scripts/api-tests | done |
+| | 备注：P21 能力位、P22 ID 口径/站点族/探活口径、P22b 凭据不外泄、P23 官方号池渠道不重复列示、P24 探活结论、**P24b 从 mock 上游日志反证打的是 GET /api/user/self**、P25 余额 500/120/380、P26 启停写两位（直接查库）、P27 未知凭据 404 → 42/42。新夹具名刻意不含 RUN_TAG 子串，否则 P2/P13b/P17/P18b 会被名称子串过滤连带污染成假失败。mock 上游补 /api/user/self。| 2026-09-16 13:45:00 |

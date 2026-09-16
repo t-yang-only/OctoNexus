@@ -129,6 +129,13 @@ class Handler(BaseHTTPRequestHandler):
             log_request({"method": "GET", "path": self.path, "model": None, "stream": None})
             self._send_json(200, {"object": "list", "data": [{"id": m, "object": "model"} for m in MODELS]})
             return
+        if self.path.endswith("/api/user/self"):
+            # New API 系的用户侧自查端点（只读）：号池的「探活」与「刷余额」都打这里。
+            # 返回形状按 new-api 的口径（data.quota/used），额度解析层的别名匹配认这一份。
+            log_request({"method": "GET", "path": self.path, "model": None, "stream": None,
+                         "authorization": _redact(self.headers.get("Authorization"))})
+            self._send_json(200, {"success": True, "message": "", "data": {"quota": 500, "used": 120}})
+            return
         self._send_json(404, {"error": {"message": "not found: " + self.path}})
 
     def do_POST(self):
