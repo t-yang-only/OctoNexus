@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/smtp"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ import (
 //   - dingtalk: 钉钉群机器人; {"msgtype":"text","text":{"content":...}}, 响应 errcode 非 0 即失败。
 //   - wecom   : 企业微信群机器人; 与钉钉同形, 响应 errcode 非 0 即失败。
 //   - smtp    : 邮件; 密码只从环境变量 OCTOPUS_SMTP_PASSWORD 读, 不进设置表/数据库/备份。
+//   - serverchan: Server酱(Turbo/³)推送; SendKey 拼进推送地址, 故优先从环境变量读, 没给才用设置表。
 //
 // 三条工程口径:
 //  1. **不信任 HTTP 200**: 三家机器人都习惯用 200 包错误码, 故按响应体里的错误码判定成败, 并把原文摘要带回去。
@@ -39,18 +41,28 @@ import (
 type Kind string
 
 const (
-	KindWebhook  Kind = "webhook"
-	KindFeishu   Kind = "feishu"
-	KindDingTalk Kind = "dingtalk"
-	KindWeCom    Kind = "wecom"
-	KindSMTP     Kind = "smtp"
+	KindWebhook    Kind = "webhook"
+	KindFeishu     Kind = "feishu"
+	KindDingTalk   Kind = "dingtalk"
+	KindWeCom      Kind = "wecom"
+	KindSMTP       Kind = "smtp"
+	KindServerChan Kind = "serverchan"
 )
 
 // allKinds 是渠道的固定顺序, 让结果表与界面顺序稳定。
-var allKinds = []Kind{KindWebhook, KindFeishu, KindDingTalk, KindWeCom, KindSMTP}
+var allKinds = []Kind{KindWebhook, KindFeishu, KindDingTalk, KindWeCom, KindSMTP, KindServerChan}
 
 // smtpPasswordEnv 是唯一接受 SMTP 密码的地方: 库与备份里不放邮箱密码。
 const smtpPasswordEnv = "OCTOPUS_SMTP_PASSWORD"
+
+// Server酱的 SendKey 本身就是凭据(它整个就是推送地址的一部分), 所以与 SMTP 密码同口径:
+// 优先从环境变量取, 没给才回落到设置表 —— 库与备份里就不会"必然"躺着这把钥匙。
+const (
+	serverChanSendKeyEnv  = "OCTOPUS_SERVERCHAN_SENDKEY"
+	serverChanBaseURLEnv  = "OCTOPUS_SERVERCHAN_BASE_URL"
+	serverChanDefaultBase = "https://sctapi.ftqq.com/"
+	serverChanTag         = "octopus|告警"
+)
 
 // deliveryTimeout 是单个渠道的投递超时。
 const deliveryTimeout = 10 * time.Second
@@ -125,6 +137,11 @@ func channelConfigState(kind Kind) (bool, string) {
 	case KindWeCom:
 		if settingValue(model.SettingKeyAlertWeComWebhook) == "" {
 			return false, "alert_wecom_webhook is empty"
+		}
+		return true, ""
+	case KindServerChan:
+		if serverChanSendKey() == "" {
+			return false, "alert_serverchan_sendkey is empty"
 		}
 		return true, ""
 	case KindSMTP:
@@ -205,6 +222,8 @@ func deliver(ctx context.Context, kind Kind, event Event, forceTest bool) Result
 		err = sendWeCom(ctx, event)
 	case KindSMTP:
 		err = sendSMTP(ctx, event)
+	case KindServerChan:
+		err = sendServerChan(ctx, event)
 	default:
 		err = fmt.Errorf("unknown channel %q", kind)
 	}
@@ -303,6 +322,61 @@ func sendWeCom(ctx context.Context, event Event) error {
 	return postJSON(ctx, settingValue(model.SettingKeyAlertWeComWebhook), payload, errCodeValidator("wecom"))
 }
 
+// serverChanSendKey 取 SendKey: 环境变量优先, 没给才读设置表(与 SMTP 密码同一考虑)。
+func serverChanSendKey() string {
+	if value := strings.TrimSpace(os.Getenv(serverChanSendKeyEnv)); value != "" {
+		return value
+	}
+	return strings.TrimSpace(settingValue(model.SettingKeyAlertServerChanSendKey))
+}
+
+// serverChanEndpoint 拼推送地址。base 可由环境变量覆盖, 好让套件把站点指到本地桩上
+// (生产不设该变量即为官方地址, 故这条缝只影响测试)。
+func serverChanEndpoint(sendKey string) string {
+	base := strings.TrimSpace(os.Getenv(serverChanBaseURLEnv))
+	if base == "" {
+		base = serverChanDefaultBase
+	}
+	if !strings.HasSuffix(base, "/") {
+		base += "/"
+	}
+	return base + sendKey + ".send"
+}
+
+// sendServerChan 投递 Server酱(Turbo/³): POST <base>/<SendKey>.send, 正文是表单 title/desp/tags。
+//
+// 它同样属于"HTTP 200 包错误码"那一类: 顶层 code 与 data.errno 都为 0 才算成功,
+// 否则把错误码与原文摘要带回去(不重试、不阻断调用方)。
+func sendServerChan(ctx context.Context, event Event) error {
+	sendKey := serverChanSendKey()
+	if sendKey == "" {
+		return fmt.Errorf("serverchan sendkey is empty")
+	}
+	form := url.Values{}
+	form.Set("title", "[octopus] "+event.DisplayTitle())
+	form.Set("desp", renderText(event))
+	form.Set("tags", serverChanTag)
+	return postForm(ctx, serverChanEndpoint(sendKey), form, func(body []byte) error {
+		var parsed struct {
+			Code *int `json:"code"`
+			Data *struct {
+				ErrNo *int   `json:"errno"`
+				Error string `json:"error"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil // 不以 JSON 应答的网关(如自建反代)按 HTTP 状态判成败。
+		}
+		if parsed.Code != nil && *parsed.Code != 0 {
+			return fmt.Errorf("serverchan returned code=%d", *parsed.Code)
+		}
+		if parsed.Data != nil && parsed.Data.ErrNo != nil && *parsed.Data.ErrNo != 0 {
+			return fmt.Errorf("serverchan returned errno=%d error=%s", *parsed.Data.ErrNo, parsed.Data.Error)
+		}
+		return nil
+	})
+}
+
 // errCodeValidator 校验钉钉/企微同形的 {"errcode":0,"errmsg":"ok"} 应答。
 func errCodeValidator(name string) func([]byte) error {
 	return func(body []byte) error {
@@ -320,15 +394,11 @@ func errCodeValidator(name string) func([]byte) error {
 	}
 }
 
-// postJSON 向 url POST 一个 JSON 正文: 不走代理设置(与既有 webhook 同口径), 非 2xx 直接失败,
+// post 向 url POST 一段正文: 不走代理设置(与既有 webhook 同口径), 非 2xx 直接失败,
 // 2xx 时再交给 validate 检查响应体里的业务错误码。
-func postJSON(ctx context.Context, url string, payload any, validate func([]byte) error) error {
+func post(ctx context.Context, url, contentType string, body []byte, validate func([]byte) error) error {
 	if url == "" {
-		return fmt.Errorf("webhook url is empty")
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal payload: %w", err)
+		return fmt.Errorf("endpoint url is empty")
 	}
 	client, err := rhttp.Direct()
 	if err != nil {
@@ -338,7 +408,7 @@ func postJSON(ctx context.Context, url string, payload any, validate func([]byte
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Type", contentType)
 	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)
@@ -354,6 +424,26 @@ func postJSON(ctx context.Context, url string, payload any, validate func([]byte
 		}
 	}
 	return nil
+}
+
+// postJSON 向 url POST 一个 JSON 正文(各家机器人走这条)。
+func postJSON(ctx context.Context, url string, payload any, validate func([]byte) error) error {
+	if url == "" {
+		return fmt.Errorf("webhook url is empty")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+	return post(ctx, url, "application/json", body, validate)
+}
+
+// postForm 向 url POST 一个表单正文(Server酱的推送接口收的是表单)。
+func postForm(ctx context.Context, url string, form url.Values, validate func([]byte) error) error {
+	if url == "" {
+		return fmt.Errorf("endpoint url is empty")
+	}
+	return post(ctx, url, "application/x-www-form-urlencoded", []byte(form.Encode()), validate)
 }
 
 // sendSMTP 投递邮件: 465 走隐式 TLS, 其余端口走 net/smtp 的 STARTTLS(失败则明文, 与标准库语义一致)。

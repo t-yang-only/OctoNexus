@@ -305,6 +305,7 @@
             "feishu": "Feishu bot webhook",
             "dingtalk": "DingTalk bot webhook",
             "wecom": "WeCom bot webhook",
+            "serverchan": "ServerChan SendKey",
             "smtpHost": "SMTP host",
             "smtpPort": "Port",
             "smtpUser": "Username",
@@ -318,6 +319,7 @@
                 "feishu": "Feishu",
                 "dingtalk": "DingTalk",
                 "wecom": "WeCom",
+                "serverchan": "ServerChan push",
                 "smtp": "Email"
             }
         },

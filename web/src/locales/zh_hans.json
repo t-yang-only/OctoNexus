@@ -305,6 +305,7 @@
             "feishu": "飞书群机器人 Webhook",
             "dingtalk": "钉钉群机器人 Webhook",
             "wecom": "企业微信群机器人 Webhook",
+            "serverchan": "Server酱 SendKey",
             "smtpHost": "SMTP 服务器",
             "smtpPort": "端口",
             "smtpUser": "用户名",
@@ -318,6 +319,7 @@
                 "feishu": "飞书",
                 "dingtalk": "钉钉",
                 "wecom": "企业微信",
+                "serverchan": "Server酱推送",
                 "smtp": "邮件"
             }
         },

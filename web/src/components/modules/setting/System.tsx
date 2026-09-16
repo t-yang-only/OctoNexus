@@ -77,7 +77,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Switch } from '@/components/ui/switch';
 
 // 通知渠道的固定顺序：界面按此顺序渲染，写回 alert_channels 时也按此顺序拼接，避免"勾选顺序"造成无意义 diff。
-const NOTIFY_KINDS = ['webhook', 'feishu', 'dingtalk', 'wecom', 'smtp'] as const;
+const NOTIFY_KINDS = ['webhook', 'feishu', 'dingtalk', 'wecom', 'smtp', 'serverchan'] as const;
 
 // 通知相关的设置键：界面里统一样式渲染，保存后统一回写初始值。
 const NOTIFY_SETTING_KEYS = {
@@ -86,6 +86,7 @@ const NOTIFY_SETTING_KEYS = {
     feishu: SettingKey.AlertFeishuWebhook,
     dingtalk: SettingKey.AlertDingTalkWebhook,
     wecom: SettingKey.AlertWeComWebhook,
+    serverchanSendKey: SettingKey.AlertServerChanSendKey,
     smtpHost: SettingKey.AlertSMTPHost,
     smtpPort: SettingKey.AlertSMTPPort,
     smtpUser: SettingKey.AlertSMTPUser,
@@ -404,10 +405,11 @@ export function SettingSystem() {
                         </label>
                     ))}
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-4">
                     <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.feishu')}<Input value={notifyField(SettingKey.AlertFeishuWebhook)} onChange={(e) => setNotifyField(SettingKey.AlertFeishuWebhook, e.target.value)} onBlur={() => handleSave(SettingKey.AlertFeishuWebhook, notifyField(SettingKey.AlertFeishuWebhook), initialNotifyFields.current[SettingKey.AlertFeishuWebhook] ?? '')} placeholder="https://open.feishu.cn/..." type="url" className="rounded-xl" /></label>
                     <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.dingtalk')}<Input value={notifyField(SettingKey.AlertDingTalkWebhook)} onChange={(e) => setNotifyField(SettingKey.AlertDingTalkWebhook, e.target.value)} onBlur={() => handleSave(SettingKey.AlertDingTalkWebhook, notifyField(SettingKey.AlertDingTalkWebhook), initialNotifyFields.current[SettingKey.AlertDingTalkWebhook] ?? '')} placeholder="https://oapi.dingtalk.com/..." type="url" className="rounded-xl" /></label>
                     <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.wecom')}<Input value={notifyField(SettingKey.AlertWeComWebhook)} onChange={(e) => setNotifyField(SettingKey.AlertWeComWebhook, e.target.value)} onBlur={() => handleSave(SettingKey.AlertWeComWebhook, notifyField(SettingKey.AlertWeComWebhook), initialNotifyFields.current[SettingKey.AlertWeComWebhook] ?? '')} placeholder="https://qyapi.weixin.qq.com/..." type="url" className="rounded-xl" /></label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.serverchan')}<Input value={notifyField(SettingKey.AlertServerChanSendKey)} onChange={(e) => setNotifyField(SettingKey.AlertServerChanSendKey, e.target.value)} onBlur={() => handleSave(SettingKey.AlertServerChanSendKey, notifyField(SettingKey.AlertServerChanSendKey), initialNotifyFields.current[SettingKey.AlertServerChanSendKey] ?? '')} placeholder="SCT..." className="rounded-xl" /></label>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-5">
                     <label className="grid gap-1 text-xs text-muted-foreground">{t('notify.smtpHost')}<Input value={notifyField(SettingKey.AlertSMTPHost)} onChange={(e) => setNotifyField(SettingKey.AlertSMTPHost, e.target.value)} onBlur={() => handleSave(SettingKey.AlertSMTPHost, notifyField(SettingKey.AlertSMTPHost), initialNotifyFields.current[SettingKey.AlertSMTPHost] ?? '')} placeholder="smtp.example.com" className="rounded-xl" /></label>
