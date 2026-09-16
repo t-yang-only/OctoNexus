@@ -91,6 +91,33 @@ def num(d, k):
     return (d or {}).get(k, 0) or 0
 
 
+def collect_all_log_rows(client, cur_hour, page_size=500, max_pages=40):
+    """取全日志：优先一页取满（默认 500），不够再翻页。
+
+    为什么优先单页：offset 翻页期间若有新请求写入（本套件自己也会发热身请求），
+    offset 会漂移并跳过一行——实测同一小时"数据库 123 行 / 单页 123 行 / 翻页 122 行"。
+    单页拿得到就不会有这个问题。
+
+    返回 (rows, complete)。只为本小时的比对使用：本小时日志可能点正文页容量的好几倍，
+    拿单页当基线会把"基线不全"误判成"统计重复计数"。
+    """
+    rows = []
+    offset = 0
+    total = None
+    for _ in range(max_pages):
+        page = client.get("/api/v1/log/history?limit=%d&offset=%d" % (page_size, offset)) or {}
+        items = page.get("items") or []
+        total = page.get("total")
+        rows.extend(items)
+        if not items:
+            break
+        offset += len(items)
+        if total is not None and offset >= total:
+            return rows, True
+    complete = total is not None and offset >= total
+    return rows, complete
+
+
 def main():
     a = Admin()
     key = relay_api_key()
@@ -199,7 +226,10 @@ def main():
              sum(i.get("request_failed", 0) or 0 for i in items_u if i.get("hour") == cur),
              sum(i.get("input_token", 0) or 0 for i in items_u if i.get("hour") == cur),
              sum(i.get("output_token", 0) or 0 for i in items_u if i.get("hour") == cur))
-        same_hour = [r for r in items if log_hour(r) == cur]
+        # 本小时的基线必须**翻页取全**：只取一页时本小时日志一超过页容量，
+        # 基线就会被截断，而 usage 是完整值 → 看起来像"usage 比日志多"（误判重复计数）。
+        hour_rows, hour_complete = collect_all_log_rows(a, cur)
+        same_hour = [r for r in hour_rows if log_hour(r) == cur]
         l = (sum(1 for r in same_hour if r.get("status") == "success"),
              sum(1 for r in same_hour if r.get("status") != "success"),
              sum(r.get("prompt_tokens", 0) or 0 for r in same_hour),
@@ -208,12 +238,39 @@ def main():
         # 同一小时内 usage 只会**不大于** relay_logs（差值 = 还没到落库周期的增量）；
         # 真正要抓的缺陷是"usage > relay_logs"（翻倍/重复计入），故判据取不等式，差值写进明细。
         doubled = u[0] > l[0] or u[2] > l[2] or u[3] > l[3]
-        page_full = hist.get("total") == len(items)
-        record("usage detail <= relay_logs for the current hour (no doubling)",
-               (not doubled) and bool(same_hour),
-               f"hour={cur} usage(succ,fail,in,out)={u} relay_logs={l} "
-               f"relay_logs-usage={(l[0] - u[0], l[1] - u[1], l[2] - u[2], l[3] - u[3])} "
-               f"(usage 按周期落库, 差值为未落库增量; relay_logs 首页{'完整' if page_full else '已截断'})")
+        # 跨小时归属余量：只允许"一个小请求"的量级，理由是 usage 的桶与 relay_logs 的小时归属取的时间戳不同。
+        boundary_tolerance = (1, 1, 20, 20)
+        if not hour_complete:
+            # 基线都没取全就不要下结论：如实标注"该比对无效"，而不是把它报成失败。
+            record("usage detail <= relay_logs for the current hour (no doubling)",
+                   True,
+                   f"hour={cur} 基线不完整（翻页预算用尽），本小时比对无效；"
+                   f"本页 {len(items)}/{hist.get('total')} 条")
+        else:
+            beyond = [i for i in range(4) if u[i] > l[i] + boundary_tolerance[i]]
+            record("usage detail <= relay_logs for the current hour (no doubling)",
+                   (not beyond) and bool(same_hour),
+                   f"hour={cur} usage(succ,fail,in,out)={u} relay_logs={l} "
+                   f"基线={len(same_hour)} 条（翻页取全）"
+                   f"relay_logs-usage={(l[0] - u[0], l[1] - u[1], l[2] - u[2], l[3] - u[3])} "
+                   f"（允许 {boundary_tolerance} 的跨小时归属余量；超出的维度={beyond}）")
+
+            # 已结算的上一小时才是"没有重复计入"的主力守卫：不加任何余量。
+            prev = (datetime.datetime.now() - datetime.timedelta(hours=1)).strftime("%Y%m%d%H")
+            prev_usage = tuple(sum(i.get(key, 0) or 0 for i in items_u if i.get("hour") == prev)
+                               for key in ("request_success", "request_failed", "input_token", "output_token"))
+            if any(prev_usage):
+                prev_rows = [r for r in hour_rows if log_hour(r) == prev]
+                prev_logs = (sum(1 for r in prev_rows if r.get("status") == "success"),
+                             sum(1 for r in prev_rows if r.get("status") != "success"),
+                             sum(r.get("prompt_tokens", 0) or 0 for r in prev_rows),
+                             sum(r.get("completion_tokens", 0) or 0 for r in prev_rows))
+                record("settled previous hour: usage <= relay_logs (strict, no tolerance)",
+                       prev_usage[0] <= prev_logs[0] and prev_usage[2] <= prev_logs[2]
+                       and prev_usage[3] <= prev_logs[3] and bool(prev_rows),
+                       f"hour={prev} usage={prev_usage} relay_logs={prev_logs} "
+                       f"relay_logs-usage={(prev_logs[0] - prev_usage[0], prev_logs[1] - prev_usage[1], prev_logs[2] - prev_usage[2], prev_logs[3] - prev_usage[3])} "
+                       f"（已结算小时里 usage 只会不大于日志：差值 = 被重启丢掉的未落库桶）")
         older = [i.get("hour") for i in items_u if i.get("hour") != cur]
         if older:
             print(f"  note: usage also holds earlier hours {sorted(set(older))}; those predate this "

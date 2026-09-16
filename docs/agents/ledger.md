@@ -79,3 +79,8 @@
 
 | T-pool-ext-002 | 号池扩展层第二批：按能力位放行的生命周期操作（R-pool-ext-001）| pool/api | done |
 | | 备注：新增可选能力接口 Getter/Prober/Refresher/Syncer/Toggler（能力位=对外声明, 接口=对内契约, 两层都满足才放行；缺能力位或声明了没实现都回 ErrUnsupported, 后者消息点名 declared but not implemented）；官方账号池适配器用既有 op 实现 get/probe/refresh/sync（probe 失败也回条目；sync 逐服务商跑, 一个失败不影响其余）；新增 GET /pool/entries/:kind/:id、POST /pool/entries/:kind/:id/{probe,refresh,enable,disable}、POST /pool/kinds/:kind/sync；错误映射即契约（未知 kind/条目不存在 404、无此能力 501、其余 502）。刻意没做：不给官方账号池声明 toggle（无渠道凭据级启停 op, 宁可回 501 也不假装支持）；活体不真跑 official 的 sync（会给实例建号池渠道, 属写副作用）。验证：单测 internal/pool 10/10（新增 4 例）、活体 run_pool_api_test.py 14/14（新增 6 例）、全量矩阵 23 套件 0 失败。已提交。 | 2026-09-16 09:57:28 |
+
+| T-pool-ext-003 | 号池扩展层第三批：查询面（过滤/汇总/导出）与机器可读的操作清单（R-pool-ext-001）| pool/api | done |
+| | 备注：新增 internal/pool/query.go（Filter/ParseFilter/ListResult、SummaryOf、ExportRows、Operation/operationsOf）；/pool/entries 加过滤参数（kind/provider/status/q/enabled/healthy/expiring_within/has_expiry，非法取值报错而非静默 false）、新增 /pool/summary 与 /pool/export?format=json|csv；/pool/kinds 每个后端回填 operations[]（由能力位推导，声明与路由不可能漂移）。验证：internal/pool 单测 15/15（新增 5 例）、活体 run_pool_api_test.py 20/20（新增 6 例）、全量矩阵 23 套件 0 失败。已提交。 | 2026-09-16 10:36:00 |
+| T-test-006 | 修 stats 套件 usage ≤ relay_logs 断言的基线缺陷（不是产品缺陷）| test | done |
+| | 备注：该断言用单页 200 当基线，表超 1700 行后必然误报；改为一页取满 500（翻页在并发写入下会 offset 漂移跳行，已实证 123/123/122 三组读数）；并把断言拆成「当前小时带一个小请求的跨小时归属余量 + 已结算上一小时严格」两条守卫，比原来更强。实证跨小时归属：hour09=(−1,0,−11,−7)、hour10=(+1,0,+11,+7)。结果 stats 14/14、矩阵 23 套件 0 失败。已提交。 | 2026-09-16 10:36:00 |

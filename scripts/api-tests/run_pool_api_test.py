@@ -202,6 +202,58 @@ def main():
         status, payload, raw = call("POST", "/api/v1/pool/kinds/nope/sync")
         record("P11 未知 kind 的同步 404", status == 404 and "unknown pool kind" in raw,
                "HTTP %s body=%s" % (status, raw[:90]))
+
+        # ===== 第三批：查询面（过滤 / 汇总 / 导出）与机器可读的操作清单 =====
+        # P12 操作清单由能力位推导：有 probe/refresh/sync 的路由，没有 enable/disable（没声明 toggle）。
+        ops = (official or {}).get("operations") or []
+        op_keys = {"%s %s" % (o.get("method"), o.get("path")) for o in ops}
+        has_probe = any("probe" in key for key in op_keys)
+        has_sync = any("/kinds/{kind}/sync" in key for key in op_keys)
+        has_toggle = any(("enable" in key or "disable" in key) for key in op_keys)
+        record("P12 操作清单与能力位一致（有 probe/sync、无 enable/disable）",
+               has_probe and has_sync and not has_toggle and len(ops) >= 5,
+               "操作数=%d probe=%s sync=%s toggle路由=%s" % (len(ops), has_probe, has_sync, has_toggle))
+
+        # P13 过滤：状态 / 名称子串 / scanned 口径
+        status, payload, _ = call("GET", "/api/v1/pool/entries?status=revoked")
+        revoked_items = (payload or {}).get("items") or []
+        record("P13 按状态过滤只回该状态",
+               status == 200 and len(revoked_items) == 1
+               and revoked_items[0].get("status") == "revoked"
+               and (payload or {}).get("scanned", 0) >= 1,
+               "HTTP %s 条数=%d scanned=%s" % (status, len(revoked_items), (payload or {}).get("scanned")))
+
+        status, payload, _ = call("GET", "/api/v1/pool/entries?q=" + RUN_TAG)
+        matched = (payload or {}).get("items") or []
+        record("P13b 按名称子串过滤命中夹具 3 条",
+               status == 200 and len(matched) == 3 and all(RUN_TAG in (e.get("name") or "") for e in matched),
+               "HTTP %s 条数=%d" % (status, len(matched)))
+
+        # P14 汇总视图与条目一致（含分服务商/分状态切分）
+        status, payload, _ = call("GET", "/api/v1/pool/summary")
+        by_provider = (payload or {}).get("by_provider") or {}
+        by_status = (payload or {}).get("by_status") or {}
+        _, entries_payload, _ = call("GET", "/api/v1/pool/entries")
+        entry_count = len((entries_payload or {}).get("items") or [])
+        record("P14 汇总视图与条目一致（分服务商/分状态齐全）",
+               status == 200 and (payload or {}).get("total") == entry_count
+               and by_provider.get("gemini", 0) >= 2 and by_status.get("revoked", 0) >= 1
+               and (payload or {}).get("enabled", 0) + (payload or {}).get("disabled", 0) == entry_count,
+               "HTTP %s total=%s 服务商=%s 状态=%s" % (status, (payload or {}).get("total"), by_provider, by_status))
+
+        # P15 导出：JSON 与 CSV 都能出，且都不含凭据
+        status, payload, raw = call("GET", "/api/v1/pool/export")
+        rows = (payload or {}).get("items") or []
+        record("P15 JSON 导出行数与条目一致且不含凭据",
+               status == 200 and len(rows) == entry_count and FAKE_CIPHER not in raw,
+               "HTTP %s 行数=%d" % (status, len(rows)))
+
+        status, payload, raw = call("GET", "/api/v1/pool/export?format=csv")
+        lines = [line for line in raw.splitlines() if line.strip()]
+        record("P15b CSV 导出带表头 + 行数一致且不含凭据",
+               status == 200 and lines and lines[0].startswith("kind,id,name,provider,status,enabled,healthy")
+               and len(lines) == len(rows) + 1 and FAKE_CIPHER not in raw,
+               "HTTP %s 行数=%d 表头=%s" % (status, len(lines), (lines[0][:60] if lines else "")))
     finally:
         cleanup_accounts()
 
