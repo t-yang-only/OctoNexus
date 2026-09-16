@@ -201,15 +201,18 @@ func TestOperationsManifestFollowsCapabilities(t *testing.T) {
 		method     string
 	}{
 		{CapGet, "GET"}, {CapProbe, "POST"}, {CapRefresh, "POST"}, {CapSync, "POST"},
+		{CapToggle, "POST"},
 	} {
 		key := string(want.capability) + ":" + want.method
 		if _, ok := paths[key]; !ok {
 			t.Errorf("官方账号池清单缺 %s: %+v", key, official.Operations)
 		}
 	}
+	// 清单由能力位推导，因此"有启停能力就必须有启停路由"之外还要有反面：
+	// 没声明 revoke 时清单里就不能出现它（避免清单与实际路由漂移）。
 	for _, operation := range official.Operations {
-		if operation.Capability == CapToggle {
-			t.Errorf("官方账号池没声明 toggle, 清单里不该有启停路由: %+v", operation)
+		if operation.Capability == CapRevoke {
+			t.Errorf("官方账号池没声明 %s, 清单里不该有这条路: %+v", operation.Capability, operation)
 		}
 	}
 }

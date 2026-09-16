@@ -198,7 +198,7 @@ func TestBuiltinOfficialAdapterIsRegistered(t *testing.T) {
 	for _, capability := range info.Capabilities {
 		has[capability] = true
 	}
-	for _, want := range []Capability{CapList, CapGet, CapProbe, CapRefresh, CapProvision, CapSync} {
+	for _, want := range []Capability{CapList, CapGet, CapProbe, CapRefresh, CapToggle, CapProvision, CapSync} {
 		if !has[want] {
 			t.Errorf("官方账号池适配器缺能力位 %q", want)
 		}

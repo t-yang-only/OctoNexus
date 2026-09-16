@@ -99,7 +99,12 @@ type ChannelKey struct {
 	ID               int `json:"id" gorm:"primaryKey"`                                    // 凭据主键。
 	ChannelID        int `json:"channel_id" gorm:"not null;index:idx_channel_key,unique"` // 所属渠道 ID。
 	ChannelKeyConfig     // 可编辑配置, 平铺为 channel_keys 的各列。
-	StatsMetrics         // 该凭据自身的累计统计。
+	// OperatorDisabled 记录"人工停用"这个决定本身, 与 Enabled 分工不同:
+	// Enabled 是"此刻是否参与选路", 号池同步会随账号状态把它改回 true;
+	// 人工停用是操作者的决定, 不该被周期性同步悄悄推翻, 故单独记一位。
+	// 渠道保存是整体替换语义, 但 syncChannelKeys 只逐列写 key/enabled, 因此这一位在编辑渠道后仍然保留。
+	OperatorDisabled bool `json:"operator_disabled"`
+	StatsMetrics          // 该凭据自身的累计统计。
 }
 
 // 渠道提供的单个上游模型。
