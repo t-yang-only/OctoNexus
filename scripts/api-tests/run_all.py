@@ -52,6 +52,7 @@ SUITES = [
     ("export", "run_log_export_audit.py", "请求级明细导出（CSV 形状/字段等价/筛选/鉴权/下载响应头）", "instance,mock,db"),
     ("stats", "check_stats.py", "后台统计审计（日志/缓存/daily/usage 与 relay_logs 对照）", "instance"),
     ("pool", "run_pool_audit.py", "号池统一视图（谷歌/GPT/Claude 合并视图 + 同步契约 + 鉴权）", "instance,db"),
+    ("poolapi", "run_pool_api_test.py", "号池扩展层（后端自描述 / 统一视图 / 凭据不泄漏 / 计数一致）", "instance,db"),
     ("apikey", "run_apikey_audit.py", "Key 级审计（限流/过期/禁用/额度/越权/登录/流/中止）", "instance,mock"),
     ("costmode", "run_costmode_test.py", "最低成本选路", "instance,real"),
     ("quality", "run_quality_test.py", "按质量自动切换", "instance,mock"),

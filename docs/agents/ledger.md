@@ -73,3 +73,6 @@
 
 | T-test-005 | 组合场景套件：加权 × 计费 × 竞速 × 流式 × 冷却 × 日志统计叠在同一分组上验证 | test | done |
 | | 备注：此前各特性都有独立套件, 但没人验证组合。新增 scripts/api-tests/run_combo_test.py（只用本地 mock）: C1 加权选路把慢成员排第一时, 竞速 800ms 后救场（0.8s 胜出, 两条成员都被尝试）; C2 落选成员不进冷却; C3 倍率权重拉满 → 倍率低的渠道胜出且不触发竞速（上游只被尝试 1 次）; C4 每请求恰好一行日志、成功行带首字节; C5 流式 + 竞速 + 加权, 首个 SSE 块 0.8s 由胜出成员给出。5/5 通过, 已注册进矩阵（22 套件）。已提交。 | 2026-09-16 07:16:22 |
+
+| T-pool-ext-001 | 号池扩展层第一批接口：适配器注册表 + 统一视图 + 只读 API（R-pool-ext-001）| pool/api | done |
+| | 备注：用户 2026-09-16 指令「号池加入高度扩展性，可基于已有的开发大量 API 接口，后面好做各种反代工具包的扩展」。新增 internal/pool（Adapter/Registry/Capability/FieldSpec/Entry + 内置官方账号池适配器 + safeEntries 的 panic 兜底），官方账号池适配器只投影既有 op.OfficialPoolStatusList（不新增表、不动选路）；新增 GET /api/v1/pool/{kinds,entries,stats}（Admin+Auth；单后端失败进 warnings 且仍 200）；单测 6/6、活体套件 run_pool_api_test.py 8/8（含凭据泄漏探针：往库里写可识别串并断言不出现在响应里）；矩阵扩到 23 套件。设计文档 docs/requirements/2026-09-16-号池扩展性-design.md §4 给出后续批次（单条详情/生命周期操作/运行时声明式适配器注册），§6 列出四个待用户拍板的取舍。已提交。 | 2026-09-16 09:44:00 |
