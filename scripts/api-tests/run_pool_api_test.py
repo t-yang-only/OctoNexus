@@ -125,7 +125,7 @@ def seed_station_channel():
     """
     existing = scalar("select id from channels where name=?", (STATION_CHANNEL,))
     if existing:
-        call("POST", "/api/v1/channel/delete/%d" % existing)
+        call("DELETE", "/api/v1/channel/delete/%d" % existing)
     payload = {
         "name": STATION_CHANNEL, "dialect": "generic", "enabled": True, "base_url": MOCK_BASE,
         "keys": [{"name": "k-on", "key": STATION_KEY, "enabled": True},
@@ -139,8 +139,10 @@ def seed_station_channel():
 
 
 def cleanup_station_channel(channel_id):
+    # 路由是 DELETE /api/v1/channel/delete/:id —— 用 POST 打不中，夹具就会一直在库里堆着
+    #（实测如此：前几次跑留下的 POOLAPI-* 渠道就是这么来的）。
     if channel_id:
-        call("POST", "/api/v1/channel/delete/%d" % channel_id)
+        call("DELETE", "/api/v1/channel/delete/%d" % channel_id)
 
 
 def seed_accounts():
