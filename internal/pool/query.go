@@ -57,15 +57,22 @@ type Filter struct {
 	Healthy   *bool
 	Expiring  time.Duration // 只留"距今 X 之内到期"的条目
 	HasExpiry *bool         // true=只留有过期时间的
+
+	// 分页与排序（外部工具包按页拉取时用；Limit<=0 表示不翻页）。
+	Limit  int    // 返回条数上限
+	Offset int    // 跳过条数
+	Sort   string // kind / name / provider / status / enabled / expires（默认 kind）
+	Desc   bool   // 倒序
 }
 
 // ListResult 是过滤后的统一视图结果，带上后端侧的错误与过滤前后的计数，
 // 便于调用方回答"是不是被过滤掉了"而不是看着空表猜。
 type ListResult struct {
 	Items    []Entry     `json:"items"`
-	Total    int         `json:"total"`   // 过滤后条数
-	Matched  int         `json:"matched"` // 同 Total（保留字段名可读性）
-	Scanned  int         `json:"scanned"` // 过滤前条数
+	Total    int         `json:"total"`    // 过滤后条数（未分页前）
+	Matched  int         `json:"matched"`  // 同 Total（保留字段名可读性）
+	Returned int         `json:"returned"` // 本次实际返回条数（分页后）
+	Scanned  int         `json:"scanned"`  // 过滤前条数
 	Warnings []KindError `json:"warnings,omitempty"`
 }
 
@@ -83,10 +90,55 @@ func List(ctx context.Context, filter Filter, now time.Time) (ListResult, error)
 		}
 		items = append(items, entry)
 	}
-	result.Items = items
+	// 先排序再分页：过滤后条数（total）与本次返回条数（returned）分开回，
+	// 调用方据此翻页，也不会把"这一页"误当成"全部"。
+	sortEntries(items, filter.Sort, filter.Desc)
 	result.Total = len(items)
 	result.Matched = len(items)
+	if filter.Offset > 0 {
+		if filter.Offset >= len(items) {
+			items = items[:0]
+		} else {
+			items = items[filter.Offset:]
+		}
+	}
+	if filter.Limit > 0 && filter.Limit < len(items) {
+		items = items[:filter.Limit]
+	}
+	result.Items = items
+	result.Returned = len(items)
 	return result, nil
+}
+
+// sortEntries 稳定排序；未知排序字段按 kind 处理（外部工具传错字段不该让整请求失败）。
+func sortEntries(items []Entry, sortBy string, desc bool) {
+	less := func(i, j int) bool { return items[i].Kind < items[j].Kind }
+	switch strings.ToLower(sortBy) {
+	case "name":
+		less = func(i, j int) bool { return items[i].Name < items[j].Name }
+	case "provider":
+		less = func(i, j int) bool { return items[i].Provider < items[j].Provider }
+	case "status":
+		less = func(i, j int) bool { return items[i].Status < items[j].Status }
+	case "enabled":
+		less = func(i, j int) bool { return !items[i].Enabled && items[j].Enabled }
+	case "expires":
+		less = func(i, j int) bool { return expiryKey(items[i]) < expiryKey(items[j]) }
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if desc {
+			return less(j, i)
+		}
+		return less(i, j)
+	})
+}
+
+// expiryKey 把可空时间转成可比较的字符串：没有到期时间的排在最后。
+func expiryKey(entry Entry) string {
+	if entry.ExpiresAt == nil {
+		return "9999-99-99"
+	}
+	return entry.ExpiresAt.Format(time.RFC3339)
 }
 
 func (f Filter) matches(entry Entry, now time.Time) bool {
@@ -253,8 +305,36 @@ func ExportRows(ctx context.Context, kind string) ([]ExportRow, []KindError, err
 
 // ParseFilter 把查询参数解析成 Filter（HTTP 层只做字符串到类型的转换，判断逻辑留在本包，
 // 这样 CLI/外部工具直接调本包也能得到同样的语义）。
-func ParseFilter(kind, provider, status, query, enabled, healthy, expiring, hasExpiry string) (Filter, error) {
-	filter := Filter{Kind: kind, Provider: provider, Status: status, Query: query}
+func ParseFilter(params map[string]string) (Filter, error) {
+	filter := Filter{
+		Kind:     params["kind"],
+		Provider: params["provider"],
+		Status:   params["status"],
+		Query:    params["q"],
+	}
+	if raw := params["limit"]; raw != "" {
+		limit, err := parseSeconds(raw)
+		if err != nil {
+			return filter, fmt.Errorf("limit: %w", err)
+		}
+		filter.Limit = int(limit)
+	}
+	if raw := params["offset"]; raw != "" {
+		offset, err := parseSeconds(raw)
+		if err != nil {
+			return filter, fmt.Errorf("offset: %w", err)
+		}
+		filter.Offset = int(offset)
+	}
+	filter.Sort = params["sort"]
+	if raw := params["desc"]; raw != "" {
+		value, err := parseBool(raw)
+		if err != nil {
+			return filter, fmt.Errorf("desc: %w", err)
+		}
+		filter.Desc = value
+	}
+	enabled, healthy, expiring, hasExpiry := params["enabled"], params["healthy"], params["expiring_within"], params["has_expiry"]
 	if enabled != "" {
 		value, err := parseBool(enabled)
 		if err != nil {

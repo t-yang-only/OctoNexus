@@ -84,3 +84,6 @@
 | | 备注：新增 internal/pool/query.go（Filter/ParseFilter/ListResult、SummaryOf、ExportRows、Operation/operationsOf）；/pool/entries 加过滤参数（kind/provider/status/q/enabled/healthy/expiring_within/has_expiry，非法取值报错而非静默 false）、新增 /pool/summary 与 /pool/export?format=json|csv；/pool/kinds 每个后端回填 operations[]（由能力位推导，声明与路由不可能漂移）。验证：internal/pool 单测 15/15（新增 5 例）、活体 run_pool_api_test.py 20/20（新增 6 例）、全量矩阵 23 套件 0 失败。已提交。 | 2026-09-16 10:36:00 |
 | T-test-006 | 修 stats 套件 usage ≤ relay_logs 断言的基线缺陷（不是产品缺陷）| test | done |
 | | 备注：该断言用单页 200 当基线，表超 1700 行后必然误报；改为一页取满 500（翻页在并发写入下会 offset 漂移跳行，已实证 123/123/122 三组读数）；并把断言拆成「当前小时带一个小请求的跨小时归属余量 + 已结算上一小时严格」两条守卫，比原来更强。实证跨小时归属：hour09=(−1,0,−11,−7)、hour10=(+1,0,+11,+7)。结果 stats 14/14、矩阵 23 套件 0 失败。已提交。 | 2026-09-16 10:36:00 |
+
+| T-pool-ext-004 | 号池扩展层第四批：分页排序 + 批量动作 + 单 kind 详情 + OpenAPI 文档（R-pool-ext-001）| pool/api | done |
+| | 备注：query.go 加分页/排序（total 与 returned 分开回、越界回空、未知排序字段回退不报错）；新增 internal/pool/batch.go（逐条独立、未声明能力逐条回不支持、需要 ids 或 filter+max、默认 50/硬上限 200、超出计 skipped）；新增 internal/pool/openapi.go（由注册表推导 paths 与 kind 枚举、12 个组件 schema）；路由新增 GET /kinds/:kind、GET /openapi.json、POST /entries/batch。验证：internal/pool 单测 23 例全绿（新增 8 例）、活体 run_pool_api_test.py 30/30（新增 9 条断言）、全量矩阵 23 套件 0 失败。已提交。 | 2026-09-16 10:47:08 |

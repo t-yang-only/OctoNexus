@@ -254,6 +254,98 @@ def main():
                status == 200 and lines and lines[0].startswith("kind,id,name,provider,status,enabled,healthy")
                and len(lines) == len(rows) + 1 and FAKE_CIPHER not in raw,
                "HTTP %s 行数=%d 表头=%s" % (status, len(lines), (lines[0][:60] if lines else "")))
+
+        # ===== 第四批：单 kind 详情 / 分页排序 / 批量动作 / OpenAPI =====
+        # P16 单个后端的详情（外部工具点进某个后端时才拿这一份，不用先拉全部再筛）
+        status, payload, _ = call("GET", "/api/v1/pool/kinds/official")
+        record("P16 取单个后端详情",
+               status == 200 and (payload or {}).get("kind") == "official"
+               and "list" in ((payload or {}).get("capabilities") or []),
+               "HTTP %s kind=%s" % (status, (payload or {}).get("kind")))
+
+        status, _, raw = call("GET", "/api/v1/pool/kinds/nope")
+        record("P16b 未注册 kind 的详情 404", status == 404 and "unknown pool kind" in raw,
+               "HTTP %s body=%s" % (status, raw[:90]))
+
+        # P17 分页与排序：过滤后条数(total)与本次返回条数(returned)分开回
+        status, payload, _ = call("GET", "/api/v1/pool/entries?q=" + RUN_TAG + "&limit=1&sort=name")
+        record("P17 分页：total 是过滤后条数、returned 是本次条数",
+               status == 200 and (payload or {}).get("total") == 3
+               and (payload or {}).get("returned") == 1 and len((payload or {}).get("items") or []) == 1,
+               "HTTP %s total=%s returned=%s" % (status, (payload or {}).get("total"), (payload or {}).get("returned")))
+
+        status, payload, _ = call("GET", "/api/v1/pool/entries?q=" + RUN_TAG + "&limit=1&sort=name&desc=true")
+        first_desc = ((payload or {}).get("items") or [{}])[0].get("name")
+        status2, payload2, _ = call("GET", "/api/v1/pool/entries?q=" + RUN_TAG + "&limit=1&sort=name")
+        first_asc = ((payload2 or {}).get("items") or [{}])[0].get("name")
+        record("P17b 排序生效且倒序确实反了",
+               status == 200 and status2 == 200 and first_desc and first_asc and first_desc != first_asc,
+               "asc=%s desc=%s" % (first_asc, first_desc))
+
+        # P18 批量动作：逐条独立、失败带原因、且不泄漏凭据
+        probes = [e.get("id") for e in matched][:2]
+        status, payload, raw = call("POST", "/api/v1/pool/entries/batch",
+                                    {"action": "probe", "kind": "official", "ids": probes})
+        items = (payload or {}).get("items") or []
+        record("P18 批量探活逐条独立（假凭据必失败且带原因、不泄漏）",
+               status == 200 and (payload or {}).get("total") == len(probes) and len(items) == len(probes)
+               and (payload or {}).get("failed") == len(probes) and all(i.get("error") for i in items)
+               and FAKE_CIPHER not in raw,
+               "HTTP %s total=%s failed=%s" % (status, (payload or {}).get("total"), (payload or {}).get("failed")))
+
+        status, payload, raw = call("POST", "/api/v1/pool/entries/batch",
+                                    {"action": "disable", "kind": "official", "ids": probes[:1]})
+        record("P18b 批量里未声明能力位逐条回不支持（不是整批 400）",
+               status == 200 and (payload or {}).get("failed") == 1
+               and "capability not supported" in json.dumps((payload or {}).get("items") or []),
+               "HTTP %s items=%s" % (status, json.dumps((payload or {}).get("items") or [])[:110]))
+
+        status, _, raw = call("POST", "/api/v1/pool/entries/batch", {"action": "drop_everything", "ids": ["1"]})
+        record("P18c 非法批量动作 400", status == 400 and "unknown batch action" in raw,
+               "HTTP %s body=%s" % (status, raw[:90]))
+
+        status, _, raw = call("POST", "/api/v1/pool/entries/batch", {"action": "probe"})
+        record("P18d 不给 ids 也不给 filter 被拒（不允许隐式全量）",
+               status == 400 and "either ids or a filter" in raw,
+               "HTTP %s body=%s" % (status, raw[:90]))
+
+        # P19 OpenAPI 文档由注册表推导：有 probe/sync 的路由，没有 toggle 的路由
+        status, payload, raw = call("GET", "/api/v1/pool/openapi.json")
+        doc_paths = (payload or {}).get("paths") or {}
+        doc_schemas = ((payload or {}).get("components") or {}).get("schemas") or {}
+        kind_param = (((doc_paths.get("/api/v1/pool/kinds/{kind}") or {}).get("get") or {})
+                      .get("parameters") or [{}])[0]
+        enum = ((kind_param.get("schema") or {}).get("enum") or [])
+        record("P19 OpenAPI 由注册表推导（路径/枚举/schema 齐全且无凭据）",
+               status == 200 and (payload or {}).get("openapi") == "3.0.3"
+               and any("probe" in p for p in doc_paths)
+               and any("/kinds/{kind}/sync" in p for p in doc_paths)
+               and not any(("enable" in p or "disable" in p) for p in doc_paths)
+               and "official" in enum and {"Entry", "BatchRequest", "Summary"} <= set(doc_schemas)
+               and FAKE_CIPHER not in raw,
+               "HTTP %s paths=%d schemas=%d enum=%s" % (status, len(doc_paths), len(doc_schemas), enum))
+
+        # P20 新路由同样在鉴权之后。
+        #     注意 code=0：无 cookie 的 POST 会在服务端读完请求体前被拒，
+        #     客户端偶发"连接重置"而不是收到 401（实测三次里出现过一次）。
+        #     这不是接口问题, 但断言也不放宽——重试掉传输噪声, 仍要求 401, 并把真实异常带上。
+        def unauth_status(method, path, payload=None):
+            last = (0, "")
+            for _ in range(3):
+                code, body, _ = call(method, path, payload, with_cookie=False)
+                if code:
+                    return code, body
+                last = (code, json.dumps(body)[:80])
+            return last
+
+        checks = []
+        for method, path in [("GET", "/api/v1/pool/kinds/official"), ("GET", "/api/v1/pool/openapi.json")]:
+            checks.append(unauth_status(method, path))
+        checks.append(unauth_status("POST", "/api/v1/pool/entries/batch", {"action": "probe", "ids": ["1"]}))
+        codes = [code for code, _ in checks]
+        record("P20 新路由未登录 401", all(code == 401 for code in codes),
+               "codes=%s detail=%s" % (codes, [body for code, body in checks if code != 401]))
+
     finally:
         cleanup_accounts()
 
