@@ -108,3 +108,5 @@
 | | 备注：条目 = (渠道, 凭据)，ID `<channel_id>:<key_name>`；排除官方账号池自动物化的渠道（同一条凭据不两个身份）；能力位 list/get/probe/refresh/toggle，不声明 sync/provision/revoke（没有东西需要物化）。probe 走 health.ProbeToken（按站点族选口径，口径回写 detail.probe_kind）、refresh 走 health.FetchBalance + op.RecordChannelBalance（余额顺带喂给加权选路的 balance 维度）、toggle 走 op.SetChannelKeyEnabled。验证：station_test 8 例 + station_contract_test 用 pooltest 自检 + 活体套件 42/42；为让 pooltest 能取到内置适配器，pool.go 新增 Lookup(kind)。踩坑：/channel/create 的 models 必须是字符串列表。| 2026-09-16 13:45:00 |
 | T-test-011 | 号池活体套件新增渠道凭据用例（P21-P27）并修正夹具命名污染（R-pool-ext-002）| scripts/api-tests | done |
 | | 备注：P21 能力位、P22 ID 口径/站点族/探活口径、P22b 凭据不外泄、P23 官方号池渠道不重复列示、P24 探活结论、**P24b 从 mock 上游日志反证打的是 GET /api/user/self**、P25 余额 500/120/380、P26 启停写两位（直接查库）、P27 未知凭据 404 → 42/42。新夹具名刻意不含 RUN_TAG 子串，否则 P2/P13b/P17/P18b 会被名称子串过滤连带污染成假失败。mock 上游补 /api/user/self。| 2026-09-16 13:45:00 |
+| T-test-012 | 夹具清理方式修正：渠道删除接口只认 DELETE（POST 打不到，残留回不了头）| scripts/api-tests | done |
+| | 备注：实证 POST /channel/delete/:id → 404、DELETE → 200 且库里该行消失；套件清理与"建前删旧"统一改 DELETE，并清掉历史残留 3 条，重跑后查库零残留。教训：夹具清理本身要验证——"调了删除接口"不等于"真删了"。| 2026-09-16 14:05:00 |
