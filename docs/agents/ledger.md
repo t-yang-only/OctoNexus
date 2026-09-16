@@ -100,3 +100,7 @@
 | | 备注：让面板当第一个调用方，接口面的别扭处才算被真用一遍。页面先取 /pool/kinds 再按能力位渲染，后端 tab/条目字段都来自自描述，所以以后接新反代工具包这一页不用改。含 api/pool.ts、modules/pool/index.tsx、nav/懒加载接线、三语 45 键（navbar.pool + unifiedPool）。验证：tsc 0、eslint 0（该文件）、产物实测含页面标记（index-D6vtIVqI.js 494KB）、全量矩阵 25 套件 0 失败。未做人工视觉验收（用户明确拒绝浏览器自动化）。| 2026-09-16 13:20:00 |
 | T-test-009 | 面板静态资源套件 run_panel_asset_test.py（4/4，注册进 run_all 第 25 条）| scripts/api-tests | done |
 | | 备注：前端没重建/没进二进制时后端套件全绿也发现不了，这条直接看正在服务的产物：首页 HTML 带入口脚本 → 入口脚本可下载 → 构建产物含号池页标记 → 三语文案齐全。| 2026-09-16 13:20:00 |
+| T-pool-ext-008 | 面板批量动作（探活/启用/停用）接上 /pool/entries/batch（R-pool-ext-001）| web | done |
+| | 备注：口径是"选择就是 ids，绝不隐式全量"——不提供按筛选条件全量执行的入口，因为启停直接影响线上路由。一次调用只针对一种后端（选中键按第一个冒号切 kind，id 自身可能含冒号）；跑完只保留失败/未执行项，避免重复提交已成功的。验证：tsc 0、eslint 0、产物标记（panel P5 断言 批量探活/Probe selected/batchDisable）、poolapi 32/32。踩坑：React Compiler 不接受手工记忆化的 Map/Set（preserve-manual-memoization），改直接算。| 2026-09-16 15:05:00 |
+| T-test-010 | CSV 导出契约：BOM + 每行列数（poolapi P15b/P15c）+ 面板批量界面进产物（panel P5）| scripts/api-tests | done |
+| | 备注：给表格软件用的 CSV 补了 BOM（否则中文乱码），并把"哪个后端没取到数据"用 X-Pool-Error-Kinds 响应头报出来。加 BOM 会让原 P15b 的表头断言变红 —— 不是回归，是断言要跟着契约走，已改为先剥 BOM；新增 P15c 用标准库 csv 解析校验列数一致（列错位比缺行更难发现）。| 2026-09-16 15:05:00 |

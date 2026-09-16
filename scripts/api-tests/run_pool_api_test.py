@@ -12,6 +12,8 @@ Run: python run_pool_api_test.py   （实例必须在跑; 会直连本地 sqlite
 """
 
 import datetime
+import csv
+import io
 import json
 import os
 import sqlite3
@@ -263,11 +265,21 @@ def main():
                "HTTP %s 行数=%d" % (status, len(rows)))
 
         status, payload, raw = call("GET", "/api/v1/pool/export?format=csv")
-        lines = [line for line in raw.splitlines() if line.strip()]
+        # CSV 是给人/表格软件看的：首字节必须是 BOM，否则中文名字在 Windows 表格软件里是乱码。
+        has_bom = raw.startswith("\ufeff")
+        lines = [line for line in raw.lstrip("\ufeff").splitlines() if line.strip()]
         record("P15b CSV 导出带表头 + 行数一致且不含凭据",
                status == 200 and lines and lines[0].startswith("kind,id,name,provider,status,enabled,healthy")
                and len(lines) == len(rows) + 1 and FAKE_CIPHER not in raw,
                "HTTP %s 行数=%d 表头=%s" % (status, len(lines), (lines[0][:60] if lines else "")))
+
+        # P15c CSV 的"给表格软件"那一层：BOM + 每行列数与表头一致（错位比缺行更难被人发现）
+        parsed = list(csv.reader(io.StringIO(raw.lstrip("\ufeff"))))
+        header = parsed[0] if parsed else []
+        widths = {len(item) for item in parsed}
+        record("P15c CSV 带 BOM 且每行列数与表头一致",
+               status == 200 and has_bom and len(header) == 10 and widths == {len(header)},
+               "BOM=%s 表头列数=%d 各行列数=%s" % (has_bom, len(header), sorted(widths)))
 
         # ===== 第四批：单 kind 详情 / 分页排序 / 批量动作 / OpenAPI =====
         # P16 单个后端的详情（外部工具点进某个后端时才拿这一份，不用先拉全部再筛）

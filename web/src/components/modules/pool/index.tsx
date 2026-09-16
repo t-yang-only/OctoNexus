@@ -13,10 +13,12 @@ import {
     RotateCw,
     Search,
     Boxes,
+    X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import {
+    poolBatch,
     poolEntriesQueryOptions,
     poolExportURL,
     poolKindsQueryOptions,
@@ -49,6 +51,10 @@ export function Pool() {
     const [busy, setBusy] = useState(''); // 正在进行的动作标识，避免重复点击
     const [notice, setNotice] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
     const [expanded, setExpanded] = useState('');
+
+    // 选中的条目键（"kind:id"）。批量动作后端要求显式 ids，选择就是这个 ids 的来源；
+    // 不提供"对当前筛选条件全量执行"这种隐式全量入口（误伤面太大）。
+    const [selected, setSelected] = useState<string[]>([]);
 
     // 关键字防抖：输入停顿 300ms 再发请求，避免每敲一个字打一次后端。
     // 关键字真的变了才归零页码（用 ref 比较，别把 setOffset 塞进 setState 更新函数里）。
@@ -83,7 +89,7 @@ export function Pool() {
     }, [kindInfos]);
     const currentKind = kind ? kindByID.get(kind) : undefined;
     const canSync = Boolean(currentKind?.capabilities.includes('sync'));
-    const items = entries.data?.items ?? [];
+    const items = useMemo(() => entries.data?.items ?? [], [entries.data]);
     const warnings = entries.data?.warnings ?? [];
     const kindErrors = summary.data?.kind_errors ?? [];
 
@@ -109,6 +115,35 @@ export function Pool() {
         }
     };
 
+    // 批量动作：按后端分组调用（一次调用只针对一种后端），逐条独立，一条失败不影响其余。
+    // 跑完只保留失败/未执行的那几条选中，方便直接重试；已成功的不再重复提交。
+    const runBatch = (action: 'probe' | 'enable' | 'disable') =>
+        runAction(`batch:${action}`, async () => {
+            let ok = 0;
+            let failed = 0;
+            let skipped = 0;
+            const reasons: string[] = [];
+            const failedKeys: string[] = [];
+            for (const [kind, ids] of selectedByKind) {
+                const report = await poolBatch({ action, kind, ids });
+                ok += report.ok;
+                failed += report.failed;
+                skipped += report.skipped;
+                for (const item of report.items) {
+                    if (item.ok) continue;
+                    failedKeys.push(`${item.kind}:${item.id}`);
+                    if (reasons.length < 3) reasons.push(`${item.id}: ${item.error ?? '—'}`);
+                }
+            }
+            setSelected(failedKeys);
+            const head = `${t('batchOk')} ${ok} · ${t('batchFail')} ${failed}${
+                skipped > 0 ? ` · ${t('batchSkipped')} ${skipped}` : ''
+            }`;
+            if (failed === 0 && skipped === 0) return head;
+            invalidate();
+            throw new Error(`${head}｜${reasons.join('；')}`);
+        });
+
     const toggleSort = (field: string) => {
         if (sort === field) {
             setDesc(!desc);
@@ -128,6 +163,52 @@ export function Pool() {
     };
 
     const entryKey = (entry: PoolEntry) => `${entry.kind}:${entry.id}`;
+
+    // 后端批量接口的单次硬上限（超出部分回执里记 skipped），页面这里只做提示不拦截。
+    const batchMax = 200;
+    const batchButtonClass =
+        'flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-muted-foreground hover:bg-muted disabled:opacity-40';
+
+    // 下面几项都是"选中集合"的派生物，规模就是选中条数，直接算即可，不需要 memo
+    //（用 useMemo 反而会被 React Compiler 判定为无法保留的手工记忆化）。
+    const selectedSet = new Set(selected);
+    const pageKeys = items.map((entry) => entryKey(entry));
+    const pageSelected = pageKeys.filter((key) => selectedSet.has(key));
+    const allPageSelected = pageKeys.length > 0 && pageSelected.length === pageKeys.length;
+
+    // 条目 id 自身可能含冒号（如 official 的 "provider:account_id"），所以按第一个冒号切分。
+    const selectedByKind = new Map<string, string[]>();
+    for (const key of selected) {
+        const at = key.indexOf(':');
+        if (at <= 0) continue;
+        const kind = key.slice(0, at);
+        const id = key.slice(at + 1);
+        const bucket = selectedByKind.get(kind);
+        if (bucket) bucket.push(id);
+        else selectedByKind.set(kind, [id]);
+    }
+
+    // 按钮可用性看"选中条目所属后端是否声明了这项能力"：后端没声明的能力，页面不给入口。
+    const selectedCapabilities = new Set<string>();
+    for (const kind of selectedByKind.keys()) {
+        for (const capability of kindByID.get(kind)?.capabilities ?? []) selectedCapabilities.add(capability);
+    }
+    const canBatchProbe = selected.length > 0 && selectedCapabilities.has('probe');
+    const canBatchToggle = selected.length > 0 && selectedCapabilities.has('toggle');
+
+    const toggleSelected = (key: string) =>
+        setSelected((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
+
+    const toggleAllPage = () =>
+        setSelected((prev) => {
+            const next = new Set(prev);
+            if (allPageSelected) {
+                for (const key of pageKeys) next.delete(key);
+            } else {
+                for (const key of pageKeys) next.add(key);
+            }
+            return [...next];
+        });
 
     const cards: Array<{ label: string; value: number | undefined; tone?: 'bad' | 'warn' }> = [
         { label: t('total'), value: summary.data?.total },
@@ -284,10 +365,73 @@ export function Pool() {
                 </div>
             )}
 
+            {selected.length > 0 && (
+                <section className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 text-xs text-card-foreground">
+                    <span className="font-medium">
+                        {t('selected')} {selected.length}
+                    </span>
+                    <span className="text-muted-foreground">
+                        {t('currentPage')} {pageSelected.length}
+                    </span>
+                    {selected.length > batchMax && <span className="text-accent">{t('batchLimitHint')}</span>}
+                    <div className="flex flex-wrap items-center gap-1">
+                        <button
+                            className={batchButtonClass}
+                            disabled={!canBatchProbe || busy !== ''}
+                            onClick={() => runBatch('probe')}
+                            title={canBatchProbe ? t('batchProbe') : t('notSupported')}
+                            type="button"
+                        >
+                            {busy === 'batch:probe' ? <Loader2 className="animate-spin" size={12} /> : <Activity size={12} />}
+                            {t('batchProbe')}
+                        </button>
+                        <button
+                            className={batchButtonClass}
+                            disabled={!canBatchToggle || busy !== ''}
+                            onClick={() => runBatch('enable')}
+                            title={canBatchToggle ? t('batchEnable') : t('notSupported')}
+                            type="button"
+                        >
+                            {busy === 'batch:enable' ? <Loader2 className="animate-spin" size={12} /> : <Power size={12} />}
+                            {t('batchEnable')}
+                        </button>
+                        <button
+                            className={batchButtonClass}
+                            disabled={!canBatchToggle || busy !== ''}
+                            onClick={() => runBatch('disable')}
+                            title={canBatchToggle ? t('batchDisable') : t('notSupported')}
+                            type="button"
+                        >
+                            {busy === 'batch:disable' ? <Loader2 className="animate-spin" size={12} /> : <Power size={12} />}
+                            {t('batchDisable')}
+                        </button>
+                        <button
+                            className={batchButtonClass}
+                            disabled={busy !== ''}
+                            onClick={() => setSelected([])}
+                            title={t('clearSelection')}
+                            type="button"
+                        >
+                            <X size={12} />
+                            {t('clearSelection')}
+                        </button>
+                    </div>
+                </section>
+            )}
+
             <section className="min-h-0 flex-1 overflow-auto rounded-2xl border border-border bg-card text-card-foreground">
                 <table className="w-full text-left text-xs">
                     <thead className="sticky top-0 z-10 bg-card text-muted-foreground">
                         <tr className="border-b border-border">
+                            <th className="w-8 px-3 py-2 font-medium">
+                                <input
+                                    aria-label={t('selectAll')}
+                                    checked={allPageSelected}
+                                    className="h-3.5 w-3.5 accent-primary align-middle"
+                                    onChange={toggleAllPage}
+                                    type="checkbox"
+                                />
+                            </th>
                             <th className="cursor-pointer px-3 py-2 font-medium" onClick={() => toggleSort('name')}>
                                 <span className="inline-flex items-center gap-1">
                                     {t('name')}
@@ -320,14 +464,14 @@ export function Pool() {
                     <tbody>
                         {entries.isLoading && (
                             <tr>
-                                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={7}>
+                                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={8}>
                                     <Loader2 className="mx-auto animate-spin" size={16} />
                                 </td>
                             </tr>
                         )}
                         {!entries.isLoading && items.length === 0 && (
                             <tr>
-                                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={7}>
+                                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={8}>
                                     <div>{t('empty')}</div>
                                     <div className="mt-1">{t('emptyHint')}</div>
                                 </td>
@@ -342,6 +486,15 @@ export function Pool() {
                             const isOpen = expanded === key;
                             return [
                                 <tr className="border-b border-border/60 align-middle" key={key}>
+                                    <td className="w-8 px-3 py-2">
+                                        <input
+                                            aria-label={entry.name || entry.id}
+                                            checked={selectedSet.has(key)}
+                                            className="h-3.5 w-3.5 accent-primary align-middle"
+                                            onChange={() => toggleSelected(key)}
+                                            type="checkbox"
+                                        />
+                                    </td>
                                     <td className="px-3 py-2">
                                         <div className="flex items-center gap-1">
                                             <button
@@ -441,7 +594,7 @@ export function Pool() {
                                 </tr>,
                                 isOpen && (
                                     <tr className="border-b border-border/60 bg-muted/30" key={`${key}:detail`}>
-                                        <td className="px-3 py-3" colSpan={7}>
+                                        <td className="px-3 py-3" colSpan={8}>
                                             <div className="grid gap-3 md:grid-cols-2">
                                                 <div>
                                                     <div className="mb-1 text-muted-foreground">{t('detail')}</div>

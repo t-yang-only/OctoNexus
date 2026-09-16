@@ -91,6 +91,14 @@ def main():
         "产物 %d 个，缺 %s" % (len(files), missing or "无"),
     )
 
+    batch_markers = ["批量探活", "Probe selected", "batchDisable"]
+    missing_batch = [marker for marker in batch_markers if marker not in bundle]
+    record(
+        "P5 批量动作界面进了产物（选择/批量按钮真的构建了）",
+        not missing_batch,
+        "缺 %s" % (missing_batch or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(
