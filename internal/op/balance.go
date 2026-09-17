@@ -31,6 +31,10 @@ func BalanceSummaryGet() model.BalanceSummary {
 		GeneratedAt:   time.Now().Unix(),
 	}
 
+	// 手动订阅先算出来：它既是总额的一部分，也是「无接口站点」的余额来源。
+	manualRows := manualSubscriptionRows(pointsPerUnit, time.Now())
+	manualByChannel := manualSubscriptionByChannel(manualRows)
+	manualUsedChannels := map[int]bool{}
 	counts := channelKeyCounts()
 	for _, channel := range channelCache.GetAll() {
 		row := model.ChannelBalanceRow{
@@ -50,8 +54,20 @@ func BalanceSummaryGet() model.BalanceSummary {
 			row.Known = true
 			row.Remaining = remaining
 			row.Balance = model.ConvertBalancePoints(remaining, pointsPerUnit)
+			row.BalanceSource = "api"
 			summary.Total += row.Balance
 			summary.KnownChannels++
+		} else if manual, bound := manualByChannel[channel.ID]; bound {
+			// 没有接口可读、但人录了一条：这条渠道就从「未知」变成「已知（手动）」。
+			// 这是本轮的目的——让无接口站点也进总余额，而不是永远挂在未知里。
+			row.Known = true
+			row.Remaining = manual.BalancePoints
+			row.Balance = manual.Balance
+			row.BalanceSource = "manual"
+			summary.Total += row.Balance
+			summary.ManualTotal += row.Balance
+			summary.KnownChannels++
+			manualUsedChannels[channel.ID] = true
 		} else {
 			summary.UnknownChannels++
 		}
@@ -61,6 +77,29 @@ func BalanceSummaryGet() model.BalanceSummary {
 	sort.Slice(summary.Channels, func(i, j int) bool {
 		return summary.Channels[i].ChannelID < summary.Channels[j].ChannelID
 	})
+
+	// 手动订阅：能计的计入总额，计不了的如实标出来（停用/过期/该渠道已有自动读数）。
+	// 「已有自动读数」时不计是刻意的——同一笔钱算两遍会让总额虚高，而自动读数是更可信的那一份。
+	for i := range manualRows {
+		row := &manualRows[i]
+		if row.Expired {
+			summary.ManualExpired++
+		}
+		switch {
+		case !row.Enabled, row.Expired:
+			row.Counted = false
+		case row.ChannelID != 0:
+			// 绑定渠道的记录，金额**只经渠道行入账**：渠道行已经把它算进 Total 了
+			// （来源标成 manual），这里再算一次就是同一笔钱算两遍。
+			// 此时 Counted 只表示「它确实被渠道行用上了」，供面板解释清楚。
+			row.Counted = manualUsedChannels[row.ChannelID]
+		default:
+			row.Counted = true
+			summary.ManualTotal += row.Balance
+			summary.Total += row.Balance
+		}
+	}
+	summary.ManualSubscriptions = manualRows
 
 	keys := apiKeyCache.GetAll()
 	for _, key := range keys {

@@ -175,6 +175,19 @@ def main():
         "缺 %s" % (missing_tier or "无"),
     )
 
+    # P14 手动订阅（R-acct-004): 无接口站点的手录入口与它的三条口径文案都要进产物, 三语齐全。
+    # 标记挑的是「面板真的会调用/真的会显示」的东西：列表数据来自余额快照（manual_subscriptions），
+    # 面板只调写接口（create/update/delete），因此不拿未被引用的 subscription/list 当标记
+    # —— 未引用的导出会被打包器摇掉，拿它当标记会假红（本轮实测过一次）。
+    manual_markers = ["subscription/create", "subscription/delete", "manual_subscriptions", "manual_total", "手录合计",
+                      "手錄合計", "Manual total", "只有「启用 + 未过期」"]
+    missing_manual = [marker for marker in manual_markers if marker not in bundle]
+    record(
+        "P14 手动订阅进产物（接口路径 + 口径文案 + 三语文案）",
+        not missing_manual,
+        "缺 %s" % (missing_manual or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(

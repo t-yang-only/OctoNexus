@@ -1,6 +1,7 @@
 import { Wallet, Layers, Coins, AlertCircle } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import { useBalanceSummary } from '@/api/balance';
+import { ManualSubscriptions } from './manual-subscription';
 import { AnimatedNumber } from '@/components/common/AnimatedNumber';
 
 // Balance 展示总余额（T-balance-001）: 各渠道剩余额度按统一口径折算后的合计 + 逐渠道明细。
@@ -85,6 +86,9 @@ export function Balance() {
                                 {channel.known
                                     ? `${channel.balance.toFixed(2)} ${currency}`
                                     : t('unknown')}
+                                {channel.balance_source === 'manual' && (
+                                    <span className="ml-1 text-xs text-muted-foreground">{t('manualSource')}</span>
+                                )}
                             </span>
                         </li>
                     ))}
@@ -94,6 +98,16 @@ export function Balance() {
             {channels.length === 0 && (
                 <p className="text-xs text-muted-foreground">{t('empty')}</p>
             )}
+
+            {/* 手动订阅（R-acct-004）：无接口站点的余额来源，人录一条即并入总额。 */}
+            <ManualSubscriptions
+                rows={data?.manual_subscriptions ?? []}
+                channels={channels}
+                currency={currency}
+                globalPointsPerUnit={pointsPerUnit}
+                manualTotal={data?.manual_total ?? 0}
+                expired={data?.manual_expired ?? 0}
+            />
         </section>
     );
 }
