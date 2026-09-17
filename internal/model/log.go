@@ -20,7 +20,13 @@ type RelayLog struct {
 	// Attempts 是本请求打向上游的轮次数: 1 表示第一次就出结果, >1 表示中途换过成员(重试/换人),
 	// 0 表示还没发起过上游请求就结束了(分组不存在、成员解析失败等)。
 	// 首字竞速的多路并发算**一轮**(它们同时发出, 抢的是同一个逻辑轮次), 与面板上的"第几轮"同口径。
-	Attempts       int       `json:"attempts"`
+	Attempts int `json:"attempts"`
+	// Decision 是这次请求的选路判定（T-decision-001）: 形如
+	// "mode=smart;tier=decision;reason=affinity;slot=1;attempt=2"。
+	// 回答"为什么走了这个成员"——模式、命中的档位、决定这次选择的机制（亲和保持/冷却恢复探测/
+	// 成员顺序/综合排序/人工指定）、成员在分组里的顶层序号与轮次。不含渠道名与凭据。
+	// 未发起上游请求就结束的请求为空串。
+	Decision       string    `json:"decision"`
 	PromptTokens   int64     `json:"prompt_tokens"`
 	CachedTokens   int64     `json:"cached_tokens"`
 	CompletionToks int64     `json:"completion_tokens"`

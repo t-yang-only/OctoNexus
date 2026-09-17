@@ -50,7 +50,7 @@ func TestRelayLogExportCSVShape(t *testing.T) {
 		t.Fatalf("records=%d, want 1 header + 2 rows", len(records))
 	}
 	if records[0][0] != "日志ID" || records[0][1] != "请求ID" || records[0][7] != "上游协议" ||
-		records[0][10] != "上游轮次" || records[0][16] != "错误" {
+		records[0][10] != "上游轮次" || records[0][11] != "判定理由" || records[0][17] != "错误" {
 		t.Fatalf("header=%v", records[0])
 	}
 	first, second := records[1], records[2]
@@ -73,11 +73,11 @@ func TestRelayLogExportCSVShape(t *testing.T) {
 	if first[10] != "3" || second[10] != "0" {
 		t.Fatalf("attempts column=%q,%q, want 3 and 0 (never reached upstream)", first[10], second[10])
 	}
-	if first[14] != "0.000123" {
-		t.Fatalf("cost column=%q, want the stored float", first[14])
+	if first[15] != "0.000123" {
+		t.Fatalf("cost column=%q, want the stored float (判定理由列插在上游轮次之后, 后续列右移一位)", first[15])
 	}
-	if second[16] != "context canceled" {
-		t.Fatalf("error column=%q", second[16])
+	if second[17] != "context canceled" {
+		t.Fatalf("error column=%q", second[17])
 	}
 }
 
@@ -102,8 +102,8 @@ func TestRelayLogExportCSVEscapesAndFilters(t *testing.T) {
 	if records[1][1] != "21" {
 		t.Fatalf("filtered row request id=%s, want 21", records[1][1])
 	}
-	if records[1][16] != errorText {
-		t.Fatalf("error text round trip = %q, want the original with comma/quote/newline", records[1][16])
+	if records[1][17] != errorText {
+		t.Fatalf("error text round trip = %q, want the original with comma/quote/newline", records[1][17])
 	}
 }
 

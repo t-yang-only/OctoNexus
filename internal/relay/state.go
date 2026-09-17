@@ -36,15 +36,16 @@ type RequestState struct {
 	Usage      llm.Usage      `json:"usage"`        // 请求结束时写入的展示用量。
 	Cost       float64        `json:"cost"`         // 请求结束时写入的累计费用。
 
-	Round          int            `json:"round"`            // 最新一轮循环的递增序号, 人工中止按此匹配以免误杀下一轮。
-	RoundStartedAt time.Time      `json:"round_started_at"` // 最新一轮上游请求的开始时间。
-	FirstByteAt    time.Time      `json:"first_byte_at"`    // 首字节写出客户端的时间, 未提交时为零值; 富化卡片的首字耗时即 FirstByteAt-StartedAt。
-	TargetChannel  string         `json:"target_channel"`   // 最新一轮选中的渠道名称。
-	TargetModel    string         `json:"target_model"`     // 最新一轮实际请求上游的模型名称。
-	TargetProtocol model.Protocol `json:"target_protocol"`  // 最新一轮实际请求上游的协议, 与 Protocol 不同即本轮做了跨协议转换; 0 表示尚未选出。
-	Sending        bool           `json:"sending"`          // 最新一轮是否仍在等待上游响应。
-	TargetItemID   int            `json:"-"`                // 最新一轮选中的成员行 ID（GroupItem.ID）; 仅供 least_busy 统计在途, 不进状态流与日志对外结构。
-	Error          string         `json:"error,omitempty"`  // 最新一轮的失败原因, 请求结束后即为最终错误。
+	Round          int            `json:"round"`              // 最新一轮循环的递增序号, 人工中止按此匹配以免误杀下一轮。
+	RoundStartedAt time.Time      `json:"round_started_at"`   // 最新一轮上游请求的开始时间。
+	FirstByteAt    time.Time      `json:"first_byte_at"`      // 首字节写出客户端的时间, 未提交时为零值; 富化卡片的首字耗时即 FirstByteAt-StartedAt。
+	TargetChannel  string         `json:"target_channel"`     // 最新一轮选中的渠道名称。
+	TargetModel    string         `json:"target_model"`       // 最新一轮实际请求上游的模型名称。
+	TargetProtocol model.Protocol `json:"target_protocol"`    // 最新一轮实际请求上游的协议, 与 Protocol 不同即本轮做了跨协议转换; 0 表示尚未选出。
+	Sending        bool           `json:"sending"`            // 最新一轮是否仍在等待上游响应。
+	TargetItemID   int            `json:"-"`                  // 最新一轮选中的成员行 ID（GroupItem.ID）; 仅供 least_busy 统计在途, 不进状态流与日志对外结构。
+	Decision       string         `json:"decision,omitempty"` // 本轮选路判定（T-decision-001）: "mode=smart;tier=decision;reason=affinity;slot=1;attempt=2", 每轮刷新。
+	Error          string         `json:"error,omitempty"`    // 最新一轮的失败原因, 请求结束后即为最终错误。
 
 	body          string                                     // 客户端原始请求体, 体积大故不进状态流, 由独立接口按需拉取。
 	responseBody  string                                     // 聚合后的完整最终响应体, 同样按需拉取。
@@ -137,6 +138,17 @@ func (r *RequestState) retargetRound(itemID int, channel, modelName string, prot
 	r.TargetChannel = channel
 	r.TargetModel = modelName
 	r.TargetProtocol = protocol
+}
+
+// setDecision 记录本轮的选路判定（T-decision-001）: 与其它状态一样先写进注册表再落到本对象,
+// 使状态流推送出去的副本也带上它。判定文本很短（不含渠道名与凭据）, 因此不额外做脱敏。
+func (r *RequestState) setDecision(decision string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if target, ok := requests[r.ID]; ok {
+		target.Decision = decision
+	}
+	r.Decision = decision
 }
 
 func (r *RequestState) finishRound(errText string) {
@@ -316,6 +328,7 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 		FirstByteMs:    firstByteMs,
 		DurationMs:     r.Duration.Milliseconds(),
 		Attempts:       r.Round,
+		Decision:       r.Decision,
 		PromptTokens:   r.Usage.PromptTokens,
 		CachedTokens:   cachedTokens,
 		CompletionToks: r.Usage.CompletionTokens,

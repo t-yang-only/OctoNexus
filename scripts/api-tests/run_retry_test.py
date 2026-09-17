@@ -183,6 +183,43 @@ def relay(group, timeout=45, messages=None):
         return 0, round(time.time() - started, 1), {"_raw": "%s: %s" % (type(e).__name__, e)}
 
 
+def relay_headers(group, timeout=45):
+    """与 relay 同款请求, 但把响应头一并带回来（判定理由写在响应头里）。"""
+    key = api_key()
+    payload = {"model": group, "max_tokens": 8, "messages": [{"role": "user", "content": "ping"}]}
+    req = urllib.request.Request(RELAY + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", "Bearer " + key)
+    started = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode())
+            return resp.status, dict(resp.headers.items()), body, round(time.time() - started, 1)
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode()
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            body = {"_raw": raw[:200]}
+        return e.code, dict(e.headers.items()), body, round(time.time() - started, 1)
+    except Exception as e:  # noqa: BLE001
+        return 0, {}, {"_raw": "%s: %s" % (type(e).__name__, e)}, round(time.time() - started, 1)
+
+
+def set_setting(key, value):
+    status, _ = call("POST", "/api/v1/setting/set", {"key": key, "value": value})
+    return status
+
+
+def setting_value(key):
+    status, resp = call("GET", "/api/v1/setting/list")
+    if status != 200:
+        return None
+    for item in (resp.get("data") or []):
+        if item.get("key") == key:
+            return item.get("value")
+    return None
+
 def model_failed(model):
     """读渠道模型的内存统计（落库是异步的, 必须走 /channel/stats）。"""
     status, resp = call("GET", "/api/v1/channel/stats")
@@ -426,6 +463,49 @@ def main():
            status == 200 and is_responses and no_dev and kept,
            "HTTP %s 耗时 %ss 上游路径=%s input条目角色=%s developer残留=%s 文本保留=%s" % (
                status, secs, row.get("path"), item_roles, not no_dev, kept))
+
+
+    # R11 判定理由（T-decision-001）: 响应头与历史日志都要回答"这次为什么走了这个成员"。
+    # 三条一起断: ① 响应头存在且形如 mode=...;reason=...; ② 历史日志里的 decision 与响应头**逐字一致**
+    # （同一份文本两处出口, 不同源就会出现"日志说是亲和、头里说是顺序"的互相打脸）;
+    # ③ slot 指向真正服务这次请求的成员 —— 该分组第一个成员必被拒, 成功的是第二个, 所以 slot=2。
+    status, headers, body, secs = relay_headers(GROUP_400_PAIR)
+    route = ""
+    for name, value in headers.items():
+        if name.lower() == "x-octopus-route":
+            route = value
+            break
+    hist = call("GET", "/api/v1/log/history?limit=40&offset=0")
+    items = ((hist[1] or {}).get("data") or {}).get("items") or []
+    logged = next((r.get("decision") for r in items if r.get("model") == GROUP_400_PAIR), None)
+    looks_ok = "mode=failover" in route and "reason=" in route and "slot=" in route
+    record("R11 响应头与日志都带判定理由（同源一致，slot 指向真正服务的成员）",
+           status == 200 and looks_ok and logged == route and "slot=2" in route,
+           "HTTP %s 响应头=%r 日志=%r" % (status, route, logged))
+
+    # R12 请求非法时的取向可切换（T-retry-003）: 同一夹具、同一请求, 唯一变量是设置项。
+    # failfast = 第一个成员拒绝就结束（1 次尝试、502）; 复原 failover 后又回到"换成员成功"（R3 的行为）。
+    # 这条同时守住"切回来还能用"——只能单向切的开关等于埋雷。
+    before_value = setting_value("relay_request_fault_action")
+    ff_status, ff_hits, ff_set = 0, [], None
+    try:
+        ff_set = set_setting("relay_request_fault_action", "failfast")
+        offset = mark()
+        ff_status, ff_secs, ff_body = relay(GROUP_400_PAIR)
+        ff_hits = attempts_since(offset)
+    finally:
+        set_setting("relay_request_fault_action", "failover")
+    offset = mark()
+    back_status, back_secs, back_body = relay(GROUP_400_PAIR)
+    back_hits = attempts_since(offset)
+    # 复原后再切回原值（默认就是 failover; 若用户改过别的取值, 这里保持原样归还）。
+    if before_value and before_value != "failover":
+        set_setting("relay_request_fault_action", before_value)
+    record("R12 请求非法时的取向可切换（failfast 立即结束 / 复原后仍换成员）",
+           ff_set == 200 and ff_status == 502 and ff_hits == [REJECT400]
+           and back_status == 200 and back_hits == [REJECT400, GOOD],
+           "failfast: HTTP %s 尝试=%s; 复原 failover: HTTP %s 尝试=%s" % (
+               ff_status, ff_hits, back_status, back_hits))
 
     return 0
 

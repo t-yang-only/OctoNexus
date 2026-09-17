@@ -3,6 +3,7 @@ package relay
 import (
 	"errors"
 	"strings"
+	"sync/atomic"
 
 	"github.com/looplj/axonhub/llm/httpclient"
 )
@@ -176,4 +177,37 @@ func requestFaultMessage(err error) string {
 		message = "upstream rejected the request"
 	}
 	return "upstream rejected the request: " + message
+}
+
+// 「上游判定请求本身非法」（400 一类）时的两种取向（T-retry-003，用户要求两种都要）。
+// 两种都保留上游原文，区别只在「要不要先用别的成员试一次」：
+//   - RequestFaultActionFailover（默认，与既往行为一致）: 记下这个成员拒绝过，换下一个成员再试；
+//     全部成员都拒绝同一份请求时才以错误结束。好处是「某个成员不支持该参数、另一个支持」时
+//     请求仍然成功 —— 多中转混用时很常见（同一模型在不同站点的参数支持度并不一致）。
+//   - RequestFaultActionFailFast: 第一个成员拒绝就立刻把上游的状态码与原文回给客户端，
+//     不再换成员。好处是错误反馈最快、最贴近上游原话，代价是放弃「换一家也许能成」。
+const (
+	RequestFaultActionFailover = "failover"
+	RequestFaultActionFailFast = "failfast"
+)
+
+// requestFaultAction 是运行时的取向选择（包内原子量）。
+// 由装配层（server 启动 / 设置变更）经 SetRequestFaultAction 注入，relay 自身不耦合配置源。
+// 未注入时取默认 failover: 与改造前的行为完全一致。
+var requestFaultAction atomic.Value
+
+// SetRequestFaultAction 设置取向; 非法取值一律回落默认 failover（不吞成"未知状态"）。
+func SetRequestFaultAction(action string) {
+	if action != RequestFaultActionFailFast {
+		action = RequestFaultActionFailover
+	}
+	requestFaultAction.Store(action)
+}
+
+// RequestFaultAction 返回当前取向，未设置时为默认 failover。
+func RequestFaultAction() string {
+	if value, ok := requestFaultAction.Load().(string); ok && value != "" {
+		return value
+	}
+	return RequestFaultActionFailover
 }
