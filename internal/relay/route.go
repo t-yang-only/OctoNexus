@@ -300,17 +300,31 @@ func hotRouteDeps() routeDeps {
 }
 
 func pickGroupItemHot(group model.Group) model.GroupItem {
+	return pickGroupItemHotWithFeatures(group, SmartFeatures{})
+}
+
+// pickGroupItemHotWithFeatures 是带请求特征的选路入口：只有智能路由模式会读 features，
+// 其余模式必须完全不受影响（特征为零值时与 pickGroupItemHot 逐字一致）。
+func pickGroupItemHotWithFeatures(group model.Group, features SmartFeatures) model.GroupItem {
 	// 生产热路径统一走 hotRouteDeps(): 以前这里另抄了一份 routeDeps 字面量, 加新维度时漏接线就会出现
 	// 「模式支持、单测通过, 但生产上永远拿不到该维度数据」的静默降级（R-weight-001 第二阶段踩过:
 	// billing 只接进了 hotRouteDeps, 而热路径用的是这份副本, 结果倍率维度在生产上等于没接）。
-	return pickGroupItemByMode(group, hotRouteDeps(), RouteBalanceEnabled())
+	return pickGroupItemByModeWithFeatures(group, hotRouteDeps(), RouteBalanceEnabled(), features)
 }
 
-// pickGroupItemByMode 按分组模式与加权轮询开关分发选路（热路径与单测共用同一入口）:
-// manual/未识别模式走原语义, failover 依开关决定是否加权轮询定序,
-// lowest_cost / quality_first / lowest_latency / least_busy 走各自的定序（模式的显式选择本身即开关）。
+// pickGroupItemByMode 是 pickGroupItemByModeWithFeatures 的兼容外壳（请求特征为空）。
 func pickGroupItemByMode(group model.Group, deps routeDeps, balanceEnabled bool) model.GroupItem {
+	return pickGroupItemByModeWithFeatures(group, deps, balanceEnabled, SmartFeatures{})
+}
+
+// pickGroupItemByModeWithFeatures 按分组模式与加权轮询开关分发选路（热路径与单测共用同一入口）:
+// manual/未识别模式走原语义, failover 依开关决定是否加权轮询定序,
+// lowest_cost / quality_first / lowest_latency / least_busy 走各自的定序（模式的显式选择本身即开关）,
+// smart 先按请求特征定档、再在该档内沿用同样的选路（档内没有可转发成员时回退全体成员）。
+func pickGroupItemByModeWithFeatures(group model.Group, deps routeDeps, balanceEnabled bool, features SmartFeatures) model.GroupItem {
 	switch {
+	case group.Mode == model.GroupModeSmart:
+		return pickGroupItemSmart(group, deps, balanceEnabled, features)
 	case group.Mode == model.GroupModeLowestCost:
 		return pickGroupItemLowestCost(group, deps.cost)
 	case group.Mode == model.GroupModeQualityFirst:

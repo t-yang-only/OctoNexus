@@ -39,6 +39,8 @@ const defaultRelayConfig: GroupRelayConfig = {
     hedge_width: 2,
     hedge_after_ms: 800,
     hedge_peak_in_flight: 0,
+    // 智能路由（mode = smart）的复杂度阈值，缺省 50。
+    smart_route_threshold: 50,
 };
 
 // PROTOCOL_TAGS 是凭据行上的协议标识。
@@ -538,6 +540,7 @@ export function GroupEditor({
                                     <SelectItem value="least_busy">{t('form.least_busy')}</SelectItem>
                                         <SelectItem value="lowest_tpm_rpm">{t('form.lowest_tpm_rpm')}</SelectItem>
                                         <SelectItem value="weighted">{t('form.weighted')}</SelectItem>
+                                        <SelectItem value="smart">{t('form.smart')}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </Field>
@@ -596,6 +599,31 @@ export function GroupEditor({
                                         className="rounded-xl"
                                     />
                                 </Field>
+                                {mode === 'smart' && (
+                                    <Field>
+                                        <FieldLabel htmlFor="group-smart-threshold">
+                                            {t('form.smartThreshold')}
+                                            <FieldHelp text={t('form.smartThresholdHint')} />
+                                        </FieldLabel>
+                                        <Input
+                                            id="group-smart-threshold"
+                                            type="number"
+                                            inputMode="numeric"
+                                            min={1}
+                                            max={100}
+                                            step={1}
+                                            value={String(relayConfig.smart_route_threshold ?? 50)}
+                                            onChange={(event) => {
+                                                const value = Number.parseInt(event.target.value, 10);
+                                                setRelayConfig((prev) => ({
+                                                    ...prev,
+                                                    smart_route_threshold: Number.isFinite(value) && value >= 1 && value <= 100 ? value : 50,
+                                                }));
+                                            }}
+                                            className="rounded-xl"
+                                        />
+                                    </Field>
+                                )}
                                 <Field>
                                     <FieldLabel htmlFor="group-retry-interval">
                                         {t('form.retryInterval')}
