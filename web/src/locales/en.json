@@ -304,6 +304,9 @@
             "weightBalance": "Balance",
             "weightMonthly": "Monthly quota left",
             "monthlyAction": "Action when the monthly quota runs out",
+    "requestFaultAction": "Action when the upstream rejects the request itself",
+    "requestFaultFailover": "Try another member (default)",
+    "requestFaultFailfast": "Return the upstream error immediately",
             "monthlyDemote": "Demote (may still be picked)",
             "monthlyExclude": "Exclude (no longer eligible)"
         },
@@ -648,6 +651,7 @@
             "apiKey": "API Key",
             "duration": "Duration",
             "attempts": "Upstream rounds",
+    "decision": "Why this route",
         "firstByte": "First byte",
             "cost": "Cost",
             "tps": "TPS",

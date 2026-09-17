@@ -41,6 +41,7 @@ export const SettingKey = {
     RouteWeightBalance: 'route_weight_balance',
     RouteWeightMonthly: 'route_weight_monthly',
     RouteMonthlyAction: 'route_monthly_exhausted_action',
+    RequestFaultAction: 'relay_request_fault_action',
 } as const;
 
 /**

@@ -383,6 +383,9 @@ export function SettingSystem() {
                         <WeightSettingField settingKey="route_weight_monthly" label={t('routing.weightMonthly')} kind="number" />
                         <WeightSettingField settingKey="route_monthly_exhausted_action" label={t('routing.monthlyAction')} kind="select"
                             options={[{ value: 'demote', label: t('routing.monthlyDemote') }, { value: 'exclude', label: t('routing.monthlyExclude') }]} />
+                        {/* 上游判定"请求本身非法"（400 一类）时的取向: 换成员再试 / 立刻回上游原文 */}
+                        <WeightSettingField settingKey="relay_request_fault_action" label={t('routing.requestFaultAction')} kind="select"
+                            options={[{ value: 'failover', label: t('routing.requestFaultFailover') }, { value: 'failfast', label: t('routing.requestFaultFailfast') }]} />
                     </div>
                 </div>
                 <label className="grid gap-1 text-xs text-muted-foreground"><span className="flex items-center gap-1"><BellRing className="size-3.5" />{t('alerts.webhook')}</span><Input value={alertWebhookUrl} onChange={(e) => setAlertWebhookUrl(e.target.value)} onBlur={() => handleSave(SettingKey.AlertWebhookURL, alertWebhookUrl, initialAlertWebhookUrl.current)} placeholder="https://..." type="url" className="rounded-xl" /></label>

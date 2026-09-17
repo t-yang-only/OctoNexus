@@ -23,6 +23,7 @@ const LOG_FIELD_LABEL_KEYS: Array<{ field: LogFieldName; labelKey: string }> = [
     { field: 'duration', labelKey: 'duration' },
     { field: 'firstByte', labelKey: 'firstByte' },
         { field: 'attempts', labelKey: 'attempts' },
+        { field: 'decision', labelKey: 'decision' },
     { field: 'cost', labelKey: 'cost' },
     { field: 'tps', labelKey: 'tps' },
     { field: 'cacheHitRate', labelKey: 'cacheHitRate' },

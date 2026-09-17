@@ -154,6 +154,17 @@ def main():
         "缺 %s" % (missing_balance or "无"),
     )
 
+    # P12 判定理由 + 请求非法时的取向（T-decision-001 / T-retry-003）: 日志卡片字段与设置项都要进产物,
+    # 三语文案齐全。前者让"为什么走了这个成员"在界面上可看, 后者让 400 类取向不必改配置文件。
+    decision_markers = ["requestFaultFailfast", "relay_request_fault_action", "判定理由",
+                        "换成员再试（默认）", "換成員再試（預設）", "Return the upstream error immediately"]
+    missing_decision = [marker for marker in decision_markers if marker not in bundle]
+    record(
+        "P12 判定理由与取向开关进产物（日志字段 + 设置项 + 三语文案）",
+        not missing_decision,
+        "缺 %s" % (missing_decision or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(

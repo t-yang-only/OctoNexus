@@ -8,6 +8,7 @@ export type LogFieldName =
     | 'duration'
     | 'firstByte'
     | 'attempts'
+    | 'decision'
     | 'cost'
     | 'tps'
     | 'cacheHitRate'
@@ -24,6 +25,7 @@ export const DEFAULT_LOG_FIELD_VISIBILITY: LogFieldVisibility = {
     duration: true,
     firstByte: true,
     attempts: true,
+    decision: true,
     cost: true,
     tps: true,
     cacheHitRate: true,
