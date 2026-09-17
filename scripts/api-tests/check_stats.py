@@ -169,9 +169,16 @@ def main():
     record("timeout switchover produced a long but successful request",
            any((r.get("duration_ms") or 0) >= 8000 for r in ds),
            f"max_duration_ms={max((r.get('duration_ms') or 0) for r in ds)}")
+    # 只对「全慢分组」这条夹具断言: 被放弃的请求要留一行 canceled, 且它从未提交首字节。
+    # 不要把「canceled 行都没首字节」当普遍事实: 客户端在首字节之后放弃的请求（流式无进展用例、
+    # Key 审计的中止用例）同样是 canceled, 但它们确实提交过首字节 —— 这条断言曾因此被证伪。
+    allslow_canceled = [r for r in canceled if "allslow" in (r.get("model") or "")]
     record("abandoned all-slow request recorded as canceled, not dropped",
-           len(canceled) >= 1 and all((r.get("first_byte_ms") or -1) < 0 for r in canceled),
-           f"canceled={[(r.get('duration_ms'), r.get('error')) for r in canceled]}")
+           len(allslow_canceled) >= 1
+           and all((r.get("first_byte_ms") or -1) < 0 for r in allslow_canceled)
+           and all(r.get("error") for r in canceled),
+           f"allslow_canceled={[(r.get('duration_ms'), r.get('error'), r.get('first_byte_ms')) for r in allslow_canceled]} "
+           f"全部 canceled 行的原因={[r.get('error') for r in canceled]}")
 
     # ---------- 2. in-memory caches agree with each other ----------
     apikey_sum = {k: sum(num(it, k) for it in apikey) for k in

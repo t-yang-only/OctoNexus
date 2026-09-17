@@ -22,6 +22,10 @@ import (
 	"github.com/looplj/axonhub/llm/transformer/openai/responses"
 )
 
+// errStreamIdleTimeout 表示流式响应在首个事件之后长时间没有任何进展（上游不发、也不结束）。
+// 首字节已提交, 无法换目标重试: 只结束本次响应, 并按成员真实失败记账（T-timeout-001）。
+var errStreamIdleTimeout = errors.New("upstream stream idle timeout")
+
 // Forward 按客户端协议承载一个请求的完整转发过程: 解析请求, 定位分组, 循环选目标请求上游, 直至提交响应或请求结束。
 func Forward(format llm.APIFormat) gin.HandlerFunc {
 	// 客户端协议同时定出入站转换器和请求协议位: 后者随请求状态推给界面, 也是每轮选择上游协议的首选。
@@ -303,6 +307,21 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			event := result.first
 			last := result.last // 已转发的最后一个事件是否已按客户端协议结束整个响应流。
 			committed := false
+			// 首个事件之后的「无进展」看门狗: 上游吐了首帧就不再出字时, 不能把客户端无限挂着。
+			// 每收到一个上游事件、每成功写给客户端一帧都重置计时; 0 表示关闭（保持旧行为）。
+			idleSeconds := group.RelayConfig.MemberStreamIdleTimeoutSeconds
+			var idleTimer *time.Timer
+			if idleSeconds > 0 {
+				idleTimer = time.AfterFunc(time.Duration(idleSeconds)*time.Second, func() {
+					cancelRoundCause(errStreamIdleTimeout)
+				})
+				defer idleTimer.Stop()
+			}
+			resetIdle := func() {
+				if idleTimer != nil {
+					idleTimer.Reset(time.Duration(idleSeconds) * time.Second)
+				}
+			}
 			for {
 				if event != nil {
 					chunks = append(chunks, event)
@@ -324,6 +343,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 						break
 					}
 					c.Writer.Flush()
+					resetIdle()
 				}
 				if last {
 					break
@@ -333,8 +353,13 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					break
 				}
 				event = result.events.Current()
+				resetIdle()
 				// 已提交的响应不能再换目标重试, 结束事件自身携带的失败原样转发给客户端, 并在转发后作为本请求终态。
 				last, err = inspectStreamEvent(format, event)
+			}
+			// 看门狗命中时上层读到的是被取消的读错误, 这里把它还原成明确的失败原因。
+			if context.Cause(roundCtx) == errStreamIdleTimeout {
+				err = errStreamIdleTimeout
 			}
 			result.events.Close()
 			// 事件流已读完, 渠道专用代理的独占连接池到此归还。

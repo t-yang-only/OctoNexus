@@ -95,6 +95,14 @@ func publishGroupEvent(event groupEvent) {
 // 不发初始快照: 分组读取接口已随分组带回当前状态, 前端由此拿到的初始值即全量。
 func streamGroupEvents(c *gin.Context) {
 	prepareSSE(c)
+	// 连上就立刻发一个注释帧: 不留「已连接但一个字节都没有」的空窗。
+	// 线上实证: 107 条该连接全部在 15.001–15.015 秒被客户端断开, 而当时的心跳正好是 15 秒 ——
+	// 首字节与客户端空闲上限同刻竞速, 客户端必然先失败。
+	if _, err := c.Writer.Write([]byte(": connected\n\n")); err != nil {
+		return
+	}
+	c.Writer.Flush()
+
 	routeUpdates := relay.OpenRouteStream()
 	defer relay.CloseRouteStream(routeUpdates)
 
@@ -112,7 +120,8 @@ func streamGroupEvents(c *gin.Context) {
 		}
 	}()
 
-	heartbeat := time.NewTicker(15 * time.Second)
+	// 心跳 10 秒: 必须明显小于常见的 15 秒空闲上限, 否则与客户端超时同刻竞速（见函数首注释）。
+	heartbeat := time.NewTicker(10 * time.Second)
 	defer heartbeat.Stop()
 	for {
 		select {

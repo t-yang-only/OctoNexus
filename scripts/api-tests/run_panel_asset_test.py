@@ -107,6 +107,14 @@ def main():
         "缺 %s" % (missing_notify or "无"),
     )
 
+    locale_markers = ["streamIdleTimeout", "流式无进展上限", "串流無進展上限", "Stream idle limit"]
+    missing_idle = [marker for marker in locale_markers if marker not in bundle]
+    record(
+        "P7 流式无进展上限进了产物（分组表单字段 + 三语文案）",
+        not missing_idle,
+        "缺 %s" % (missing_idle or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(

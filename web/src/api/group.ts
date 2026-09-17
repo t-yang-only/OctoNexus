@@ -13,6 +13,8 @@ export interface GroupRelayConfig {
     member_retry_interval_seconds: number;
     member_non_stream_response_timeout_seconds: number;
     member_stream_first_event_timeout_seconds: number;
+    // 流式「无进展」上限（T-timeout-001）：首个事件之后允许的最长静默秒数，0 = 关闭。
+    member_stream_idle_timeout_seconds: number;
     member_cooldown_seconds: number;
     member_affinity_seconds: number;
     // 首字竞速 (T-hedge-001): 提交首字节之前并发请求排序靠前的多个成员, 取最快给出有效响应者。

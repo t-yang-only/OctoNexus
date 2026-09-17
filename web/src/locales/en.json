@@ -511,6 +511,8 @@
             "nonStreamTimeout": "Non-stream Timeout (s)",
             "nonStreamTimeoutHint": "Maximum wait for a complete non-stream response",
             "streamTimeout": "Stream First Event Timeout (s)",
+            "streamIdleTimeout": "Stream idle limit (seconds)",
+            "streamIdleTimeoutHint": "Longest allowed silence after the first stream event: if the upstream stops producing output, the response ends at this limit and the member is recorded as failed (the first byte is already committed, so there is no retry with another target). 0 disables the guard. Default 300 seconds; some relays are fake-streaming and only deliver the body once generation finishes, so raise it if a slow-but-alive stream gets cut.",
             "streamTimeoutHint": "Maximum wait for the first valid stream event",
             "cooldown": "Cooldown (s)",
             "cooldownHint": "Time a member is paused after retries are exhausted",
