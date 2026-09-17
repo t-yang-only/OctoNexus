@@ -125,15 +125,61 @@ func TestSmartTierSplitKeepsOrderAndGivesComplexTheExtra(t *testing.T) {
 		{5, []int{1, 2, 3}, []int{4, 5}, "奇数：多出来的归决策档"},
 	}
 	for _, testCase := range cases {
-		gotDecision := ids(SmartTierItems(items(testCase.n), true))
-		gotExecution := ids(SmartTierItems(items(testCase.n), false))
+		// decisionMembers 传 0：调用方没给顶层结构时的兜底口径就是「整体对半」。
+		gotDecision := ids(smartTierItems(items(testCase.n), 0, true))
+		gotExecution := ids(smartTierItems(items(testCase.n), 0, false))
 		if !equalInts(gotDecision, testCase.decision) || !equalInts(gotExecution, testCase.execution) {
 			t.Fatalf("%d 个成员（%s）: 决策档=%v 执行档=%v, 期望 %v / %v",
 				testCase.n, testCase.comment, gotDecision, gotExecution, testCase.decision, testCase.execution)
 		}
 	}
-	if got := SmartTierItems(nil, true); got != nil {
+	if got := smartTierItems(nil, 0, true); got != nil {
 		t.Fatalf("空成员应返回 nil, 实际 %v", got)
+	}
+}
+
+// TestSmartTierSplitFollowsTopLevelItems 守住档位切分的粒度（T-smart-006）：档位按**顶层成员**切，
+// 子分组（一条链）整体归入某一档，不会被从中间切开。
+// 反例（修复前的口径）：决策链 1 名成员 + 执行链 2 名成员，按展平后的条数对半切会把执行链第一个成员
+// 算进决策档 —— 复杂请求于是可能落到"便宜"的那条链上，与用户「强链走复杂」的排布相反。
+func TestSmartTierSplitFollowsTopLevelItems(t *testing.T) {
+	flat := []model.GroupItem{{ID: 1}, {ID: 2}, {ID: 3}} // 决策链 1 名 + 执行链 2 名（按引用顺序展平）
+	ids := func(list []model.GroupItem) []int {
+		out := make([]int, 0, len(list))
+		for _, item := range list {
+			out = append(out, item.ID)
+		}
+		return out
+	}
+
+	// 顶层结构 [1, 2]：决策档 = 第一个顶层成员贡献的 1 条；执行档 = 剩下的 2 条。
+	decisionMembers := SmartDecisionMembers([]int{1, 2}, true)
+	if decisionMembers != 1 {
+		t.Fatalf("复杂请求的档位切分点 = %d, 期望 1（只含第一个顶层成员）", decisionMembers)
+	}
+	if got := ids(smartTierItems(flat, decisionMembers, true)); !equalInts(got, []int{1}) {
+		t.Fatalf("复杂请求决策档 = %v, 期望 [1]（不能把执行链的成员算进来）", got)
+	}
+	executionMembers := SmartDecisionMembers([]int{1, 2}, false)
+	if got := ids(smartTierItems(flat, executionMembers, false)); !equalInts(got, []int{2, 3}) {
+		t.Fatalf("简单请求执行档 = %v, 期望 [2 3]", got)
+	}
+
+	// 顶层结构 [2, 1]：对半后决策档 = 前两个顶层成员（共 2 条）。
+	if got := SmartDecisionMembers([]int{2, 1}, true); got != 2 {
+		t.Fatalf("顶层 [2,1] 的切分点 = %d, 期望 2", got)
+	}
+	// 只有一个顶层成员：两档都是整条链（等价于不分档）。
+	single := SmartDecisionMembers([]int{3}, true)
+	if got := ids(smartTierItems(flat, single, true)); !equalInts(got, []int{1, 2, 3}) {
+		t.Fatalf("单顶层成员的决策档 = %v, 期望整条链", got)
+	}
+	if got := ids(smartTierItems(flat, single, false)); !equalInts(got, []int{1, 2, 3}) {
+		t.Fatalf("单顶层成员的执行档 = %v, 期望整条链（不能为空）", got)
+	}
+	// 空顶层结构（没有成员）不 panic。
+	if got := SmartDecisionMembers(nil, true); got != 0 {
+		t.Fatalf("空顶层结构的切分点 = %d, 期望 0", got)
 	}
 }
 
@@ -150,8 +196,8 @@ func TestPickGroupItemSmartUsesTierThenFallsBack(t *testing.T) {
 		},
 		RelayConfig: model.GroupRelayConfig{SmartRouteThreshold: 50, MemberAffinitySeconds: 0},
 	}
-	complex := SmartFeatures{Score: 80, Rounds: 12, Tools: 9, Tokens: 9000}
-	simple := SmartFeatures{Score: 10, Rounds: 1, Tools: 0, Tokens: 40}
+	complex := SmartRoute{Features: SmartFeatures{Score: 80, Rounds: 12, Tools: 9, Tokens: 9000}}
+	simple := SmartRoute{Features: SmartFeatures{Score: 10, Rounds: 1, Tools: 0, Tokens: 40}}
 
 	if got := pickGroupItemSmart(group, routeDeps{}, false, complex); got.ID != 11 {
 		t.Fatalf("复杂请求命中成员 %d, 期望 11（决策引擎档）", got.ID)
@@ -159,6 +205,13 @@ func TestPickGroupItemSmartUsesTierThenFallsBack(t *testing.T) {
 	ResetRouteState(9) // 清掉上一轮写入的 CurrentItemID，避免亲和影响下一断言
 	if got := pickGroupItemSmart(group, routeDeps{}, false, simple); got.ID != 12 {
 		t.Fatalf("简单请求命中成员 %d, 期望 12（执行引擎档）", got.ID)
+	}
+
+	// 档位切分点由调用方给出（顶层成员口径）：两个顶层成员、各 1 条 → 切分点 1，与兜底口径一致。
+	explicit := SmartRoute{Features: complex.Features, DecisionMembers: SmartDecisionMembers([]int{1, 1}, true)}
+	ResetRouteState(9)
+	if got := pickGroupItemSmart(group, routeDeps{}, false, explicit); got.ID != 11 {
+		t.Fatalf("显式切分点 1 的复杂请求命中 %d, 期望 11", got.ID)
 	}
 
 	// 决策档整体冷却：复杂请求不该失败，也不该把请求丢到冷却成员上——
@@ -270,7 +323,7 @@ func TestRankedHedgeCandidatesStaysInsideTier(t *testing.T) {
 	}
 
 	// 简单请求（执行引擎档 = 第 3 名成员）：候选里不能有决策档成员。
-	simpleCandidates := ids(deps.rankedHedgeCandidatesWithFeatures(group, SmartFeatures{Score: 10}))
+	simpleCandidates := ids(deps.rankedHedgeCandidatesWithFeatures(group, SmartRoute{Features: SmartFeatures{Score: 10}}))
 	if contains(simpleCandidates, 31) || contains(simpleCandidates, 32) {
 		t.Fatalf("简单请求把决策档成员拉进了竞速: %v", simpleCandidates)
 	}
@@ -279,7 +332,7 @@ func TestRankedHedgeCandidatesStaysInsideTier(t *testing.T) {
 	}
 
 	// 复杂请求（决策引擎档 = 前 2 名成员）：候选里不能有执行档成员。
-	complexCandidates := ids(deps.rankedHedgeCandidatesWithFeatures(group, SmartFeatures{Score: 90}))
+	complexCandidates := ids(deps.rankedHedgeCandidatesWithFeatures(group, SmartRoute{Features: SmartFeatures{Score: 90}}))
 	if contains(complexCandidates, 33) {
 		t.Fatalf("复杂请求把执行档成员拉进了竞速: %v", complexCandidates)
 	}
@@ -289,7 +342,7 @@ func TestRankedHedgeCandidatesStaysInsideTier(t *testing.T) {
 
 	// 其它模式一律不受影响：failover 仍是全体成员参与。
 	group.Mode = model.GroupModeFailover
-	if got := ids(deps.rankedHedgeCandidatesWithFeatures(group, SmartFeatures{Score: 10})); len(got) != 3 {
+	if got := ids(deps.rankedHedgeCandidatesWithFeatures(group, SmartRoute{Features: SmartFeatures{Score: 10}})); len(got) != 3 {
 		t.Fatalf("failover 模式下竞速候选 = %v, 期望全体 3 名成员", got)
 	}
 }
