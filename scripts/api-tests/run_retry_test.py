@@ -16,10 +16,12 @@
   R4 成员自身问题（401）: 换成员后成功（2 次尝试, 不耗尽该成员次数）, 且该成员计 1 次失败。
   R5 手动模式同样有上限: 钉住的成员一直 500 时以 502 结束, 不再每秒重试。
   R6 developer 角色被改写为 system（读 mock 落盘的请求正文核对）。
+  R7 客户端凭据不会被透传给上游（上游收到的是渠道密钥, 上游 #372 同类的头部处理）。
 
 Run: python run_retry_test.py    （实例 + mock 必须在跑）
 """
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -113,6 +115,24 @@ def attempts_since(offset):
             if row.get("path", "").endswith("/__control"):
                 continue
             out.append(row.get("model"))
+    return out
+
+
+def rows_since(offset):
+    """某时刻之后 mock 收到的完整请求记录（供核对凭据与请求头, 已由 mock 脱敏）。"""
+    if not os.path.exists(MOCK_LOG):
+        return []
+    out = []
+    with open(MOCK_LOG, "r", encoding="utf-8", errors="replace") as fh:
+        fh.seek(offset)
+        for line in fh.read().splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get("path", "").endswith("/__control"):
+                continue
+            out.append(row)
     return out
 
 
@@ -307,6 +327,27 @@ def main():
     record("R6 developer 角色改写为 system",
            status == 200 and roles == ["system", "user"],
            "HTTP %s 耗时 %ss 上游收到的角色=%s" % (status, secs, roles))
+
+    # R7 凭据隔离（上游 #372 同类的头部处理）: 客户端带来的凭据绝不能出现在上游请求里,
+    # 上游收到的必须是渠道自己的密钥。mock 只落盘凭据的哈希前缀（见 mock_upstream._redact）,
+    # 故这里按同样的算法比对哈希, 断言不涉及凭据原文。
+    offset = mark()
+    status, secs, body = relay(GROUP_400_PAIR)
+    rows = [r for r in rows_since(offset) if r.get("model") == GOOD]
+    channel_key = "mock-secret-not-a-real-key"  # ensure_channel 里配置的渠道密钥
+    client_key = api_key() or ""
+    channel_bearer = "bearer:" + hashlib.sha256(("Bearer " + channel_key).encode()).hexdigest()[:12]
+    channel_header = "key:" + hashlib.sha256(channel_key.encode()).hexdigest()[:12]
+    client_bearer = "bearer:" + hashlib.sha256(("Bearer " + client_key).encode()).hexdigest()[:12]
+    client_header = "key:" + hashlib.sha256(client_key.encode()).hexdigest()[:12]
+    seen = [(r.get("authorization"), r.get("x_api_key")) for r in rows]
+    # 窗口内可能有后台探活等并发请求, 故不强求"恰好一条", 但**每一条**都必须是渠道密钥、且一条都不许带客户端凭据。
+    carried = [pair for pair in seen if channel_bearer in pair or channel_header in pair]
+    leaked = [pair for pair in seen if client_bearer in pair or client_header in pair]
+    record("R7 客户端凭据不透传给上游",
+           status == 200 and len(seen) >= 1 and len(carried) == len(seen) and not leaked,
+           "HTTP %s 上游请求 %d 条, 携带渠道密钥 %d 条, 携带客户端凭据 %d 条" % (
+               status, len(seen), len(carried), len(leaked)))
 
     return 0
 
