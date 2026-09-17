@@ -28,7 +28,7 @@ CHANNEL = "DS-TEST-proto3"
 MOCK_BASE = "http://127.0.0.1:18099"
 
 MARK_SYS, MARK_U1, MARK_A1, MARK_U2 = "SYS-MARKER-1", "USER-MARKER-1", "ASSIST-MARKER-1", "USER-MARKER-2"
-MAXTOK, TEMP, TOOL = 321, 0.25, "probe_tool"
+MAXTOK, TEMP, TOPP, TOOL = 321, 0.25, 0.35, "probe_tool"
 SCHEMA = {"type": "object", "properties": {"x": {"type": "string"}}, "required": ["x"]}
 
 UPSTREAM_TEXT = {"chat": "mock chat ok", "responses": "mock responses ok", "messages": "mock messages ok"}
@@ -72,22 +72,26 @@ def api_key():
 
 
 def build_client_body(client, group, stream=False):
-    """按客户端协议构造同一份语义载荷：system + 两轮 user + 一轮 assistant + 参数 + 一个工具。"""
+    """按客户端协议构造同一份语义载荷：system + 两轮 user + 一轮 assistant + 参数 + 一个工具。
+
+    top_p 与 temperature 一起给：两者都在"转换层会丢采样参数"的那份清单里（见
+    internal/relay/upstream.go 的 carryOverSamplingParams），所以必须逐条路径核验，不能只测一个。
+    """
     if client == "chat":
-        return {"model": group, "stream": stream, "max_tokens": MAXTOK, "temperature": TEMP,
+        return {"model": group, "stream": stream, "max_tokens": MAXTOK, "temperature": TEMP, "top_p": TOPP,
                 "messages": [{"role": "system", "content": MARK_SYS},
                              {"role": "user", "content": MARK_U1},
                              {"role": "assistant", "content": MARK_A1},
                              {"role": "user", "content": MARK_U2}],
                 "tools": [{"type": "function", "function": {"name": TOOL, "parameters": SCHEMA}}]}
     if client == "responses":
-        return {"model": group, "stream": stream, "max_output_tokens": MAXTOK, "temperature": TEMP,
+        return {"model": group, "stream": stream, "max_output_tokens": MAXTOK, "temperature": TEMP, "top_p": TOPP,
                 "instructions": MARK_SYS,
                 "input": [{"role": "user", "content": [{"type": "input_text", "text": MARK_U1}]},
                           {"role": "assistant", "content": [{"type": "output_text", "text": MARK_A1}]},
                           {"role": "user", "content": [{"type": "input_text", "text": MARK_U2}]}],
                 "tools": [{"type": "function", "name": TOOL, "parameters": SCHEMA}]}
-    return {"model": group, "stream": stream, "max_tokens": MAXTOK, "temperature": TEMP,
+    return {"model": group, "stream": stream, "max_tokens": MAXTOK, "temperature": TEMP, "top_p": TOPP,
             "system": MARK_SYS,
             "messages": [{"role": "user", "content": [{"type": "text", "text": MARK_U1}]},
                          {"role": "assistant", "content": [{"type": "text", "text": MARK_A1}]},
@@ -148,6 +152,46 @@ def upstream_roles(body):
         elif isinstance(items, str):
             roles.append("%s=字符串" % field)
     return roles
+
+
+def tool_shape_ok(body, pin):
+    """工具必须以上游协议该有的形状到达：chat 用 tools[].function.{name,parameters}、
+    responses 用扁平的 tools[].{name,parameters}、anthropic 用 tools[].{name,input_schema}。
+    形状错了上游会 400 —— 这类结构性错误文本断言看不见（工具名和 schema 里的 "x" 都还在）。"""
+    tools = body.get("tools") if isinstance(body, dict) else None
+    if not isinstance(tools, list) or not tools:
+        return False, "上游没有 tools"
+    first = tools[0] if isinstance(tools[0], dict) else {}
+    if pin == "chat":
+        fn = first.get("function") or {}
+        ok = fn.get("name") == TOOL and isinstance(fn.get("parameters"), dict)
+        return ok, ("chat 形状 function.name+function.parameters" if ok
+                    else "chat 形状不符: %s" % json.dumps(first, ensure_ascii=False)[:140])
+    if pin == "responses":
+        ok = (first.get("name") == TOOL and isinstance(first.get("parameters"), dict)
+              and not first.get("function") and not first.get("input_schema"))
+        return ok, ("responses 形状 扁平 name+parameters" if ok
+                    else "responses 形状不符: %s" % json.dumps(first, ensure_ascii=False)[:140])
+    ok = first.get("name") == TOOL and isinstance(first.get("input_schema"), dict)
+    return ok, ("anthropic 形状 name+input_schema" if ok
+                else "anthropic 形状不符: %s" % json.dumps(first, ensure_ascii=False)[:140])
+
+
+def usage_of(client, raw):
+    """客户端收到的用量字段：chat 用 prompt_tokens/completion_tokens；
+    responses 与 anthropic 都用 input_tokens/output_tokens。返回 (输入, 输出) 或 (None, None)。"""
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    usage = payload.get("usage") or {}
+    if not isinstance(usage, dict):
+        return None, None
+    if client == "chat":
+        return usage.get("prompt_tokens"), usage.get("completion_tokens")
+    return usage.get("input_tokens"), usage.get("output_tokens")
 
 
 def log_len():
@@ -303,6 +347,10 @@ def main():
     # mock 不校验密钥, 故"凭据带错"不会让任何功能用例变红, 只能逐条直接看上游实际收到的头。
     channel_keys = ["mock-any"]  # ensure_fixtures 里三个凭据配的是同一个值
     cred_total, cred_carried, cred_leaked = 0, 0, []
+    # 结构性不变量逐路径取证：工具形状、top_p 保留、回程用量（见 T-invariant-001）。
+    tool_ok_ev, tool_bad = [], []
+    topp_ok_ev, topp_bad = [], []
+    usage_ok_ev, usage_bad = [], []
 
     for client in CLIENTS:
         for pin, _bit in PINS:
@@ -335,6 +383,26 @@ def main():
             detail = (f"客户端={client} 上游路径={upstream_path} 缺失字段={missing} 顺序保留={ordered} "
                       f"max_tokens保留={kept_tokens}(实际{got_tokens}) 温度保留={kept_temp}(实际{got_temp}) "
                       f"工具保留={tool} 响应形状={shape_note} 上游正文透传={upstream_ok}")
+
+            # 结构性不变量（逐路径取证，失败时能直接看出是哪条路径哪种形状）
+            got_topp = body.get("top_p")
+            if got_topp == TOPP:
+                topp_ok_ev.append("%s→%s=%s" % (client, pin, got_topp))
+            else:
+                topp_bad.append("%s→%s 实际=%s（期望 %s）" % (client, pin, got_topp, TOPP))
+
+            tshape_ok, tshape_note = tool_shape_ok(body, pin)
+            if tshape_ok:
+                tool_ok_ev.append("%s→%s %s" % (client, pin, tshape_note))
+            else:
+                tool_bad.append("%s→%s %s" % (client, pin, tshape_note))
+
+            in_tokens, out_tokens = usage_of(client, raw)
+            if isinstance(in_tokens, int) and isinstance(out_tokens, int) and in_tokens > 0 and out_tokens > 0:
+                usage_ok_ev.append("%s→%s=%s/%s" % (client, pin, in_tokens, out_tokens))
+            else:
+                usage_bad.append("%s→%s 用量=%s/%s 响应片段=%s" % (
+                    client, pin, in_tokens, out_tokens, raw[:120]))
             record(f"无损[{client} → {pin}]", st == 200 and not missing and ordered and params and tool and ok_shape and upstream_ok, detail)
 
             if client == pin:
@@ -346,6 +414,38 @@ def main():
                 record(f"直通逐字段相等[{client}]", not diff and mapped,
                        ("除 model 外逐字段一致，且 model 已映射为上游模型名 %r" % got.get("model")) if (not diff and mapped)
                        else ("差异=" + json.dumps({k: v for k, v in list(diff.items())[:3]}, ensure_ascii=False)[:200] + " model=%r" % got.get("model")))
+
+    # 结构性不变量逐路径汇总（T-invariant-001）。这三条盯的都是"内容都在、但形状/字段不对"那一类问题 ——
+    # 文本断言看不见它们（工具名与 schema 里的 x 都还在），而上游收到错形状会直接 400、用量丢字段会算错账。
+    record("工具 schema 形状[9 条路径]", not tool_bad,
+           ("9 条路径的工具都以上游协议该有的形状到达: " + "; ".join(tool_ok_ev)) if not tool_bad
+           else ("形状不符: " + "; ".join(tool_bad) + " || 正常: " + "; ".join(tool_ok_ev)))
+    record("top_p 保留[9 条路径]", not topp_bad,
+           ("9 条路径都保住了 top_p=%s: " % TOPP + "; ".join(topp_ok_ev)) if not topp_bad
+           else ("丢失: " + "; ".join(topp_bad) + " || 正常: " + "; ".join(topp_ok_ev)))
+    record("回程用量[9 条路径]", not usage_bad,
+           ("9 条路径客户端都拿到非零用量: " + "; ".join(usage_ok_ev)) if not usage_bad
+           else ("有问题: " + "; ".join(usage_bad) + " || 正常: " + "; ".join(usage_ok_ev)))
+
+    # 判据自检（负向对照）：形状/用量这几条判据靠的是「按上游协议该有的形状」这类逻辑,
+    # 逻辑写错就会变成恒真断言 —— 所以拿正确与错误的合成样例各喂一次, 要求它能区分。
+    # （这几条判据的下游是依赖库的转换器, 不在本仓库里, 没有可打的变异点; 负向对照是这里的替代手段。）
+    good_chat, bad_chat = {"tools": [{"function": {"name": TOOL, "parameters": SCHEMA}}]}, {"tools": [{"name": TOOL, "input_schema": SCHEMA}]}
+    good_resp, bad_resp = {"tools": [{"name": TOOL, "parameters": SCHEMA}]}, {"tools": [{"function": {"name": TOOL, "parameters": SCHEMA}}]}
+    good_msg, bad_msg = {"tools": [{"name": TOOL, "input_schema": SCHEMA}]}, {"tools": [{"name": TOOL, "parameters": SCHEMA}]}
+    self_checks = [
+        ("chat 工具形状", tool_shape_ok(good_chat, "chat")[0] and not tool_shape_ok(bad_chat, "chat")[0]),
+        ("responses 工具形状", tool_shape_ok(good_resp, "responses")[0] and not tool_shape_ok(bad_resp, "responses")[0]),
+        ("anthropic 工具形状", tool_shape_ok(good_msg, "messages")[0] and not tool_shape_ok(bad_msg, "messages")[0]),
+        ("chat 用量", usage_of("chat", json.dumps({"usage": {"prompt_tokens": 3, "completion_tokens": 4}})) == (3, 4)
+         and usage_of("chat", json.dumps({"usage": {}})) == (None, None)),
+        ("responses/anthropic 用量", usage_of("responses", json.dumps({"usage": {"input_tokens": 3, "output_tokens": 4}})) == (3, 4)
+         and usage_of("responses", json.dumps({"usage": {"prompt_tokens": 3}})) == (None, None)),
+    ]
+    self_failed = [name for name, ok in self_checks if not ok]
+    record("结构性判据自检（负向对照）", not self_failed,
+           ("5 项判据自检全部能区分正确与错误样例: " + ", ".join(name for name, _ in self_checks)) if not self_failed
+           else ("自检失败: " + ", ".join(self_failed)))
 
     # developer 角色契约（T-devrole-001）：客户端用 developer 角色携带指令时, 上游正文里不许再出现 developer,
     # 且这条指令的文本必须仍在（不是被整条丢掉）。chat / responses 两种客户端协议 × 3 个上游协议位 = 6 条路径,
