@@ -159,7 +159,7 @@ def cleanup():
         gid = scalar("select id from groups where name=?", (name,))
         if gid:
             call("DELETE", "/api/v1/group/delete/%d" % gid)
-    for name in [CHANNEL_STRONG, CHANNEL_FAST] + CLEANUP_CHANNELS:
+    for name in [CHANNEL_STRONG, CHANNEL_FAST, CHANNEL_BAD] + CLEANUP_CHANNELS:
         cid = scalar("select id from channels where name=?", (name,))
         if cid:
             call("DELETE", "/api/v1/channel/delete/%d" % cid)
@@ -277,6 +277,12 @@ def main():
     if len(strong_grants) != 2 or len(fast_grants) != 2 or not all(strong_grants + fast_grants):
         record("S0 装置就位", False, "渠道授权没建全: strong=%s fast=%s" % (strong_grants, fast_grants))
         return 1
+    # 必失败渠道（mock-bad，两条凭据）：S5 用它当"决策档当前不可用"，S9 用它当执行链里的后备成员。
+    _cid_bad, bad_grants = ensure_channel(CHANNEL_BAD, "mock-bad",
+                                          [("badkey", "smart-secret-bad"), ("badkey2", "smart-secret-bad2")])
+    if len(bad_grants) != 2 or not all(bad_grants):
+        record("S0 装置就位", False, "必失败渠道授权没建全: %s" % (bad_grants,))
+        return 1
     grant_strong, grant_fast = strong_grants[0], fast_grants[0]
     # 成员顺序 = 档位：强渠道在前（决策引擎档），快渠道在后（执行引擎档）。
     if not ensure_group(GROUP, [grant_strong, grant_fast]) or not ensure_group(GROUP_ORDER, [grant_strong, grant_fast]):
@@ -287,13 +293,17 @@ def main():
     if not ensure_group_hedge(GROUP_HEDGE, strong_grants + fast_grants):
         record("S0 装置就位", False, "竞速用例分组创建失败")
         return 1
-    # S9 用的两个子分组：决策链 1 个成员、执行链 2 个成员（故意不等长，用来暴露"按展平条数对半切"的错法）。
+    # S9 用的两个子分组（长度故意不等，用来暴露「按展平条数对半切」的错法）：
+    # 决策链 1 个成员（强）；执行链 3 个成员（先一个快成员，后面两个必失败成员）。
+    # 这样两种口径的差别会直接体现在"第一次尝试打到谁"上：
+    #   按顶层成员切 → 简单请求的档 = 整条执行链，首位是快成员 → 只尝试 mock-plain；
+    #   按展平条数对半切 → 简单请求的档 = 展平列表后两名（两个必失败成员）→ 尝试里出现 mock-bad。
     child_decision = ensure_child_group(CHILD_DECISION, [strong_grants[0]])
-    child_execution = ensure_child_group(CHILD_EXECUTION, fast_grants)
+    child_execution = ensure_child_group(CHILD_EXECUTION, [fast_grants[0], bad_grants[0], bad_grants[1]])
     if not child_decision or not child_execution or not ensure_group_by_children(GROUP_CHILD, [child_decision, child_execution]):
         record("S0 装置就位", False, "子分组用例装置失败")
         return 1
-    record("S0 装置就位", True, "两个渠道（各两条凭据）+ 智能路由分组 + 竞速分档分组就位")
+    record("S0 装置就位", True, "两个渠道（各两条凭据）+ 智能路由分组 + 竞速分档分组 + 子分组档位装置就位")
     time.sleep(1)
 
     # S1/S2：同一分组、只改请求形状。
@@ -334,17 +344,15 @@ def main():
 
     # S5 决策引擎档当前不可用（这里让强渠道的上游必失败, 走生产同一条失败 → 冷却 → 换人路径）：
     # 复杂请求不该失败, 而应回退到执行引擎档 —— 「省钱」不能变成「不可用」。
-    _cid_bad, bad_grants = ensure_channel(CHANNEL_BAD, "mock-bad", [("badkey", "smart-secret-bad")])
-    grant_bad = bad_grants[0] if bad_grants else None
-    if not grant_bad or not set_group(GROUP, items=[grant_bad, grant_fast]):
-        record("S5 决策档不可用时回退", False, "第三渠道/成员顺序替换失败")
+    # 必失败渠道在 S0 就建好了（S9 也要用），这里直接复用它的第一条授权。
+    if not set_group(GROUP, items=[bad_grants[0], grant_fast]):
+        record("S5 决策档不可用时回退", False, "成员顺序替换失败（必失败渠道 %s）" % (bad_grants[0],))
     else:
         status, model = served_by(GROUP, complex_body())
         fallback_ok = status == 200 and model == MODEL_FAST
         record("S5 决策档不可用时回退", fallback_ok,
                "HTTP %s 上游模型=%s（期望回退到 %s 而不是失败）" % (status, model, MODEL_FAST))
         set_group(GROUP, items=[grant_strong, grant_fast])
-        CLEANUP_CHANNELS.append(CHANNEL_BAD)
         time.sleep(2)  # 等冷却（1 秒）到期，避免影响后续用例
 
     # S6 流式请求同样分档（判定只看请求特征，与是否流式无关）。
