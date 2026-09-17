@@ -122,7 +122,7 @@ func OfficialPoolSync(conn *gorm.DB, provider model.OfficialAccountProvider) (mo
 			// 逐列点名更新：只写会变的两列，凭据行的统计列不在同步的职责范围内。
 			updates := map[string]any{}
 			if key.Key != access {
-				updates["key"] = access
+				updates["key"] = sealChannelKeyForStore(access)
 			}
 			if key.OperatorDisabled {
 				// 人工停用是操作者的决定，不是账号的当前状态：同步只补凭据内容，不把 enabled 改回来，
@@ -142,7 +142,7 @@ func OfficialPoolSync(conn *gorm.DB, provider model.OfficialAccountProvider) (mo
 
 		key := model.ChannelKey{
 			ChannelID:        channel.ID,
-			ChannelKeyConfig: model.ChannelKeyConfig{Name: account.ExternalName, Key: access, Enabled: true},
+			ChannelKeyConfig: model.ChannelKeyConfig{Name: account.ExternalName, Key: sealChannelKeyForStore(access), Enabled: true},
 		}
 		if err := target.Create(&key).Error; err != nil {
 			return result, fmt.Errorf("create key %q: %w", account.ExternalName, err)
@@ -362,6 +362,10 @@ func officialPoolKeys(conn *gorm.DB, channelID int) ([]model.ChannelKey, error) 
 	var keys []model.ChannelKey
 	if err := conn.Where("channel_id = ?", channelID).Find(&keys).Error; err != nil {
 		return nil, fmt.Errorf("list official pool keys: %w", err)
+	}
+	// 库内密文、进程内明文：物化同步要拿明文做比较（是否变化）。
+	if err := DecryptChannelKeyRows(keys); err != nil {
+		return nil, err
 	}
 	return keys, nil
 }

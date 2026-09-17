@@ -8,6 +8,7 @@ import (
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/poolstore"
 	"github.com/bestruirui/octopus/internal/relay"
+	"github.com/bestruirui/octopus/internal/secret"
 	"github.com/bestruirui/octopus/internal/server"
 	"github.com/bestruirui/octopus/internal/task"
 	"github.com/bestruirui/octopus/internal/utils/shutdown"
@@ -40,6 +41,21 @@ var startCmd = &cobra.Command{
 			return
 		}
 		shutdown.Register(op.SaveCache)
+
+		// 凭据静态加密的状态说清楚（R-sec-001）：启用时给出来源（环境变量/密钥文件），
+		// 未启用时明确告诉运维"当前是明文"，免得以为已经加密了。
+		if source := op.CredentialKeySource(); source != "" {
+			log.Infof("渠道凭据静态加密已启用（密钥来源：%s）", source)
+		} else {
+			log.Warnf("渠道凭据静态加密未启用：channel_keys.key 以明文落库。设置 OCTOPUS_OFFICIAL_KEY 或允许在数据目录写入 %s 即可启用",
+				secret.KeyFileName)
+		}
+		// 备份导入可能带回来旧版本的明文凭据：落地即加密，不等下一次启动的迁移。
+		if sealed, err := secret.SealLegacyChannelKeys(db.GetDB()); err != nil {
+			log.Warnf("渠道凭据补加密失败（不影响启动）：%v", err)
+		} else if sealed > 0 {
+			log.Infof("渠道凭据补加密：%d 行明文已转为密文", sealed)
+		}
 
 		// 加权轮询热路径开关按设置注入 relay (T-route-002 L5 装配层): 默认关闭,
 		// 设置缺失/解析失败一律按关闭处理; 运行期变更由 setting 接口热注入。
