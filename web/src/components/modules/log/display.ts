@@ -31,6 +31,9 @@ export interface LogDisplayFields {
     // attempts 是本请求打向上游的轮次数: 1 = 第一次就出结果, >1 = 中途换过成员(重试/换人),
     // 0 = 还没发起过上游请求就结束了。首字竞速的多路并发算一轮。
     attempts: number;
+    // decision 是这次请求的选路判定: 形态与含义见 relay/decision.go（与响应头 X-Octopus-Route 同一份文本）。
+    // 空串表示该请求没走到选路（例如分组不存在、Key 不允许该模型）。
+    decision: string;
     elapsedMs: number; // 速率类指标（TPS）的除数。
     promptTokens: number;
     cachedTokens: number;
@@ -108,6 +111,8 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
         durationMs,
         // 实时快照还没有落库值, 用它当前的轮次序号(与面板上的"第几轮"同源); 历史行用落库的上游轮次。
         attempts: live ? source.round ?? 0 : source.attempts ?? 0,
+        // 判定理由两个来源都直接给（后端同一份文本）: 实时快照是刷新中的最新一轮, 历史行是落库的终态。
+        decision: source.decision ?? '',
         elapsedMs: running ? (startedAtMs > 0 ? Math.max(0, now - startedAtMs) : 0) : durationMs,
         promptTokens,
         cachedTokens,

@@ -304,6 +304,9 @@
             "weightBalance": "餘額",
             "weightMonthly": "包月餘量",
             "monthlyAction": "包月用盡的處置",
+    "requestFaultAction": "請求被上游判為非法時的取向",
+    "requestFaultFailover": "換成員再試（預設）",
+    "requestFaultFailfast": "立刻回傳上游原文",
             "monthlyDemote": "降權（仍可能被選到）",
             "monthlyExclude": "剔除（不再參與）"
         },
@@ -640,6 +643,7 @@
             "apiKey": "API Key",
             "duration": "耗時",
             "attempts": "上游輪次",
+    "decision": "判定理由",
         "firstByte": "首字時間",
             "cost": "費用",
             "tps": "TPS",

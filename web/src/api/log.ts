@@ -32,6 +32,10 @@ export interface RelayHistoryItem {
     duration_ms: number;
     // attempts 是本请求打向上游的轮次数: 1 = 第一次就出结果, >1 = 中途换过成员; 首字竞速的多路并算一轮。
     attempts: number;
+    // decision 是这次请求的选路判定（后端 relay.Decision.Text()）: 形如
+    // "mode=smart;tier=decision;reason=affinity;slot=1;attempt=2", 回答"为什么走了这个成员"。
+    // 未发起上游请求就结束的请求为空串。
+    decision: string;
     prompt_tokens: number;
     cached_tokens: number;
     completion_tokens: number;
@@ -111,6 +115,8 @@ export interface RelayLogOverview {
     cost: number;
     round: number;
     round_started_at: string;
+    // decision 是本轮的选路判定（后端 relay.Decision.Text()），每轮刷新；空串表示尚未走到选路。
+    decision?: string;
     target_channel: string;
     target_model: string;
     target_protocol: number;
