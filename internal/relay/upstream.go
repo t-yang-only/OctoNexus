@@ -178,13 +178,26 @@ func (m *conversionMiddleware) OnOutboundRawRequest(_ context.Context, request *
 	return request, nil
 }
 
-// normalizeDeveloperRole 把转换后的 chat completions 请求里 messages 的 developer 角色归一化为 system。
+// normalizeDeveloperRole 把发给上游的请求里 developer 角色归一化为等价的 system。
 //
 // 为什么需要（对齐上游 PR #360 对 #19 回归的修复）：developer 是 OpenAI Responses 协议里 system 的替代角色，
 // 客户端（Codex 等）会用它携带指令；而不少 OpenAI 兼容中转站只认 system，收到 developer 直接报错。
-// 归一化后语义等价、兼容性更好，且只在上游协议是 chat completions 时改写。
+// 归一化后语义等价、兼容性更好。
+//
+// 两种上游形状都要盖（T-devrole-001，分协议位实测发现 Responses 形状曾经漏掉）：
+//   - chat completions: 角色在顶层 messages 数组里；
+//   - responses:       角色在顶层 input 数组里（input 也可能是字符串，或含无 role 的条目，逐项判角色即可）。
 func normalizeDeveloperRole(format llm.APIFormat, request *httpclient.Request) {
-	if format != llm.APIFormatOpenAIChatCompletion || request == nil {
+	if request == nil {
+		return
+	}
+	var path string
+	switch format {
+	case llm.APIFormatOpenAIChatCompletion:
+		path = "messages"
+	case llm.APIFormatOpenAIResponse:
+		path = "input"
+	default:
 		return
 	}
 	body := request.Body
@@ -194,17 +207,17 @@ func normalizeDeveloperRole(format llm.APIFormat, request *httpclient.Request) {
 	if len(body) == 0 {
 		return
 	}
-	messages := gjson.GetBytes(body, "messages")
-	if !messages.IsArray() {
+	items := gjson.GetBytes(body, path)
+	if !items.IsArray() {
 		return
 	}
 	rewritten := body
 	changed := false
-	for index, message := range messages.Array() {
-		if message.Get("role").String() != "developer" {
+	for index, item := range items.Array() {
+		if item.Get("role").String() != "developer" {
 			continue
 		}
-		next, err := sjson.SetBytes(rewritten, fmt.Sprintf("messages.%d.role", index), "system")
+		next, err := sjson.SetBytes(rewritten, fmt.Sprintf("%s.%d.role", path, index), "system")
 		if err != nil {
 			return
 		}
