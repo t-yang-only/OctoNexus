@@ -40,6 +40,11 @@ const (
 	SettingKeyAlertWebhookURL      SettingKey = "alert_webhook_url"            // 告警事件 webhook 地址, 留空不推送; 余额告警/归零停用等事件 POST JSON 到该地址
 	SettingKeyRouteProbeEnabled    SettingKey = "route_probe_enabled"          // 冷却成员主动探活开关 (R-probe-001); 默认关闭: 每次探测都是一次真实计费请求
 	SettingKeyRouteProbeInterval   SettingKey = "route_probe_interval_seconds" // 主动探活周期(秒), 0 表示停用探活任务; 默认 300
+	// 号池扩展层（R-pool-ext-001 第三批，用户对"四个边界"回复「我全都要」后落地）：
+	// 声明式适配器让"接一个新的反代工具包"变成提交一份 JSON，因此必须显式划边界——
+	// 白名单为空即一律拒绝（fail closed），宁可用不了也不要默认敞着一个"按 JSON 请求任意 URL"的入口。
+	SettingKeyPoolDeclarativeHosts    SettingKey = "pool_declarative_hosts"    // 声明式适配器允许访问的域名白名单(逗号分隔, 支持后缀); 留空 = 一律拒绝注册
+	SettingKeyPoolDeclarativeAdapters SettingKey = "pool_declarative_adapters" // 已注册的声明式适配器(整份 JSON 的密文, 凭据在其中, 接口永不回显)
 
 	// 通知渠道 (R-alert-001 余项): 一个事件同时投递到全部启用渠道。
 	// 密钥口径: 三个群机器人的 webhook 地址本身即凭据(与既有 alert_webhook_url 同性质, 面板可见可编辑);
@@ -102,6 +107,9 @@ func DefaultSettings() []Setting {
 		// 请求本身非法时的取向: 默认与改造前一致 —— 换个成员再试, 全部成员都拒绝才失败。
 		// 用户要求两种都要, 因此这里只定默认值, 另一种由使用方显式切换（热生效, 不必重启）。
 		{Key: SettingKeyRequestFaultAction, Value: "failover"},
+		// 声明式适配器默认全拒: 白名单为空时连注册都会被拒绝（fail closed）。
+		{Key: SettingKeyPoolDeclarativeHosts, Value: ""},
+		{Key: SettingKeyPoolDeclarativeAdapters, Value: ""},
 	}
 }
 
@@ -168,6 +176,25 @@ func (s *Setting) Validate() error {
 	case SettingKeyBalanceCurrency:
 		if strings.TrimSpace(s.Value) == "" || len(s.Value) > 16 || strings.ContainsAny(s.Value, " \t\n") {
 			return fmt.Errorf("balance currency must be a short non-empty token (e.g. USD or CNY)")
+		}
+		return nil
+	case SettingKeyPoolDeclarativeHosts:
+		// 只收域名/后缀: 带 scheme、带空格、带路径一律报错——这一项是安全边界, 不接受"看起来像域名"的输入。
+		for _, part := range strings.Split(s.Value, ",") {
+			host := strings.TrimSpace(part)
+			if host == "" {
+				continue
+			}
+			if strings.ContainsAny(host, " \t\n/:\\") {
+				return fmt.Errorf("pool declarative hosts must be comma separated host names without scheme or path")
+			}
+		}
+		return nil
+	case SettingKeyPoolDeclarativeAdapters:
+		// 这一项由号池接口写入整份密文, 这里只挡住明显不合理的形状（换行/超长）, 不做解密校验:
+		// 解密校验在 op 层做, 失败时表现为"加载不到适配器", 不影响启动。
+		if len(s.Value) > 1<<20 || strings.ContainsAny(s.Value, "\n\r") {
+			return fmt.Errorf("pool declarative adapters must be a single-line ciphertext no longer than 1MiB")
 		}
 		return nil
 	case SettingKeyRouteProbeEnabled:

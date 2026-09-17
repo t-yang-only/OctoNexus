@@ -11,6 +11,7 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/notify"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/poolstore"
 	"github.com/bestruirui/octopus/internal/relay"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
@@ -116,6 +117,10 @@ func setSetting(c *gin.Context) {
 		// 请求本身非法时的取向热生效: relay 不耦合配置源, 由装配层在此注入（非法取值已在
 		// Validate 阶段拦下, 这里再回落一次也不会静默改成别的语义）。
 		relay.SetRequestFaultAction(setting.Value)
+	case model.SettingKeyPoolDeclarativeHosts:
+		// 声明式适配器的域名白名单即时生效：收紧白名单后，已注册但不再允许的适配器会在下一轮
+		// 刷新时失败（注册表本身不动——静默摘掉别人的适配器比让它报错更难查）。
+		poolstore.ApplyGuards()
 	case model.SettingKeyStatsSaveInterval:
 		// 统计保存周期热更新: 注册时与历史日志清理同周期, 改值两条一起跟随, 免得落库与清理节奏错位。
 		// 与注册同口径 (0 停用, task.Update 自会摘任务), 解析失败不拦保存。
