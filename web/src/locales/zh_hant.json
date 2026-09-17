@@ -704,6 +704,8 @@
             "grantClearAll": "清空全部模型",
             "modelRemove": "移除模型",
             "grantRemove": "移除該憑據的授權",
+            "grantUnsupported": "該憑證不支援此模型",
+            "grantPruned": "已丟棄 {count} 筆該憑證不支援的模型授權",
             "billingMode": "計費方式（加權選路用）",
             "billingModeUnknown": "未知",
             "billingModeMetered": "按量計費",

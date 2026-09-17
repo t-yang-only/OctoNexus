@@ -75,6 +75,8 @@ SUITES = [
     ("hotapply", "hot_apply_check.py", "设置热生效（改完无需重启）", "instance"),
     ("display", "check_display.js", "日志卡片字段容错解析（纯函数自检）", "node,esbuild"),
     ("reallog", "check_real_logs.js", "日志卡片真实数据等价性", "node,db"),
+    ("grants", "check_grants.js",
+     "渠道授权按凭据实际支持的模型收敛（上游 #387：全选跳过/不可勾选/保存不落无效授权）", "node,esbuild"),
 ]
 
 
@@ -187,6 +189,23 @@ def build_display_cjs():
     if not os.path.exists(src):
         return False, "缺少 web/src/components/modules/log/display.ts"
     cmd = ["npx", "esbuild", src, "--format=cjs", "--platform=node", "--outfile=" + out]
+    proc = subprocess.run(cmd, cwd=os.path.join(ROOT, "web"), capture_output=True, text=True, shell=True)
+    if proc.returncode != 0 or not os.path.exists(out):
+        return False, (proc.stderr or proc.stdout or "").strip()[:200]
+    return True, out
+
+
+def build_grants_cjs():
+    """把渠道授权的可用性判定与表单状态模块编译成单个 cjs，供 node 自检脚本 require。
+
+    入口是仓库里的 grants-entry.ts（它 re-export 界面用的 grants.ts 与 state.ts 两条链路），
+    打成单文件后产物没有运行期依赖，node 直接跑；出 .js 会被当成可提交产物，故按 display 的做法出 .cjs。
+    """
+    src = os.path.join(HERE, "grants-entry.ts")
+    out = os.path.join(HERE, "grants.cjs")
+    if not os.path.exists(src):
+        return False, "缺少 scripts/api-tests/grants-entry.ts"
+    cmd = ["npx", "esbuild", src, "--bundle", "--format=cjs", "--platform=node", "--outfile=" + out]
     proc = subprocess.run(cmd, cwd=os.path.join(ROOT, "web"), capture_output=True, text=True, shell=True)
     if proc.returncode != 0 or not os.path.exists(out):
         return False, (proc.stderr or proc.stdout or "").strip()[:200]
@@ -321,6 +340,11 @@ def main():
         if "node" in needs or "esbuild" in needs:
             if key == "display":
                 ok, detail = build_display_cjs()
+                if not ok:
+                    results.append((key, desc, None, None, None, "依赖失败: " + detail))
+                    continue
+            if key == "grants":
+                ok, detail = build_grants_cjs()
                 if not ok:
                     results.append((key, desc, None, None, None, "依赖失败: " + detail))
                     continue

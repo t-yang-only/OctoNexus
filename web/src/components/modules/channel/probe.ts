@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { useTranslations } from 'use-intl';
 import { useFetchModel } from '@/api/channel';
 import { grantKey, toChannelConfig, type ChannelFormState } from './state';
+import { recordProbe } from './grants';
 
 // useModelProbe 按凭据探测上游模型列表, 供模型页与凭据页共用。
 // 两侧并发探测, 逐模型三协议实测与协议位判定都在后端完成, 此处只负责转圈状态, 结果并入表单和结果提示。
@@ -44,7 +45,9 @@ export function useModelProbe() {
                 const mapKey = grantKey(name, channelKey.name);
                 grants.set(mapKey, (grants.get(mapKey) ?? 0) | protocols);
             }
-            setState({ ...state, models, grants });
+            // 探测结论同时成为该凭据的支持清单, 授权矩阵据此收敛: 它供不了的模型既勾不上也不会被存下。
+            const keyModels = recordProbe(state.keyModels, channelKey.name, fetched.map((m) => m.name));
+            setState({ ...state, models, grants, keyModels });
             // 实测结论的模型数与 /models 返回一致, 协议位只多不少; 明细留待人工展开核对。
             toast.success(t('modelRefreshProbed', { count: fetched.length }));
         } catch (error) {

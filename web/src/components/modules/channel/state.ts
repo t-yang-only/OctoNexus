@@ -1,4 +1,5 @@
 import type { ChannelDetail } from '@/api/channel';
+import { unsupportedPairs, type KeyModelIndex } from './grants';
 
 // ChannelFormState 是渠道表单的全部可编辑内容。
 // 全按名称组织而不存主键: 后端凭据与模型都按名称匹配增删改, 而新建渠道和新加模型时主键尚不存在。
@@ -14,6 +15,9 @@ export type ChannelFormState = {
     keys: { name: string; key: string; enabled: boolean }[];
     models: string[];
     grants: Map<string, number>; // 键为 grantKey(模型名, 凭据名), 值为 Protocol 位掩码。
+    // 各凭据经探测确认支持的模型, 只用于收敛授权范围(全选跳过, 不可勾选, 保存前裁剪), 不提交给后端。
+    // 编辑既有渠道时为空: 探测结论不随渠道保存, 旧表单里的授权也不足以反推某个凭据支持哪些模型。
+    keyModels: KeyModelIndex;
     custom_header: ChannelDetail['custom_header'];
     channel_proxy: string;
     param_override: string;
@@ -43,6 +47,7 @@ export const emptyFormState: ChannelFormState = {
     keys: [],
     models: [],
     grants: new Map(),
+    keyModels: new Map(),
     custom_header: [],
     channel_proxy: '',
     param_override: '',
@@ -68,6 +73,7 @@ export function fromChannel(channel: ChannelDetail): ChannelFormState {
         keys: channel.keys.map(({ name, key, enabled }) => ({ name, key, enabled })),
         models: [...channel.models],
         grants: new Map(channel.grants.map((g) => [grantKey(g.model_name, g.key_name), g.protocols])),
+        keyModels: new Map(),
         custom_header: channel.custom_header,
         channel_proxy: channel.channel_proxy,
         param_override: channel.param_override,
@@ -120,4 +126,23 @@ export function toChannelDetail(state: ChannelFormState, id: number): ChannelDet
                 return { model_name, key_name, protocols };
             }),
     };
+}
+
+// pruneUnsupportedGrants 是提交前的最后一道收敛: 删掉已知不可用的 (模型, 凭据) 授权。
+// 与界面禁用同一份判据(见 grants.ts): 界面挡的是新勾选, 这里兜住界面之外就已存在的旧组合——
+// 此前全量置位存下的授权正是这一类, 不删就会持续把请求派给供不了该模型的凭据。
+// 只删有探测结论的组合; 一条都没删时原样返回, 调用方据此决定是否提示用户。
+export function pruneUnsupportedGrants(state: ChannelFormState): { next: ChannelFormState; removed: number } {
+    const pairs = unsupportedPairs(state.keyModels, state.models, state.keys.map((k) => k.name));
+    if (pairs.length === 0) return { next: state, removed: 0 };
+    const grants = new Map(state.grants);
+    let removed = 0;
+    for (const [modelName, keyName] of pairs) {
+        const mapKey = grantKey(modelName, keyName);
+        if (!grants.has(mapKey)) continue;
+        grants.delete(mapKey);
+        removed += 1;
+    }
+    if (removed === 0) return { next: state, removed: 0 };
+    return { next: { ...state, grants }, removed };
 }

@@ -115,6 +115,16 @@ def main():
         "缺 %s" % (missing_idle or "无"),
     )
 
+    # P8 授权按凭据实际支持的模型收敛（上游 #387）：三语文案 + 界面真的引用了这个键，
+    # 只查文案会漏掉"文案在但界面没连上"的空壳。
+    grant_markers = ["grantUnsupported", "该凭据不支持此模型", "該憑證不支援此模型", "This key does not serve this model"]
+    missing_grant = [marker for marker in grant_markers if marker not in bundle]
+    record(
+        "P8 授权按凭据支持的模型收敛进了产物（键被引用 + 三语文案）",
+        not missing_grant,
+        "缺 %s" % (missing_grant or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(

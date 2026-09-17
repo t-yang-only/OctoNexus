@@ -721,7 +721,9 @@
             "backToStats": "Back to Stats",
             "grantClearAll": "Clear all models",
             "modelRemove": "Remove model",
-            "grantRemove": "Remove this key’s grant"
+            "grantRemove": "Remove this key’s grant",
+            "grantUnsupported": "This key does not serve this model",
+            "grantPruned": "Dropped {count} grant(s) for models this key does not serve"
         }
     },
   "unifiedPool": {
