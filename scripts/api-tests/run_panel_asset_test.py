@@ -144,6 +144,16 @@ def main():
         "缺 %s" % (missing_attempts or "无"),
     )
 
+    # P11 总余额（T-balance-001）: 首页余额卡片、字段与三语文案都要进产物。
+    balance_markers = ["balance/summary", "points_per_unit", "未读到余额", "未讀到餘額",
+                       "No balance yet", "Monthly left"]
+    missing_balance = [marker for marker in balance_markers if marker not in bundle]
+    record(
+        "P11 总余额卡片进产物（接口路径 + 未知余额文案 + 三语文案）",
+        not missing_balance,
+        "缺 %s" % (missing_balance or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(

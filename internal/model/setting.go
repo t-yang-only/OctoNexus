@@ -32,10 +32,13 @@ const (
 	SettingKeyRouteWeightMonthly    SettingKey = "route_weight_monthly"           // 包月余量（剩余比例, 越多越好）
 	SettingKeyRouteMonthlyAction    SettingKey = "route_monthly_exhausted_action" // 包月额度用尽时: demote(降权, 默认) 或 exclude(剔除)
 	SettingKeyQuotaAlertThreshold   SettingKey = "quota_alert_threshold"          // 余额告警阈值(额度点), 剩余额度低于该值记告警事件; 留空或<=0 表示不告警 (归零停用不受其影响, 恒按 remaining<=0 判定)
-	SettingKeyRouteBalanceEnabled   SettingKey = "route_balance_enabled"          // 故障转移分组是否用加权轮询定序候选 (T-route-002); 默认关闭, 走原有优先级选路
-	SettingKeyAlertWebhookURL       SettingKey = "alert_webhook_url"              // 告警事件 webhook 地址, 留空不推送; 余额告警/归零停用等事件 POST JSON 到该地址
-	SettingKeyRouteProbeEnabled     SettingKey = "route_probe_enabled"            // 冷却成员主动探活开关 (R-probe-001); 默认关闭: 每次探测都是一次真实计费请求
-	SettingKeyRouteProbeInterval    SettingKey = "route_probe_interval_seconds"   // 主动探活周期(秒), 0 表示停用探活任务; 默认 300
+	// 总余额聚合 (T-balance-001): 把各渠道读到的剩余额度折成同一个货币口径, 供 /v1/dashboard/billing/* 与 /v1/balance 查询。
+	SettingKeyBalancePointsPerUnit SettingKey = "balance_points_per_unit"      // 换算口径: 多少额度点 = 1 个货币单位; 默认 500000 (new-api 惯例)
+	SettingKeyBalanceCurrency      SettingKey = "balance_currency"             // 折算后的货币名, 仅用于显示; 默认 USD
+	SettingKeyRouteBalanceEnabled  SettingKey = "route_balance_enabled"        // 故障转移分组是否用加权轮询定序候选 (T-route-002); 默认关闭, 走原有优先级选路
+	SettingKeyAlertWebhookURL      SettingKey = "alert_webhook_url"            // 告警事件 webhook 地址, 留空不推送; 余额告警/归零停用等事件 POST JSON 到该地址
+	SettingKeyRouteProbeEnabled    SettingKey = "route_probe_enabled"          // 冷却成员主动探活开关 (R-probe-001); 默认关闭: 每次探测都是一次真实计费请求
+	SettingKeyRouteProbeInterval   SettingKey = "route_probe_interval_seconds" // 主动探活周期(秒), 0 表示停用探活任务; 默认 300
 
 	// 通知渠道 (R-alert-001 余项): 一个事件同时投递到全部启用渠道。
 	// 密钥口径: 三个群机器人的 webhook 地址本身即凭据(与既有 alert_webhook_url 同性质, 面板可见可编辑);
@@ -60,17 +63,19 @@ type Setting struct {
 func DefaultSettings() []Setting {
 	return []Setting{
 		{Key: SettingKeyProxyURL, Value: ""},
-		{Key: SettingKeyStatsSaveInterval, Value: "10"},       // 默认10分钟保存一次统计信息
-		{Key: SettingKeyCORSAllowOrigins, Value: ""},          // CORS 默认不允许跨域，设置为 "*" 才允许所有来源
-		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"}, // 默认24小时更新一次模型信息
-		{Key: SettingKeyModelFilter, Value: ""},               // 默认不过滤模型
-		{Key: SettingKeyQuotaScanInterval, Value: "5"},        // 余额扫描默认 5 分钟一轮 (P5 低频口径)
-		{Key: SettingKeyQuotaAlertThreshold, Value: ""},       // 默认不设告警阈值; 归零停用恒生效, 不经该阈值
-		{Key: SettingKeyRouteBalanceEnabled, Value: "false"},  // 加权轮询热路径默认关闭, 行为与既有优先级选路一致
-		{Key: SettingKeyAlertWebhookURL, Value: ""},           // 告警 webhook 默认不推送
-		{Key: SettingKeyRouteProbeEnabled, Value: "false"},    // 主动探活默认关闭: 探测是真实计费请求, 开不开由用户决定
-		{Key: SettingKeyRouteProbeInterval, Value: "300"},     // 探活默认 5 分钟一轮 (低频, 冷却期通常远大于它)
-		{Key: SettingKeyAlertChannels, Value: "webhook"},      // 默认只发通用 webhook: 与改造前行为一致
+		{Key: SettingKeyStatsSaveInterval, Value: "10"},        // 默认10分钟保存一次统计信息
+		{Key: SettingKeyCORSAllowOrigins, Value: ""},           // CORS 默认不允许跨域，设置为 "*" 才允许所有来源
+		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"},  // 默认24小时更新一次模型信息
+		{Key: SettingKeyModelFilter, Value: ""},                // 默认不过滤模型
+		{Key: SettingKeyQuotaScanInterval, Value: "5"},         // 余额扫描默认 5 分钟一轮 (P5 低频口径)
+		{Key: SettingKeyQuotaAlertThreshold, Value: ""},        // 默认不设告警阈值; 归零停用恒生效, 不经该阈值
+		{Key: SettingKeyBalancePointsPerUnit, Value: "500000"}, // 总余额换算默认 new-api 惯例: 500000 点 = 1 个货币单位
+		{Key: SettingKeyBalanceCurrency, Value: "USD"},         // 只是显示名: 换 CNY 不改变任何折算, 改口径请调上面的点数
+		{Key: SettingKeyRouteBalanceEnabled, Value: "false"},   // 加权轮询热路径默认关闭, 行为与既有优先级选路一致
+		{Key: SettingKeyAlertWebhookURL, Value: ""},            // 告警 webhook 默认不推送
+		{Key: SettingKeyRouteProbeEnabled, Value: "false"},     // 主动探活默认关闭: 探测是真实计费请求, 开不开由用户决定
+		{Key: SettingKeyRouteProbeInterval, Value: "300"},      // 探活默认 5 分钟一轮 (低频, 冷却期通常远大于它)
+		{Key: SettingKeyAlertChannels, Value: "webhook"},       // 默认只发通用 webhook: 与改造前行为一致
 		{Key: SettingKeyAlertFeishuWebhook, Value: ""},
 		{Key: SettingKeyAlertDingTalkWebhook, Value: ""},
 		{Key: SettingKeyAlertWeComWebhook, Value: ""},
@@ -147,6 +152,18 @@ func (s *Setting) Validate() error {
 		threshold, err := strconv.ParseFloat(s.Value, 64)
 		if err != nil || threshold < 0 {
 			return fmt.Errorf("quota alert threshold must be empty or a non-negative number")
+		}
+		return nil
+	case SettingKeyBalancePointsPerUnit:
+		// 换算口径必须为正数: 0 或负数会让总额除出 +Inf/负值, 而不是"用默认值"。
+		points, err := strconv.ParseFloat(s.Value, 64)
+		if err != nil || points <= 0 {
+			return fmt.Errorf("balance points per unit must be a positive number")
+		}
+		return nil
+	case SettingKeyBalanceCurrency:
+		if strings.TrimSpace(s.Value) == "" || len(s.Value) > 16 || strings.ContainsAny(s.Value, " \t\n") {
+			return fmt.Errorf("balance currency must be a short non-empty token (e.g. USD or CNY)")
 		}
 		return nil
 	case SettingKeyRouteProbeEnabled:
