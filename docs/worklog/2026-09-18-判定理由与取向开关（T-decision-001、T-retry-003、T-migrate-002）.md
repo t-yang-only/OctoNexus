@@ -76,3 +76,14 @@ Text() → "mode=smart;tier=decision;reason=affinity;slot=1;attempt=2"
 
 - 面板：`decision` 字段的日志卡片单元格与「判定理由」字段开关、以及 `relay_request_fault_action` 的设置界面（本轮是后端 + 活体判据；响应头与日志接口已可用）。
 - 与 ②③⑧⑩ 的交叉点复核（③ 显式决策引擎渠道落地时要同步 `Decision.Tier` 的口径）。
+
+## 判据灵敏度（变异检查）
+
+| 变异 | 改法 | 期望用例 | 实测 |
+| --- | --- | --- | --- |
+| DC1 判定理由不写响应头 | `publishDecision` 里注释掉 `c.Writer.Header().Set(...)` | R11 | **如期变红**：`响应头='' 日志='mode=failover;reason=priority;slot=2;attempt=2'` |
+| DC2 取向开关失效 | `SetRequestFaultAction` 的取值判断恒真（任何取值都落 failover） | R12 | **如期变红**：`failfast: HTTP 200 尝试=['mock-reject400','mock-good']`（应当 502/1 次） |
+
+DC1 的明细顺带暴露了一个设计事实（也是这条判据的价值）：日志与响应头是**两个独立出口**，只写一处仍然"看起来正常"。这正是"两者都要"的意义——只写日志时，正在等这个请求的客户端什么也看不到。
+
+还原后干净重建 + 复跑 streamidle 9/9、retry 12/12 全绿。
