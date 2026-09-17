@@ -15,6 +15,7 @@ import http.client
 import json
 import os
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -160,7 +161,13 @@ def credential_audit(since, channel_keys, client_key):
         forms = {entry.get("authorization"), entry.get("x_api_key")} - {None}
         if forms & forms_channel:
             carried += 1
-        if forms & forms_client:
+        # 泄露判据看**所有**请求头的指纹（entry["headers"]），不止那两个凭据列:
+        # 正向半边（10/10 命中渠道密钥）已经证明指纹算法与字段读取是对的,
+        # 反向半边就是同款比较换成客户端凭据的指纹 —— 自定义头也在这个集合里。
+        all_forms = set((entry.get("headers") or {}).values()) | forms
+        if all_forms & forms_client or (client_key and client_key in line):
+            # 后半个判据是"兜底": 上游收到的这一行里若**原文**出现客户端凭据（正文/查询串/任何字段）
+            # 都算泄露 —— 比按字段比对更宽，能盖住 mock 没有单独建列的传输位置。
             leaked.append(entry.get("model") or "?")
     return total, carried, leaked
 
@@ -322,6 +329,38 @@ def main():
            "上游请求 %d 条, 携带渠道密钥 %d 条, 携带客户端凭据 %d 条%s" % (
                cred_total, cred_carried, len(cred_leaked),
                (" 泄露=%s" % ",".join(cred_leaked[:3])) if cred_leaked else ""))
+
+    # 判据自检（负向对照）: 用伪造行证明上面的凭据判据不是空转 —— 合规行不报,
+    # 「自定义头指纹」与「正文里的凭据原文」两种泄露都必须报出来。做成用例的一部分,
+    # 免得日后判据被改瞎了还一路绿。
+    def sig(value, kind):
+        return kind + hashlib.sha256(value.encode()).hexdigest()[:12]
+
+    probe_channel = sig("Bearer " + channel_keys[0], "bearer:")
+    probe_rows = [
+        {"method": "POST", "model": "self-ok", "authorization": probe_channel,
+         "headers": {"authorization": probe_channel}},
+        {"method": "POST", "model": "self-leak-header", "authorization": probe_channel,
+         "headers": {"x-custom-thing": sig(key, "key:")}},
+        {"method": "POST", "model": "self-leak-body", "authorization": probe_channel,
+         "headers": {}, "body": {"messages": [{"content": key}]}},
+        {"event": "stall_peer_closed", "closed_after": 1.0},
+    ]
+    tmp_path = os.path.join(tempfile.gettempdir(), "cred_audit_selftest.jsonl")
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        for row in probe_rows:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    saved_log = globals()["MOCK_LOG"]
+    globals()["MOCK_LOG"] = tmp_path
+    try:
+        st_total, st_carried, st_leaked = credential_audit(0, channel_keys, key)
+    finally:
+        globals()["MOCK_LOG"] = saved_log
+        os.remove(tmp_path)
+    record("凭据判据自检（负向对照）",
+           (st_total, st_carried, st_leaked) == (3, 3, ["self-leak-header", "self-leak-body"]),
+           "伪造 4 行（1 合规 + 2 泄露 + 1 事件行）→ total=%d carried=%d leaked=%s" % (
+               st_total, st_carried, st_leaked))
 
     print()
     total = len(RESULTS)
