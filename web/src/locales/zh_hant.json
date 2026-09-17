@@ -512,6 +512,8 @@
             "nonStreamTimeout": "非串流逾時（秒）",
             "nonStreamTimeoutHint": "等待完整非串流回應的最長時間",
             "streamTimeout": "串流首事件逾時（秒）",
+            "streamIdleTimeout": "串流無進展上限（秒）",
+            "streamIdleTimeoutHint": "首個事件之後允許的最長靜默秒數：上游吐了首幀就再也不出字時，超過它就結束本次回應並按成員失敗記帳（首位元組已提交，不會換目標重試）。0 表示關閉。預設 300 秒；部分中轉站是「假串流」，正文要等整段生成完才下發，靜默可能偏長，遇到誤傷可調大。",
             "streamTimeoutHint": "等待首個有效串流事件的最長時間",
             "cooldown": "冷卻時間（秒）",
             "cooldownHint": "成員重試耗盡後暫停使用的時間",

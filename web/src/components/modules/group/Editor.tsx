@@ -32,6 +32,7 @@ const defaultRelayConfig: GroupRelayConfig = {
     member_retry_interval_seconds: 1,
     member_non_stream_response_timeout_seconds: 120,
     member_stream_first_event_timeout_seconds: 30,
+    member_stream_idle_timeout_seconds: 300,
     member_cooldown_seconds: 60,
     member_affinity_seconds: 0,
     hedge_enabled: false,
@@ -648,6 +649,25 @@ export function GroupEditor({
                                         onChange={(event) => {
                                             const value = Number.parseInt(event.target.value, 10);
                                             setRelayConfig((prev) => ({ ...prev, member_stream_first_event_timeout_seconds: Number.isFinite(value) && value >= 1 ? value : 1 }));
+                                        }}
+                                        className="rounded-xl"
+                                    />
+                                </Field>
+                                <Field>
+                                    <FieldLabel htmlFor="group-stream-idle-timeout">
+                                        {t('form.streamIdleTimeout')}
+                                        <FieldHelp text={t('form.streamIdleTimeoutHint')} />
+                                    </FieldLabel>
+                                    <Input
+                                        id="group-stream-idle-timeout"
+                                        type="number"
+                                        inputMode="numeric"
+                                        min={0}
+                                        step={1}
+                                        value={String(relayConfig.member_stream_idle_timeout_seconds)}
+                                        onChange={(event) => {
+                                            const value = Number.parseInt(event.target.value, 10);
+                                            setRelayConfig((prev) => ({ ...prev, member_stream_idle_timeout_seconds: Number.isFinite(value) && value >= 0 ? value : 0 }));
                                         }}
                                         className="rounded-xl"
                                     />

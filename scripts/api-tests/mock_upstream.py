@@ -9,12 +9,16 @@ Endpoints (all paths are what octopus channels will call):
 Behavior is driven by the upstream model name in the request body "model" field:
   contains "slow" -> sleep SLOW_SECONDS before answering (drives timeout switchover)
   contains "bad"  -> answer HTTP 500 immediately (drives failover)
+  contains "stall"-> streaming only: send the first SSE frame and then go silent with the
+                     connection still open, for STALL_SECONDS (drives the after-first-byte
+                     "no progress" guard: the relay must end the response instead of hanging
+                     until the client gives up)
   otherwise       -> answer normally
 Streaming (body.stream == true) answers SSE in the same wire shape as the protocol.
 
 Runtime override (drives proactive-probe tests, which must flip a model from
 failing to healthy while the relay is running):
-  POST /__control {"model": "mock-bad", "behavior": "ok"|"bad"|"slow"}
+  POST /__control {"model": "mock-bad", "behavior": "ok"|"bad"|"slow"|"stall"}
   GET  /__control -> current overrides
 An override wins over the name-derived behavior for that model.
 
@@ -40,10 +44,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("MOCK_PORT", "18099"))
 SLOW_SECONDS = float(os.environ.get("MOCK_SLOW_SECONDS", "15"))
+STALL_SECONDS = float(os.environ.get("MOCK_STALL_SECONDS", "120"))
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requests.jsonl")
 _lock = threading.Lock()
 
-MODELS = ["mock-good", "mock-slow", "mock-bad", "mock-chatonly"]
+MODELS = ["mock-good", "mock-slow", "mock-bad", "mock-chatonly", "mock-stall"]
 
 # FORCED 是运行期行为覆盖: 模型名 → "ok"/"bad"/"slow"。探活用例要证明"上游恢复后冷却被提前解除",
 # 就需要在实例运行中把某个模型从失败翻成健康, 改模型名做不到 (成员模型名是落库配置)。
@@ -134,6 +139,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
         self.end_headers()
+        if getattr(self, "_stall", False):
+            # 模拟「上游吐完首帧就静默」: 只发第一个事件, 然后保持连接不关、不写 [DONE]、也不返回
+            # （返回会关掉连接, 那就变成普通截断而不是静默）。relay 必须在「无进展上限」处主动结束
+            # 这次响应, 而不是一直挂着, 等客户端自己放弃。
+            if events:
+                self.wfile.write(("data: " + json.dumps(_scale_usage_payload(events[0], scale)) + "\n\n").encode("utf-8"))
+                self.wfile.flush()
+            time.sleep(STALL_SECONDS)
+            return
         for ev in events:
             self.wfile.write(("data: " + json.dumps(_scale_usage_payload(ev, scale)) + "\n\n").encode("utf-8"))
             self.wfile.flush()
@@ -163,12 +177,12 @@ class Handler(BaseHTTPRequestHandler):
         stream = bool(body.get("stream"))
         if self.path.rstrip("/").endswith("/__control"):
             behavior = body.get("behavior")
-            if body.get("model") and behavior in ("ok", "bad", "slow"):
+            if body.get("model") and behavior in ("ok", "bad", "slow", "stall"):
                 FORCED[body["model"]] = behavior
             elif body.get("model") and behavior == "clear":
                 FORCED.pop(body["model"], None)
             else:
-                self._send_json(400, {"error": {"message": "want {model, behavior=ok|bad|slow|clear}"}})
+                self._send_json(400, {"error": {"message": "want {model, behavior=ok|bad|slow|stall|clear}"}})
                 return
             if body.get("model") and "usage_scale" in body:
                 try:
@@ -196,6 +210,8 @@ class Handler(BaseHTTPRequestHandler):
         })
 
         forced = FORCED.get(model)
+        # stalling 由模型名或运行期覆盖决定: 只看流式分支（非流式请求没有「首帧之后再静默」这一说）。
+        self._stall = forced == "stall" or (forced is None and "stall" in model)
         if forced == "slow" or (forced is None and "slow" in model):
             time.sleep(SLOW_SECONDS)
         if forced == "bad" or (forced is None and "bad" in model):

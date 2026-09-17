@@ -158,7 +158,8 @@ func streamOverview(c *gin.Context) {
 		c.Writer.Flush()
 	}
 
-	heartbeat := time.NewTicker(15 * time.Second)
+	// 心跳 10 秒: 与分组事件流同口径, 明显小于常见的 15 秒空闲上限, 避免与客户端超时同刻竞速。
+	heartbeat := time.NewTicker(10 * time.Second)
 	defer heartbeat.Stop()
 	for {
 		select {

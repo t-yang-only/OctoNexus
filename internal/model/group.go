@@ -35,8 +35,15 @@ type GroupRelayConfig struct {
 	MemberRetryIntervalSeconds            int `json:"member_retry_interval_seconds" binding:"omitempty,min=1"`              // 同一成员相邻两次尝试之间的等待秒数。
 	MemberNonStreamResponseTimeoutSeconds int `json:"member_non_stream_response_timeout_seconds" binding:"omitempty,min=1"` // 单个成员返回完整非流式响应的超时秒数。
 	MemberStreamFirstEventTimeoutSeconds  int `json:"member_stream_first_event_timeout_seconds" binding:"omitempty,min=1"`  // 单个成员返回首个有效流事件的超时秒数。
-	MemberCooldownSeconds                 int `json:"member_cooldown_seconds" binding:"omitempty,min=1"`                    // 单个成员耗尽尝试后被跳过的秒数，仅在故障转移模式生效。
-	MemberAffinitySeconds                 int `json:"member_affinity_seconds" binding:"omitempty,min=0"`                    // 成员亲和时间:故障切换成功后继续保持当前成员的秒数;当前成员失败会立即结束亲和,0 表示不保持。
+	// 首个事件之后的「无进展」上限（T-timeout-001）。上游吐了首帧就再也不出字时，原先没有任何上限：
+	// 首帧超时定时器在首个事件到达后就停掉了，转发循环会一直阻塞在读事件上，直到客户端自己放弃
+	// （线上日志实证：流式请求挂着 300–760 秒才被客户端断开，而当时配的首帧超时只有 25 秒）。
+	// 语义：两次「进展」之间（收到一个上游事件 或 成功写给客户端一帧）的最长间隔，命中即结束本次响应。
+	// 0 = 关闭该保护（保持旧行为）。默认 300 秒是刻意留宽：部分中转站是「假流式」——先发一个
+	// 角色空帧，正文等整段生成完才一次性下发，静默间隔可能长于普通的逐字流式。
+	MemberStreamIdleTimeoutSeconds int `json:"member_stream_idle_timeout_seconds" binding:"omitempty,min=0"`
+	MemberCooldownSeconds          int `json:"member_cooldown_seconds" binding:"omitempty,min=1"` // 单个成员耗尽尝试后被跳过的秒数，仅在故障转移模式生效。
+	MemberAffinitySeconds          int `json:"member_affinity_seconds" binding:"omitempty,min=0"` // 成员亲和时间:故障切换成功后继续保持当前成员的秒数;当前成员失败会立即结束亲和,0 表示不保持。
 	// 首字竞速 (T-hedge-001): 提交首字节之前并发向排序靠前的多个成员发同一请求, 取最快给出有效响应者。
 	// 默认关闭: 竞速意味着同一份输入可能被多个上游各处理一次, 上游按 token 计费时最坏付 width 份钱。
 	HedgeEnabled      bool `json:"hedge_enabled"`                                         // 是否开启首字竞速。
@@ -52,6 +59,7 @@ func DefaultGroupRelayConfig() GroupRelayConfig {
 		MemberRetryIntervalSeconds:            3,
 		MemberNonStreamResponseTimeoutSeconds: 120,
 		MemberStreamFirstEventTimeoutSeconds:  30,
+		MemberStreamIdleTimeoutSeconds:        300,
 		MemberCooldownSeconds:                 60,
 		MemberAffinitySeconds:                 300,
 		HedgeWidth:                            2,
@@ -77,6 +85,11 @@ func NormalizeGroupRelayConfig(config *GroupRelayConfig) {
 	}
 	if config.MemberStreamFirstEventTimeoutSeconds < 1 {
 		config.MemberStreamFirstEventTimeoutSeconds = defaults.MemberStreamFirstEventTimeoutSeconds
+	}
+	// 与其它超时不同, 这里**不**用默认值兜底: 0 是「关闭该保护」的合法取值, 已经存在的分组
+	// （存量 JSON 里没有这个键）升上来时保持旧行为不变, 是否收紧由使用方在面板上显式决定。
+	if config.MemberStreamIdleTimeoutSeconds < 0 {
+		config.MemberStreamIdleTimeoutSeconds = 0
 	}
 	if config.MemberCooldownSeconds < 1 {
 		config.MemberCooldownSeconds = defaults.MemberCooldownSeconds
