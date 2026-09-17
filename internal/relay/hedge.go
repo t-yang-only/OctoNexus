@@ -157,6 +157,28 @@ func cloneHTTPRequest(src *httpclient.Request) *httpclient.Request {
 	return &clone
 }
 
+// rankedHedgeCandidatesWithFeatures 是带请求特征的竞速候选入口。
+//
+// 智能路由（T-smart-001）下**只在选中那一档内竞速**：档位决定「去哪一档」，竞速只决定「这一档里谁先答」。
+// 不这样收口的话，简单请求会因为竞速把靠前的强成员也拉进来跑一遍 —— 复杂度的成本控制被竞速悄悄绕过，
+// 而且用户会看到简单请求也在花贵渠道的钱（竞速本身就是要多发一份请求的）。
+// 档内没有可竞速成员时与选路一致地回退到全体成员。其余模式行为与不带特征时逐字一致。
+func (deps routeDeps) rankedHedgeCandidatesWithFeatures(group model.Group, features SmartFeatures) []model.GroupItem {
+	if group.Mode != model.GroupModeSmart {
+		return deps.rankedHedgeCandidates(group)
+	}
+	tiered := SmartTierItems(group.Items, SmartComplex(features, group.RelayConfig.SmartRouteThreshold))
+	if len(tiered) > 0 {
+		tierGroup := group
+		tierGroup.Mode = model.GroupModeFailover // 档内走 failover 口径（含加权轮询与延迟档内排序）
+		tierGroup.Items = tiered
+		if ranked := deps.rankedHedgeCandidates(tierGroup); len(ranked) > 0 {
+			return ranked
+		}
+	}
+	return deps.rankedHedgeCandidates(group)
+}
+
 // rankedHedgeCandidates 返回该分组按当前模式排序、且可参与竞速的成员（冷却中/不可用/额度归零的不参与）。
 func (deps routeDeps) rankedHedgeCandidates(group model.Group) []model.GroupItem {
 	routeMu.Lock()

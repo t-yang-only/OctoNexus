@@ -169,7 +169,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				if settings.peak > 0 && groupInFlight(metadata.Model) >= settings.peak {
 					hedgeImmediately = true
 				}
-				candidates := hotRouteDeps().rankedHedgeCandidates(group.WithItems(op.FlattenGroupItems(group)))
+				// 智能路由下竞速只在选中那一档内进行（见 rankedHedgeCandidatesWithFeatures）：
+				// 否则简单请求会连强成员一起跑，复杂度分档的成本控制被竞速绕过。
+				candidates := hotRouteDeps().rankedHedgeCandidatesWithFeatures(group.WithItems(op.FlattenGroupItems(group)), smartFeatures)
 				for _, candidate := range candidates {
 					if len(hedgeTargets) >= settings.width-1 {
 						break
