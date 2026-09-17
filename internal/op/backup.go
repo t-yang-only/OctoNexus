@@ -88,7 +88,7 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 	}
 
 	conn := db.GetDB().WithContext(ctx)
-	res := &model.DBImportResult{RowsAffected: map[string]int64{}}
+	res := &model.DBImportResult{RowsAffected: map[string]int64{}, Skipped: map[string]int64{}}
 	err := conn.Transaction(func(tx *gorm.DB) error {
 		// base tables
 		if n, err := createRowsRaw(tx, dump.Channels, nil, true); err != nil {
@@ -109,6 +109,16 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 			return fmt.Errorf("import groups: %w", err)
 		} else {
 			res.RowsAffected["groups"] = n
+		}
+		// 基础表就位后再过滤孤儿子行: 备份可能带着"父行已被删除"的残留（渠道删了、凭据/模型/授权/分组成员的
+		// 行还在），直接插入会撞外键约束而让整份备份导入失败（上游 PR #344 的同类问题）。
+		// 过滤只丢确定无法插入的行, 数量如实回报, 不静默。
+		if skipped, err := sanitizeOrphanRows(tx, dump); err != nil {
+			return err
+		} else {
+			for table, count := range skipped {
+				res.Skipped[table] = count
+			}
 		}
 		if n, err := createRowsRaw(tx, dump.ChannelKeys, []clause.Column{{Name: "id"}}, false); err != nil {
 			return fmt.Errorf("import channel_keys: %w", err)
@@ -173,6 +183,136 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 		return nil, err
 	}
 	return res, nil
+}
+
+// sanitizeOrphanRows 过滤转储里引用已不存在父行的孤儿子行, 返回按表统计的丢弃数量。
+//
+// 为什么要做（对齐上游 PR #344）: 备份是"某时刻的快照", 而快照里的子行可能指向早已删除的父行 ——
+// 渠道删除后残留的凭据/模型/授权行、授权删除后残留的分组成员行等。这些行本身插不进去
+// （外键约束), 却会让**整份备份导入失败**, 于是一个孤儿行就能挡住用户恢复全部数据。
+// 有效父键集合 = 本次转储里的父行 ∪ 库里已存在的父行（导入是增量语义, 父行可能早就在库里）。
+//
+// 只丢确定无法插入的行, 且数量如实回给调用方, 不做静默"修复"。
+func sanitizeOrphanRows(tx *gorm.DB, dump *model.DBDump) (map[string]int64, error) {
+	skipped := map[string]int64{}
+
+	// 按依赖顺序逐层过滤: 子行的有效父键必须取自**过滤后**的上层集合,
+	// 否则"父行自己就是孤儿"的子行会被误判为合法（先算出来的集合里还带着即将被丢掉的行）。
+	channelIDs, err := validParentIDs(tx, &model.Channel{}, idsOf(dump.Channels, func(row model.Channel) int { return row.ID }))
+	if err != nil {
+		return nil, err
+	}
+
+	keys := dump.ChannelKeys[:0]
+	for _, row := range dump.ChannelKeys {
+		if channelIDs[row.ChannelID] {
+			keys = append(keys, row)
+			continue
+		}
+		skipped["channel_keys"]++
+	}
+	dump.ChannelKeys = keys
+
+	models := dump.ChannelModels[:0]
+	for _, row := range dump.ChannelModels {
+		if channelIDs[row.ChannelID] {
+			models = append(models, row)
+			continue
+		}
+		skipped["channel_models"]++
+	}
+	dump.ChannelModels = models
+
+	keyIDs, err := validParentIDs(tx, &model.ChannelKey{}, idsOf(dump.ChannelKeys, func(row model.ChannelKey) int { return row.ID }))
+	if err != nil {
+		return nil, err
+	}
+	modelIDs, err := validParentIDs(tx, &model.ChannelModel{}, idsOf(dump.ChannelModels, func(row model.ChannelModel) int { return row.ID }))
+	if err != nil {
+		return nil, err
+	}
+
+	grants := dump.ChannelGrants[:0]
+	for _, row := range dump.ChannelGrants {
+		if modelIDs[row.ChannelModelID] && keyIDs[row.ChannelKeyID] {
+			grants = append(grants, row)
+			continue
+		}
+		skipped["channel_grants"]++
+	}
+	dump.ChannelGrants = grants
+
+	groupIDs, err := validParentIDs(tx, &model.Group{}, idsOf(dump.Groups, func(row model.Group) int { return row.ID }))
+	if err != nil {
+		return nil, err
+	}
+	grantIDs, err := validParentIDs(tx, &model.ChannelGrant{}, idsOf(dump.ChannelGrants, func(row model.ChannelGrant) int { return row.ID }))
+	if err != nil {
+		return nil, err
+	}
+
+	items := dump.GroupItems[:0]
+	for _, row := range dump.GroupItems {
+		if !groupIDs[row.GroupID] {
+			skipped["group_items"]++
+			continue
+		}
+		// 授权成员 (ChannelGrantID) 与子分组成员 (ChildGroupID) 互为互斥的两侧, 只校验非空那一侧。
+		if row.ChannelGrantID != nil && !grantIDs[*row.ChannelGrantID] {
+			skipped["group_items"]++
+			continue
+		}
+		if row.ChildGroupID != nil && !groupIDs[*row.ChildGroupID] {
+			skipped["group_items"]++
+			continue
+		}
+		items = append(items, row)
+	}
+	dump.GroupItems = items
+
+	apiKeyIDs, err := validParentIDs(tx, &model.APIKey{}, idsOf(dump.APIKeys, func(row model.APIKey) int { return row.ID }))
+	if err != nil {
+		return nil, err
+	}
+	apiKeyStats := dump.StatsAPIKey[:0]
+	for _, row := range dump.StatsAPIKey {
+		if apiKeyIDs[row.APIKeyID] {
+			apiKeyStats = append(apiKeyStats, row)
+			continue
+		}
+		skipped["stats_api_key"]++
+	}
+	dump.StatsAPIKey = apiKeyStats
+
+	return skipped, nil
+}
+
+// idsOf 取出转储行里的主键集合（跳过 0: 未落库的行没有主键）。
+func idsOf[T any](rows []T, id func(T) int) map[int]bool {
+	out := make(map[int]bool, len(rows))
+	for _, row := range rows {
+		if value := id(row); value != 0 {
+			out[value] = true
+		}
+	}
+	return out
+}
+
+// validParentIDs 把"过滤后仍在转储里的主键"与"库里已有的主键"合并成有效父键集合。
+// 调用前必须先完成上层的过滤, 否则集合里会带着即将被丢掉的行。
+func validParentIDs(tx *gorm.DB, dest any, fromDump map[int]bool) (map[int]bool, error) {
+	valid := make(map[int]bool, len(fromDump))
+	for id := range fromDump {
+		valid[id] = true
+	}
+	var existing []int
+	if err := tx.Model(dest).Pluck("id", &existing).Error; err != nil {
+		return nil, fmt.Errorf("query %T ids for orphan filtering: %w", dest, err)
+	}
+	for _, id := range existing {
+		valid[id] = true
+	}
+	return valid, nil
 }
 
 // batchSize 控制每次 INSERT 的最大行数。

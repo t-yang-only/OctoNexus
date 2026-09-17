@@ -89,6 +89,10 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		failedItemID := 0 // 当前累计连续失败次数的成员 ID。
 		failures := 0     // 该成员包含首次请求的连续失败次数。
+		attempts := 0     // 本请求已经打向上游的尝试次数（用于单请求尝试上限）。
+		var lastErr error // 最近一次上游失败原因（上限触发时回给客户端）。
+		// rejectedItems 是本请求内被上游判定为"请求本身非法"而拒绝过的成员: 同一份请求再发给它只会被同样拒绝。
+		rejectedItems := map[int]bool{}
 
 		for {
 			if ctx.Err() != nil {
@@ -112,7 +116,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			// 同包内直接调用, 不经导出外壳 (外壳专供单测与外部消费)。
 			// 加权轮询 flag (T-route-002) 默认关: 关时行为与原路径完全一致;
 			// 开时仅改 failover 候选定序, 冷却/探测/亲和仍归顶层 RouteState。
-			item := pickGroupItemHot(group.WithItems(op.FlattenGroupItems(group)))
+			// 已被上游以"请求本身非法"拒绝的成员在本请求内不再重复尝试（其余成员正常参与选路）。
+			items := dropRejectedMembers(op.FlattenGroupItems(group), rejectedItems)
+			item := pickGroupItemHot(group.WithItems(items))
 			if item.ID == 0 {
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
 					return
@@ -235,6 +241,28 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					continue
 				}
 				cancelRound()
+				// 单请求尝试次数上限: 成员持续不可用时不再无限重试（上游 issue #388/#338),
+				// 给客户端一个明确的失败响应, 而不是让它自己超时、后台还在每秒打上游。
+				// 计数放在处置分支之前, 覆盖所有失败类别（含"请求本身非法"的快速失败）,
+				// 嵌套分组等异常情形也不会绕过上限。
+				attempts++
+				lastErr = err
+				if attempts >= attemptCap(len(op.FlattenGroupItems(group)), group.RelayConfig.MemberMaxAttempts) {
+					failRequest(c, inbound, request, lastErr)
+					return
+				}
+				disposition := classifyUpstreamFailure(err)
+				// 请求本身被上游判定为非法（400/413/422 等）: 换成员同样会被拒绝, 因此既不计成员失败
+				// （那不是成员的锅, 计了会拉低成员质量）、也不打冷却（否则一个坏请求就能把健康成员冻住),
+				// 只把该成员记入本请求的拒绝集合后换下一个; 全部成员都拒绝时以明确错误结束请求。
+				if disposition == dispositionRequestFault {
+					rejectedItems[item.ID] = true
+					if allMembersRejected(op.FlattenGroupItems(group), rejectedItems) {
+						failRequest(c, inbound, request, errors.New(requestFaultMessage(err)))
+						return
+					}
+					continue
+				}
 				// 本轮真实失败只计入当前渠道和成员, 客户端取消与人工中止不计为渠道故障。
 				metrics := model.StatsMetrics{WaitTime: time.Since(roundStartedAt).Milliseconds(), RequestFailed: 1}
 				_ = op.ChannelStatsUpdate(channel.ID, metrics)
@@ -248,11 +276,16 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					failedItemID = item.ID
 					failures = 1
 				}
-				// 达到总尝试次数时成员进入冷却并立即重新选路, 否则等待后重试。
+				// 成员自身的问题（401/403/404 等）重试没有意义: 按尝试次数已用尽处理, 立即冷却换人。
+				if disposition == dispositionMemberFault && failures < group.RelayConfig.MemberMaxAttempts {
+					failures = group.RelayConfig.MemberMaxAttempts
+				}
+				// 达到总尝试次数时成员进入冷却并立即重新选路, 否则按退避等待后重试。
 				if recordRouteFailure(group, item.ID, failures, time.Since(roundStartedAt).Milliseconds()) {
 					continue
 				}
-				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
+				// 退避: 同一成员连续失败时把重试间隔逐次翻倍（封顶 30 秒）, 避免每秒一次地打上游。
+				if !request.wait(ctx, retryBackoff(group.RelayConfig.MemberRetryIntervalSeconds, failures)) {
 					return
 				}
 				continue
@@ -375,9 +408,12 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			// 流式响应结束并聚合出用量后, 按最终结果完成本轮渠道和成员统计。
 			metrics := usageMetrics(channelModel.Name, result.usage)
 			metrics.WaitTime = roundWaitTime
+			// 与提交前的口径保持一致: 客户端在首字节之后离开（ctx 结束）不算成员故障。
+			// 否则客户端自己的超时/取消会持续拉低成员质量 —— 线上假死探针的 123 次超时取消
+			// 就是这样把 11 个健康成员误判成假死并降级的（见日志包 README 与 T-retry-001）。
 			if err == nil {
 				metrics.RequestSuccess = 1
-			} else {
+			} else if ctx.Err() == nil {
 				metrics.RequestFailed = 1
 			}
 			_ = op.ChannelStatsUpdate(channel.ID, metrics)
@@ -395,6 +431,59 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			return
 		}
 	}
+}
+
+// failRequest 在请求已经没有希望时给客户端一个明确的失败响应。
+//
+// 触发条件: 单请求尝试次数达到上限（上游 issue #388/#338 的无限重试）, 或所有成员都以
+// "请求本身非法" 拒绝了同一份请求。没有这个出口时, 重试循环会一直转到客户端自己超时为止 ——
+// 客户端看到的是"卡住", 而服务端还在每秒一次地打上游。
+func failRequest(c *gin.Context, inbound transformer.Inbound, request *RequestState, err error) {
+	message := "all members failed"
+	if err != nil && err.Error() != "" {
+		message = err.Error()
+	}
+	request.markFailed(err, "", nil)
+	response := inbound.TransformError(c.Request.Context(), &llm.ResponseError{
+		StatusCode: http.StatusBadGateway,
+		Detail:     llm.ErrorDetail{Message: message, Type: "upstream_error"},
+	})
+	c.Data(response.StatusCode, "application/json", response.Body)
+	c.Abort()
+}
+
+// dropRejectedMembers 去掉本请求内已被上游判定为"请求本身非法"而拒绝过的成员。
+// 全部成员都被拒绝时保持原样返回: 该情形由 allMembersRejected 直接结束请求, 不依赖这里兜底。
+func dropRejectedMembers(items []model.GroupItem, rejected map[int]bool) []model.GroupItem {
+	if len(rejected) == 0 {
+		return items
+	}
+	kept := make([]model.GroupItem, 0, len(items))
+	for _, item := range items {
+		if rejected[item.ID] {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if len(kept) == 0 {
+		return items
+	}
+	return kept
+}
+
+// allMembersRejected 报告分组里是否已经每个成员都被"请求本身非法"拒绝过。
+// 传展平后的成员列表（而非分组顶层项）: 嵌套分组下顶层项是子分组, 其主键与成员行主键不同。
+// 此时继续换成员没有意义, 请求应当以明确错误结束而不是空转。
+func allMembersRejected(members []model.GroupItem, rejected map[int]bool) bool {
+	if len(members) == 0 {
+		return false
+	}
+	for _, item := range members {
+		if !rejected[item.ID] {
+			return false
+		}
+	}
+	return true
 }
 
 // rejectRequest 以客户端协议的错误格式返回请求级失败, 用于尚未登记状态因而无需定稿的请求。

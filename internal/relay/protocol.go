@@ -52,6 +52,9 @@ func buildPassthroughRequest(format llm.APIFormat, raw *httpclient.Request, chan
 	if err := applyChannelConfig(channel, request); err != nil {
 		return nil, err
 	}
+	// 同协议透传也要做 developer→system 归一化: 客户端(如 Codex 系)会用 developer 角色携带指令,
+	// 而不少 OpenAI 兼容中转站只认 system（跨协议路径在 conversionMiddleware 里同样调用）。
+	normalizeDeveloperRole(format, request)
 	return request, nil
 }
 

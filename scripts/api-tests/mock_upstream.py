@@ -48,7 +48,8 @@ STALL_SECONDS = float(os.environ.get("MOCK_STALL_SECONDS", "120"))
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requests.jsonl")
 _lock = threading.Lock()
 
-MODELS = ["mock-good", "mock-slow", "mock-bad", "mock-chatonly", "mock-stall"]
+MODELS = ["mock-good", "mock-slow", "mock-bad", "mock-chatonly", "mock-stall",
+          "mock-reject400", "mock-reject401"]
 
 # FORCED 是运行期行为覆盖: 模型名 → "ok"/"bad"/"slow"。探活用例要证明"上游恢复后冷却被提前解除",
 # 就需要在实例运行中把某个模型从失败翻成健康, 改模型名做不到 (成员模型名是落库配置)。
@@ -217,6 +218,13 @@ class Handler(BaseHTTPRequestHandler):
         if forced == "bad" or (forced is None and "bad" in model):
             self._send_json(500, {"error": {"message": "mock upstream forced failure", "type": "mock_error"}})
             return
+        # 确定性错误桩 (T-retry-001): 名字里带 reject400 / reject401 的模型按对应状态码拒绝,
+        # 用来验证「请求本身非法」与「成员自身问题」两类错误不再被反复重试。
+        for status, marker in ((400, "reject400"), (401, "reject401")):
+            if forced == marker or (forced is None and marker in model):
+                self._send_json(status, {"error": {"message": "mock upstream rejected (%d)" % status,
+                                                   "type": "mock_reject"}})
+                return
 
         if self.path.endswith("/chat/completions"):
             return self._chat(model, stream)

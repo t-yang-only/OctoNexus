@@ -27,4 +27,7 @@ type DBDump struct {
 type DBImportResult struct {
 	// RowsAffected contains the rows affected for each table operation (insert/upsert depending on table).
 	RowsAffected map[string]int64 `json:"rows_affected"`
+	// Skipped 是按表统计的"孤儿行"数量: 引用已不存在父行、插进去只会撞外键的行。
+	// 导入跳过它们并在此如实回报, 既不静默丢弃也不让整份备份因一行残留而导入失败。
+	Skipped map[string]int64 `json:"skipped,omitempty"`
 }

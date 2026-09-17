@@ -66,6 +66,8 @@ SUITES = [
     ("hedge", "run_hedge_test.py", "首字竞速（触发条件/快者胜出/落选不计失败/宽度校验）", "instance,mock,db"),
     ("streamidle", "run_stream_idle_test.py",
      "流式无进展上限（首帧后静默不再挂到客户端放弃 / 记账为真实失败 / 不换目标重试 / 0=关闭）", "instance,mock,db"),
+    ("retry", "run_retry_test.py",
+     "重试语义（尝试上限终结 / 确定性错误不重试 / 成员问题立即换人 / developer 角色归一化）", "instance,mock,db"),
     ("weighted", "run_weighted_test.py", "加权综合选路（换权重换选择 / 全 0 退化 priority / 越界权重拒绝）", "instance,mock,db"),
     ("combo", "run_combo_test.py", "组合场景（加权×计费×竞速×流式×冷却×日志统计叠在一起）", "instance,mock,db"),
     ("backup", "run_backup_import_test.py",
