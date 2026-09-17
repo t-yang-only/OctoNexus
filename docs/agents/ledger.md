@@ -159,3 +159,7 @@
 | | 备注：8/8 通过 —— S1 简单→执行档、S2 复杂→决策档、S3 灵敏度阶梯（单项 33 分不够、任意两项 ≥66 分够）、S4 阈值 70/60 两侧翻转、S5 决策档上游必失败时回退到执行档且 HTTP 200、S6 流式同样分档、S7 切回 failover 后不看请求形状。已注册进 run_all.py（矩阵第 28 套）。夹具用两个渠道（强=mock-good / 快=mock-plain）+ 一个必失败渠道（mock-bad）驱动冷却。 | 2026-09-17 17:35:59 |
 | T-smart-003 | 智能路由进面板：模式选项 + 阈值输入（仅 smart 模式显示）+ 三语文案 + 面板套件 P9 | web/src/components/modules/group/Editor.tsx | done | 2026-09-17 17:35:59 |
 | | 备注：按「加模式要同步的地方」逐处落地 —— 常量/IsValid/三处 binding oneof（后端）、GroupMode 联合类型、Editor 下拉项与 `smart_route_threshold` 输入、三语 `form.smart`/`smartThreshold`/`smartThresholdHint`；`npx tsc --noEmit` 0、面板套件 9/9（新增 P9 断言模式文案与阈值字段真的进了产物）。 | 2026-09-17 17:35:59 |
+| T-smart-004 | 首字竞速不越档：竞速候选在智能路由下收敛到选中那一档 | internal/relay/hedge.go | done | 2026-09-17 18:30:11 |
+| | 备注：竞速候选原先走 hedge.go 自己的模式分派, smart 落默认分支会把全体成员当候选, 简单请求因此可能把强成员拉进竞速（成本控制被绕过）。新增 rankedHedgeCandidatesWithFeatures：档内竞速（failover 口径）+ 档内无人时与选路一致回退全体；其余模式逐字不变。单测 TestRankedHedgeCandidatesStaysInsideTier + 活体 S8（简单请求尝试 ['mock-plain','mock-plain']、复杂请求 ['mock-good','mock-good']）。 | 2026-09-17 18:30:11 |
+| T-smart-005 | 智能路由判据的变异检查（档位切分/评分维度/回退/竞速收敛四处守卫） | internal/relay/smart.go | done | 2026-09-17 18:30:11 |
+| | 备注：SM1 严格执行档返回全体 → S1 红（简单请求命中 mock-good）；SM2 工具维不计分 → S3 红（两条依赖工具数的阶梯掉到执行档）；SM3 去掉回退 → S5 红（复杂请求 HTTP 502、不再回退到执行档）；SM4 竞速不收敛档位 → S8 红（复杂请求尝试里出现 mock-plain）。四条均如期变红, 跑完自动还原重建并复跑 streamidle 9/9、retry 9/9 全绿。 | 2026-09-17 18:30:11 |
