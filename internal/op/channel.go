@@ -381,6 +381,12 @@ func channelRefreshCache(ctx context.Context) error {
 	if err := conn.Find(&channelKeys).Error; err != nil {
 		return err
 	}
+	// 库内是密文、进程内是明文（R-sec-001）：装载是唯一的解密点，解不开就整次刷新失败，
+	// 免得把密文当凭据缓存下来（那样只会在转发时变成上游 401，查不出原因）。
+	if err := DecryptChannelKeyRows(channelKeys); err != nil {
+		log.Errorf("failed to decrypt channel keys: %v", err)
+		return err
+	}
 	channelModels := []model.ChannelModel{}
 	if err := conn.Find(&channelModels).Error; err != nil {
 		return err
@@ -416,6 +422,9 @@ func reloadChannelChildren(ctx context.Context, channelID int) error {
 	channelKeys := []model.ChannelKey{}
 	if err := conn.Where("channel_id = ?", channelID).Find(&channelKeys).Error; err != nil {
 		return fmt.Errorf("failed to load channel keys: %w", err)
+	}
+	if err := DecryptChannelKeyRows(channelKeys); err != nil {
+		return fmt.Errorf("failed to decrypt channel keys: %w", err)
 	}
 	channelModels := []model.ChannelModel{}
 	if err := conn.Where("channel_id = ?", channelID).Find(&channelModels).Error; err != nil {
@@ -549,6 +558,10 @@ func syncChannelKeys(tx *gorm.DB, channelID int, inputs []model.ChannelKeyInput)
 	if err := tx.Where("channel_id = ?", channelID).Find(&existing).Error; err != nil {
 		return fmt.Errorf("failed to load channel keys: %w", err)
 	}
+	// 比对必须是明文对明文：库内是密文，直接比会让「值没变」永远判成变了。
+	if err := DecryptChannelKeyRows(existing); err != nil {
+		return err
+	}
 	existingByName := make(map[string]model.ChannelKey, len(existing))
 	for _, channelKey := range existing {
 		existingByName[channelKey.Name] = channelKey
@@ -562,7 +575,7 @@ func syncChannelKeys(tx *gorm.DB, channelID int, inputs []model.ChannelKeyInput)
 				// 号池同步重新打开(实测同步对 active 账号是无条件启用的)。
 				if err := tx.Model(&model.ChannelKey{}).Where("id = ?", current.ID).
 					Updates(map[string]any{
-						"key":               requestedKey.Key,
+						"key":               sealChannelKeyForStore(requestedKey.Key),
 						"enabled":           requestedKey.Enabled,
 						"operator_disabled": !requestedKey.Enabled,
 					}).Error; err != nil {
@@ -572,7 +585,9 @@ func syncChannelKeys(tx *gorm.DB, channelID int, inputs []model.ChannelKeyInput)
 			delete(existingByName, requestedKey.Name)
 			continue
 		}
-		newKey := model.ChannelKey{ChannelID: channelID, ChannelKeyConfig: requestedKey}
+		stored := requestedKey
+		stored.Key = sealChannelKeyForStore(requestedKey.Key)
+		newKey := model.ChannelKey{ChannelID: channelID, ChannelKeyConfig: stored}
 		if err := tx.Create(&newKey).Error; err != nil {
 			return fmt.Errorf("failed to create channel key: %w", err)
 		}

@@ -58,6 +58,8 @@ SUITES = [
     ("poolapi", "run_pool_api_test.py", "号池扩展层（后端自描述 / 统一视图 / 凭据不泄漏 / 计数一致）", "instance,db"),
     ("pooldecl", "run_pool_declarative_test.py",
      "声明式适配器（白名单 fail closed / 只读能力位 / 不回显凭据 / 只读 APIKey 通道）", "instance,mock"),
+    ("cipher", "run_credential_encryption_test.py",
+     "渠道凭据静态加密（落库密文 / 端到端解密 / 判据自检 / 全库无明文）", "instance,db,mock"),
     ("panel", "run_panel_asset_test.py", "面板静态资源（页面随二进制发布 / 三语文案齐全）", "instance"),
     ("apikey", "run_apikey_audit.py", "Key 级审计（限流/过期/禁用/额度/越权/登录/流/中止）", "instance,mock"),
     ("costmode", "run_costmode_test.py", "最低成本选路", "instance,real"),
