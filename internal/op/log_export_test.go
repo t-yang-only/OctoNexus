@@ -20,7 +20,7 @@ func TestRelayLogExportCSVShape(t *testing.T) {
 	relayLogSaveOn(conn, model.RelayLog{
 		RequestID: 11, Status: "success", Model: "DS-TEST-formats", TargetModel: "mock-good",
 		TargetChannel: "DS-TEST-mock", TargetProtocol: int(model.ProtocolAnthropicMessage),
-		FirstByteMs: 12, DurationMs: 340, PromptTokens: 11, CachedTokens: 3, CompletionToks: 7,
+		FirstByteMs: 12, DurationMs: 340, Attempts: 3, PromptTokens: 11, CachedTokens: 3, CompletionToks: 7,
 		Cost: 0.000123, APIKeyName: "k1", CreatedAt: created,
 	})
 	// 未提交首字节的请求在库内是 -1, 导出必须给空串(表格工具按"无数据"处理)。
@@ -49,7 +49,8 @@ func TestRelayLogExportCSVShape(t *testing.T) {
 	if len(records) != 3 {
 		t.Fatalf("records=%d, want 1 header + 2 rows", len(records))
 	}
-	if records[0][0] != "日志ID" || records[0][1] != "请求ID" || records[0][7] != "上游协议" || records[0][15] != "错误" {
+	if records[0][0] != "日志ID" || records[0][1] != "请求ID" || records[0][7] != "上游协议" ||
+		records[0][10] != "上游轮次" || records[0][16] != "错误" {
 		t.Fatalf("header=%v", records[0])
 	}
 	first, second := records[1], records[2]
@@ -69,11 +70,14 @@ func TestRelayLogExportCSVShape(t *testing.T) {
 	if first[8] != "12" || second[8] != "" {
 		t.Fatalf("first byte column=%q,%q, want 12 and empty (never committed)", first[8], second[8])
 	}
-	if first[13] != "0.000123" {
-		t.Fatalf("cost column=%q, want the stored float", first[13])
+	if first[10] != "3" || second[10] != "0" {
+		t.Fatalf("attempts column=%q,%q, want 3 and 0 (never reached upstream)", first[10], second[10])
 	}
-	if second[15] != "context canceled" {
-		t.Fatalf("error column=%q", second[15])
+	if first[14] != "0.000123" {
+		t.Fatalf("cost column=%q, want the stored float", first[14])
+	}
+	if second[16] != "context canceled" {
+		t.Fatalf("error column=%q", second[16])
 	}
 }
 
@@ -98,8 +102,8 @@ func TestRelayLogExportCSVEscapesAndFilters(t *testing.T) {
 	if records[1][1] != "21" {
 		t.Fatalf("filtered row request id=%s, want 21", records[1][1])
 	}
-	if records[1][15] != errorText {
-		t.Fatalf("error text round trip = %q, want the original with comma/quote/newline", records[1][15])
+	if records[1][16] != errorText {
+		t.Fatalf("error text round trip = %q, want the original with comma/quote/newline", records[1][16])
 	}
 }
 

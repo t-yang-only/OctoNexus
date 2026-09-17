@@ -135,6 +135,15 @@ def main():
         "缺 %s" % (missing_smart or "无"),
     )
 
+    # P10 日志卡片的上游轮次（上游 #395 的「重试详情」最小切片）：字段键被界面引用 + 三语文案进产物。
+    attempts_markers = ["attempts", "上游轮次", "上游輪次", "Upstream rounds"]
+    missing_attempts = [marker for marker in attempts_markers if marker not in bundle]
+    record(
+        "P10 日志卡片显示上游轮次（字段被引用 + 三语文案）",
+        not missing_attempts,
+        "缺 %s" % (missing_attempts or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(

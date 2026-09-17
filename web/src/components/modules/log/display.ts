@@ -28,6 +28,9 @@ export interface LogDisplayFields {
     startedAtMs: number;
     firstByteMs: number; // 未提交为 -1。
     durationMs: number;
+    // attempts 是本请求打向上游的轮次数: 1 = 第一次就出结果, >1 = 中途换过成员(重试/换人),
+    // 0 = 还没发起过上游请求就结束了。首字竞速的多路并发算一轮。
+    attempts: number;
     elapsedMs: number; // 速率类指标（TPS）的除数。
     promptTokens: number;
     cachedTokens: number;
@@ -103,6 +106,8 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
         startedAtMs,
         firstByteMs,
         durationMs,
+        // 实时快照还没有落库值, 用它当前的轮次序号(与面板上的"第几轮"同源); 历史行用落库的上游轮次。
+        attempts: live ? source.round ?? 0 : source.attempts ?? 0,
         elapsedMs: running ? (startedAtMs > 0 ? Math.max(0, now - startedAtMs) : 0) : durationMs,
         promptTokens,
         cachedTokens,

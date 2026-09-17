@@ -315,6 +315,20 @@ def main():
            status == 200 and hits == [REJECT400, GOOD] and failed_before == failed_after,
            "HTTP %s 耗时 %ss 尝试=%s 成员失败计数 %s→%s" % (status, secs, hits, failed_before, failed_after))
 
+    # R10 日志里能看到这次请求打了几轮上游（上游 #395「重试详情」的最小可用切片）:
+    # 排障时"这次为什么慢"先看这个数 —— >1 就是换过成员, 与耗时/首字时间一起看才能分清是上游慢还是换人换出来的。
+    # 断言用同一套夹具已有的两条日志: 耗尽上限的 R1（6 轮）与换人成功的 R3（2 轮）。
+    hist = call("GET", "/api/v1/log/history?limit=40&offset=0")
+    items = ((hist[1] or {}).get("data") or {}).get("items") or []
+    cap_row = next((r for r in items if r.get("model") == GROUP_CAP), None)
+    pair_row = next((r for r in items if r.get("model") == GROUP_400_PAIR), None)
+    cap_attempts = (cap_row or {}).get("attempts")
+    pair_attempts = (pair_row or {}).get("attempts")
+    record("R10 日志记录上游轮次（耗尽上限=6 / 换人成功=2）",
+           cap_attempts == EXPECTED_SOLO_CAP and pair_attempts == 2,
+           "上限用例 attempts=%s（期望 %d）; 换人用例 attempts=%s（期望 2）"
+           % (cap_attempts, EXPECTED_SOLO_CAP, pair_attempts))
+
     # R4 成员自身问题（401）: 记 1 次失败并立即换人, 不耗尽该成员的全部尝试次数。
     failed_before = model_failed(REJECT401)
     offset = mark()
