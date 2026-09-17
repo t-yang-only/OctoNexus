@@ -5,7 +5,9 @@ import { queryClient } from './client';
 import { groupListQueryOptions } from './queries';
 
 // GroupMode 表示分组的手动或故障转移路由模式。
-export type GroupMode = 'manual' | 'failover' | 'lowest_cost' | 'quality_first' | 'lowest_latency' | 'least_busy' | 'lowest_tpm_rpm' | 'weighted';
+export type GroupMode = 'manual' | 'failover' | 'lowest_cost' | 'quality_first' | 'lowest_latency' | 'least_busy' | 'lowest_tpm_rpm' | 'weighted' | 'smart';
+// smart 是智能路由（对齐阶跃 Step Router 的用法）：按请求特征（轮数/输入量/工具数）判复杂度，
+// 复杂走靠前的成员、简单走靠后的成员；阈值见 relay_config.smart_route_threshold。
 
 // GroupRelayConfig 保存分组 Relay 配置。
 export interface GroupRelayConfig {
@@ -22,6 +24,8 @@ export interface GroupRelayConfig {
     hedge_width: number;
     hedge_after_ms: number;
     hedge_peak_in_flight: number;
+    // 智能路由（mode = smart）的复杂度阈值 1..100，缺省 50：评分 ≥ 阈值走靠前的成员（决策引擎档）。
+    smart_route_threshold: number;
 }
 
 // GroupItem 是分组内一条可路由的成员：或引用一条渠道授权，或引用一个子分组，二者互斥。

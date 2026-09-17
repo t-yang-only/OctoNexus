@@ -93,6 +93,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 		var lastErr error // 最近一次上游失败原因（上限触发时回给客户端）。
 		// rejectedItems 是本请求内被上游判定为"请求本身非法"而拒绝过的成员: 同一份请求再发给它只会被同样拒绝。
 		rejectedItems := map[int]bool{}
+		// 智能路由（GroupModeSmart）的请求特征：只看客户端原始正文，与目标协议无关，
+		// 因此整轮循环里算一次即可（同一份请求无论换到哪个成员，复杂度判定都不该变）。
+		smartFeatures := SmartScoreBody(raw.Body)
 
 		for {
 			if ctx.Err() != nil {
@@ -118,7 +121,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			// 开时仅改 failover 候选定序, 冷却/探测/亲和仍归顶层 RouteState。
 			// 已被上游以"请求本身非法"拒绝的成员在本请求内不再重复尝试（其余成员正常参与选路）。
 			items := dropRejectedMembers(op.FlattenGroupItems(group), rejectedItems)
-			item := pickGroupItemHot(group.WithItems(items))
+			item := pickGroupItemHotWithFeatures(group.WithItems(items), smartFeatures)
 			if item.ID == 0 {
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
 					return

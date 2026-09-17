@@ -69,6 +69,8 @@ SUITES = [
     ("retry", "run_retry_test.py",
      "重试语义（尝试上限终结 / 确定性错误不重试 / 成员问题立即换人 / developer 角色归一化）", "instance,mock,db"),
     ("weighted", "run_weighted_test.py", "加权综合选路（换权重换选择 / 全 0 退化 priority / 越界权重拒绝）", "instance,mock,db"),
+    ("smart", "run_smart_route_test.py",
+     "智能路由（按请求特征分档：复杂→决策引擎 / 简单→执行引擎 / 阈值两侧 / 档不可用回退）", "instance,mock,db"),
     ("combo", "run_combo_test.py", "组合场景（加权×计费×竞速×流式×冷却×日志统计叠在一起）", "instance,mock,db"),
     ("backup", "run_backup_import_test.py",
      "备份隔离导入（真备份导进独立实例：计数/编辑/三协议调用 + 生产库零改动）", "instance,mock"),

@@ -125,6 +125,16 @@ def main():
         "缺 %s" % (missing_grant or "无"),
     )
 
+    # P9 智能路由（mode = smart，对齐阶跃 Step Router 的用法）：模式选项、阈值字段与三语文案都要进产物。
+    smart_markers = ["smart_route_threshold", "form.smartThreshold", "智能路由", "智能路由複雜度閾值",
+                     "Smart routing complexity threshold"]
+    missing_smart = [marker for marker in smart_markers if marker not in bundle]
+    record(
+        "P9 智能路由进了产物（模式选项 + 阈值字段 + 三语文案）",
+        not missing_smart,
+        "缺 %s" % (missing_smart or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(
