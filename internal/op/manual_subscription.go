@@ -9,6 +9,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/charmbracelet/log"
 	"gorm.io/gorm"
 )
 
@@ -32,8 +33,20 @@ func ManualSubscriptionList() []model.ManualSubscription {
 }
 
 // ManualSubscriptionRefresh 从库刷新手动订阅缓存（启动与写操作后调用）。
+//
+// 表不存在时按"没有手动订阅"处理并告警，而不是让整次缓存初始化失败：
+// 手动订阅是**可选的余额来源**（上游没有余额接口时才用得上），它的表缺失
+// （只建了部分表的测试环境、极端情况下的老库）不该把渠道/分组/凭据的缓存一起拖垮、让实例起不来。
+// 其它错误照旧上报 —— 只有"这张表不存在"这一种情况被容忍。
 func ManualSubscriptionRefresh(ctx context.Context) error {
 	conn := db.GetDB().WithContext(ctx)
+	if !conn.Migrator().HasTable(&model.ManualSubscription{}) {
+		log.Warnf("manual subscriptions: table missing, treating as empty (optional balance source)")
+		manualSubscriptionCache.Lock()
+		manualSubscriptionCache.items = nil
+		manualSubscriptionCache.Unlock()
+		return nil
+	}
 	items := []model.ManualSubscription{}
 	if err := conn.Order("channel_id ASC, id ASC").Find(&items).Error; err != nil {
 		return fmt.Errorf("failed to load manual subscriptions: %w", err)
