@@ -28,7 +28,7 @@ const RelayLogExportMaxRows = 200000
 // 第一列给**日志行主键**而不是请求 ID: 一个客户端请求可能留多行(重试/多轮各一行), 请求 ID 会重复,
 // 只有行主键能唯一定位一行, 下游做去重/回查时不必再猜。
 var relayLogExportHeader = []string{
-	"日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "目标渠道", "上游协议", "首字节(ms)", "耗时(ms)",
+	"日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "目标渠道", "上游协议", "首字节(ms)", "耗时(ms)", "上游轮次",
 	"输入tokens", "缓存命中tokens", "输出tokens", "费用", "API Key", "错误",
 }
 
@@ -101,6 +101,7 @@ func relayLogExportRow(entry model.RelayLog) []string {
 		protocolLabel(entry.TargetProtocol),
 		firstByte,
 		strconv.FormatInt(entry.DurationMs, 10),
+		strconv.Itoa(entry.Attempts),
 		strconv.FormatInt(entry.PromptTokens, 10),
 		strconv.FormatInt(entry.CachedTokens, 10),
 		strconv.FormatInt(entry.CompletionToks, 10),

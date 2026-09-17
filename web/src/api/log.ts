@@ -30,6 +30,8 @@ export interface RelayHistoryItem {
     started_at: string;
     first_byte_ms: number;
     duration_ms: number;
+    // attempts 是本请求打向上游的轮次数: 1 = 第一次就出结果, >1 = 中途换过成员; 首字竞速的多路并算一轮。
+    attempts: number;
     prompt_tokens: number;
     cached_tokens: number;
     completion_tokens: number;

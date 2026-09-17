@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, Clock, Cpu, Database, DollarSign, Gauge, KeyRound, Loader2, Percent, Square, Zap } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, Clock, Cpu, Database, DollarSign, Gauge, KeyRound, Loader2, Percent, Repeat2, Square, Zap } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
@@ -85,6 +85,8 @@ function LogMetrics({ log, now, brandColor, variant }: { log: RelayLogOverview; 
         { key: 'apiKey', Icon: KeyRound, iconClassName: 'size-3.5 shrink-0 text-orange-500', value: display.apiKeyName || '-', valueClassName: 'truncate', cellClassName: 'col-span-4 md:col-span-1', visible: visibility.apiKey },
         { key: 'duration', Icon: Cpu, iconClassName: 'size-3.5 shrink-0 text-blue-500', value: duration, cellClassName: 'col-span-4 md:col-span-1', visible: visibility.duration },
         { key: 'firstByte', Icon: Zap, iconClassName: 'size-3.5 shrink-0 text-amber-500', value: formatFirstByteMs(firstByteMs), cellClassName: 'col-span-4 md:col-span-1', visible: visibility.firstByte },
+        // 上游轮次 > 1 说明中途换过成员(重试/换人): 排障时先看它, 才知道这次慢是上游本身慢还是换人换出来的。
+        { key: 'attempts', Icon: Repeat2, iconClassName: 'size-3.5 shrink-0 text-fuchsia-500', value: String(display.attempts ?? 0), cellClassName: 'col-span-4 md:col-span-1', visible: visibility.attempts },
         { key: 'cost', Icon: DollarSign, iconClassName: 'size-3.5 shrink-0 text-emerald-500', value: formatCNYCost(display.cost), valueClassName: 'font-medium text-emerald-600 dark:text-emerald-400', cellClassName: 'col-span-4 md:col-span-1', visible: visibility.cost },
         { key: 'tps', Icon: Gauge, iconClassName: 'size-3.5 shrink-0 text-lime-500', value: tps, cellClassName: 'col-span-4 md:col-span-1', visible: visibility.tps },
         { key: 'cacheHitRate', Icon: Percent, iconClassName: 'size-3.5 shrink-0 text-teal-500', value: hitRate, cellClassName: 'col-span-4 md:col-span-1', visible: visibility.cacheHitRate },

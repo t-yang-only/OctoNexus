@@ -315,6 +315,7 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 		StartedAt:      r.StartedAt,
 		FirstByteMs:    firstByteMs,
 		DurationMs:     r.Duration.Milliseconds(),
+		Attempts:       r.Round,
 		PromptTokens:   r.Usage.PromptTokens,
 		CachedTokens:   cachedTokens,
 		CompletionToks: r.Usage.CompletionTokens,

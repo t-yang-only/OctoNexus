@@ -235,6 +235,82 @@ func TestPickGroupItemSmartUsesTierThenFallsBack(t *testing.T) {
 	}
 }
 
+// TestAffinityNeverLeavesTheCandidateSet 钉住「亲和不会把人带出候选集合」这条不变量（T-smart-007 的核查结论）。
+//
+// 核查起因：智能路由只把选中的那一档传给 pickGroupItem，而亲和分支 `return itemOf(group, CurrentItemID)`
+// 在成员不在候选集合里时返回零值 —— 表面上会让调用方以为「档内没人」而回退到全体成员，
+// 把另一档的亲和成员请回来（简单请求被改路由到强成员 = 档位的成本控制被绕过）。
+//
+// 实测结论：**不会**。groupRouteLocked 每次选路都按传入的候选集合校验一次路由状态
+// （冷却表 / 探测占用 / CurrentItemID+亲和+affinityArmed 只要不在集合里就清掉），
+// 所以进入亲和分支时 CurrentItemID 要么在集合里、要么已被清零而根本不进分支 —— 那条零值返回路径不可达。
+// 把亲和分支改回旧写法（变异 SA1）本用例依旧全绿，正是因为它不可达：这不是判据空转，而是缺陷假设被证伪。
+//
+// 因此本用例是**不变量守卫**（不是回归判据）：档外亲和不得改路由到档外成员，且状态会被就地清掉；
+// 反向对照保证档内亲和仍然沿用（收口没有把亲和本身的作用丢掉）；最后一条是同一不变量的通用形态。
+//
+// 已知边界（未采用的设计改动）：亲和是**每个分组一个槽位**（CurrentItemID/AffinityUntil），两个档共用一个槽
+// —— 档外请求会把这枚亲和清掉，紧接着另一档的请求也就没有亲和保护了。按档各存一份亲和要求新增状态与迁移，
+// 收益（少一点抖动）不抵复杂度，故维持现状。
+func TestAffinityNeverLeavesTheCandidateSet(t *testing.T) {
+	const groupID = 77
+	ResetRouteState(groupID)
+	defer ResetRouteState(groupID)
+
+	group := model.Group{
+		ID:   groupID,
+		Name: "smart-affinity",
+		Mode: model.GroupModeSmart,
+		Items: []model.GroupItem{
+			{ID: 71, Available: true, Priority: 1}, // 决策档（亲和将落在它身上）
+			{ID: 72, Available: true, Priority: 2}, // 执行档（简单请求应当用它）
+		},
+		RelayConfig: model.GroupRelayConfig{SmartRouteThreshold: 50, MemberAffinitySeconds: 60},
+	}
+	simple := SmartRoute{Features: SmartFeatures{Score: 10}}
+
+	// 直接注入路由状态：当前成员 = 决策档成员 71，且处于亲和期内。
+	routeMu.Lock()
+	route := groupRouteLocked(group)
+	route.CurrentItemID = 71
+	route.AffinityUntil = time.Now().UnixMilli() + 60_000
+	routeMu.Unlock()
+
+	if got := pickGroupItemSmart(group, routeDeps{}, false, simple); got.ID != 72 {
+		t.Fatalf("简单请求命中成员 %d, 期望 72（执行档）—— 档外亲和不得改路由到决策档", got.ID)
+	}
+	// 状态侧可观测事实：档外亲和被就地清掉，当前成员换成档内选中的 72。
+	if state := RouteStateOf(group); state.CurrentItemID != 72 || state.AffinityUntil != 0 {
+		t.Fatalf("档外亲和应被清除并改写当前成员, 实际 current=%d affinity_until=%d",
+			state.CurrentItemID, state.AffinityUntil)
+	}
+
+	// 反向对照：亲和成员落在**本次选中档**里时仍然沿用（收口没有把亲和本身的作用丢掉）。
+	ResetRouteState(groupID)
+	routeMu.Lock()
+	route = groupRouteLocked(group)
+	route.CurrentItemID = 72
+	route.AffinityUntil = time.Now().UnixMilli() + 60_000
+	routeMu.Unlock()
+	if got := pickGroupItemSmart(group, routeDeps{}, false, simple); got.ID != 72 {
+		t.Fatalf("档内亲和应沿用成员 72, 实际 %d", got.ID)
+	}
+
+	// 同一不变量的通用形态（与档位无关）：故障转移下把亲和成员从候选集合里剔除，
+	// 选路必须落在集合内的成员上，而不是返回零值让调用方空等。
+	ResetRouteState(groupID)
+	failover := group
+	failover.Mode = model.GroupModeFailover
+	routeMu.Lock()
+	route = groupRouteLocked(failover)
+	route.CurrentItemID = 71
+	route.AffinityUntil = time.Now().UnixMilli() + 60_000
+	routeMu.Unlock()
+	if got := PickGroupItem(failover, []model.GroupItem{{ID: 72, Available: true, Priority: 1}}); got.ID != 72 {
+		t.Fatalf("候选集合不含亲和成员时应退回集合内选路, 实际 %d", got.ID)
+	}
+}
+
 func TestSmartRouteDescriptionIsReadable(t *testing.T) {
 	description := SmartRouteDescription(SmartFeatures{Score: 67, Rounds: 9, Tools: 10, Tokens: 8600}, 50, true)
 	for _, want := range []string{"smart:", "复杂", "评分 67", "阈值 50", "轮数=9", "工具=10", "档位=decision"} {

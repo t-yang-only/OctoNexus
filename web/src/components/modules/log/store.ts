@@ -7,6 +7,7 @@ export type LogFieldName =
     | 'apiKey'
     | 'duration'
     | 'firstByte'
+    | 'attempts'
     | 'cost'
     | 'tps'
     | 'cacheHitRate'
@@ -22,6 +23,7 @@ export const DEFAULT_LOG_FIELD_VISIBILITY: LogFieldVisibility = {
     apiKey: true,
     duration: true,
     firstByte: true,
+    attempts: true,
     cost: true,
     tps: true,
     cacheHitRate: true,
