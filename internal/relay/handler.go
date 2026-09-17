@@ -124,10 +124,10 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			// 子分组（一条链）整体归入某一档，不会被从中间切开（T-smart-006）。
 			flat, topCounts := op.FlattenGroupItemsWithTopCounts(group)
 			items := dropRejectedMembers(flat, rejectedItems)
+			complexRequest := SmartComplex(smartFeatures, group.RelayConfig.SmartRouteThreshold)
 			smart := SmartRoute{
-				Features: smartFeatures,
-				DecisionMembers: SmartDecisionMembers(topCounts,
-					SmartComplex(smartFeatures, group.RelayConfig.SmartRouteThreshold)),
+				Features:        smartFeatures,
+				DecisionMembers: SmartDecisionMembers(topCounts, complexRequest),
 			}
 			item := pickGroupItemHotWithFeatures(group.WithItems(items), smart)
 			if item.ID == 0 {
@@ -164,7 +164,8 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			cancelRound := func() {
 				cancelRoundCause(context.Canceled)
 			}
-			request.startRound(cancelRound, item.ID, channel.Name, channelModel.Name, targetProtocol)
+			round := request.startRound(cancelRound, item.ID, channel.Name, channelModel.Name, targetProtocol)
+			publishDecision(c, request, group, flat, topCounts, item.ID, complexRequest, round)
 
 			roundStartedAt := time.Now() // 本轮调用的开始时间, 用于统计首个有效响应耗时
 
@@ -236,6 +237,8 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					channelModel, channelKey, channel = winner.channelModel, winner.channelKey, winner.channel
 					targetProtocol, passthrough, outbound = winner.targetProtocol, winner.passthrough, winner.outbound
 					request.retargetRound(winner.item.ID, winner.channel.Name, winner.channelModel.Name, winner.targetProtocol)
+					// 胜出者可能不是首选: 判定理由按胜出者重算（档位/理由/序号都指向真正服务这次请求的成员）。
+					publishDecision(c, request, group, flat, topCounts, winner.item.ID, complexRequest, round)
 				}
 				result, err = raceResult, raceErr
 			}
@@ -269,6 +272,12 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				// （那不是成员的锅, 计了会拉低成员质量）、也不打冷却（否则一个坏请求就能把健康成员冻住),
 				// 只把该成员记入本请求的拒绝集合后换下一个; 全部成员都拒绝时以明确错误结束请求。
 				if disposition == dispositionRequestFault {
+					// 取向由设置项决定（T-retry-003）: failfast 时第一个成员拒绝就结束请求,
+					// failover（默认）时把该成员记入拒绝集合、换下一个成员再试。
+					if RequestFaultAction() == RequestFaultActionFailFast {
+						failRequest(c, inbound, request, errors.New(requestFaultMessage(err)))
+						return
+					}
 					rejectedItems[item.ID] = true
 					if allMembersRejected(op.FlattenGroupItems(group), rejectedItems) {
 						failRequest(c, inbound, request, errors.New(requestFaultMessage(err)))
@@ -444,6 +453,25 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			return
 		}
 	}
+}
+
+// decisionHeaderName 是把本轮选路判定回给客户端的响应头（T-decision-001）。
+// 内容不含渠道名与凭据，只有模式/档位/理由/成员序号/轮次，例如：
+//
+//	X-Octopus-Route: mode=smart;tier=decision;reason=affinity;slot=1;attempt=2
+//
+// 客户端拿到它就能解释「这次为什么走了这条路」，服务端排障也不必再对着分组配置反推。
+const decisionHeaderName = "X-Octopus-Route"
+
+// publishDecision 记录并对外公布本轮的选路判定: 写进请求状态（随历史日志/导出回看）
+// 与响应头（客户端当场可见）。首字节提交之前可以反复覆盖, 因此每轮尝试与竞速胜出者
+// 都会刷新它, 最终留下的是真正服务这次请求的那个判定。
+func publishDecision(c *gin.Context, request *RequestState, group model.Group, flat []model.GroupItem,
+	topCounts []int, itemID int, complexRequest bool, round int) {
+	decision := DescribeDecision(group, itemID, DecisionTier(group.Mode, complexRequest), round,
+		TopSlot(flat, topCounts, itemID))
+	c.Writer.Header().Set(decisionHeaderName, decision.Text())
+	request.setDecision(decision.Text())
 }
 
 // failRequest 在请求已经没有希望时给客户端一个明确的失败响应。

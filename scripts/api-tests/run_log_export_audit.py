@@ -27,7 +27,7 @@ DB = os.environ.get("OCTOPUS_DB", os.path.join(os.path.dirname(os.path.abspath(_
 
 GROUP = "DS-TEST-formats"
 HEADER = ["日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "目标渠道", "上游协议", "首字节(ms)", "耗时(ms)",
-          "上游轮次", "输入tokens", "缓存命中tokens", "输出tokens", "费用", "API Key", "错误"]
+          "上游轮次", "判定理由", "输入tokens", "缓存命中tokens", "输出tokens", "费用", "API Key", "错误"]
 COLUMN = {name: index for index, name in enumerate(HEADER)}
 PROTOCOLS = {"openai-chat", "openai-responses", "anthropic-messages", ""}
 
@@ -145,7 +145,8 @@ def main():
             "首字节(ms)": "" if first_byte is None or first_byte < 0 else str(first_byte),
             "耗时(ms)": str(item.get("duration_ms") or 0),
             "上游轮次": str(item.get("attempts") or 0),
-    "输入tokens": str(item.get("prompt_tokens") or 0),
+            "判定理由": item.get("decision") or "",
+            "输入tokens": str(item.get("prompt_tokens") or 0),
             "缓存命中tokens": str(item.get("cached_tokens") or 0),
             "输出tokens": str(item.get("completion_tokens") or 0),
             "API Key": item.get("api_key_name") or "",

@@ -46,6 +46,12 @@ var startCmd = &cobra.Command{
 			relay.SetRouteBalanceEnabled(true)
 		}
 
+		// 上游判定"请求本身非法"时的取向按设置注入 relay (T-retry-003): 读不到/取值异常时
+		// relay 内部回落 failover（与既有行为一致），运行期变更由 setting 接口热注入。
+		if action, err := op.SettingGetString(model.SettingKeyRequestFaultAction); err == nil {
+			relay.SetRequestFaultAction(action)
+		}
+
 		// 告警 webhook 的设置读取源注入 notify 包 (避免 notify→op 导入环)。
 		notify.SetSettingSource(op.SettingGetString)
 

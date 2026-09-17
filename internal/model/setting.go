@@ -36,6 +36,7 @@ const (
 	SettingKeyBalancePointsPerUnit SettingKey = "balance_points_per_unit"      // 换算口径: 多少额度点 = 1 个货币单位; 默认 500000 (new-api 惯例)
 	SettingKeyBalanceCurrency      SettingKey = "balance_currency"             // 折算后的货币名, 仅用于显示; 默认 USD
 	SettingKeyRouteBalanceEnabled  SettingKey = "route_balance_enabled"        // 故障转移分组是否用加权轮询定序候选 (T-route-002); 默认关闭, 走原有优先级选路
+	SettingKeyRequestFaultAction   SettingKey = "relay_request_fault_action"   // 上游判定"请求本身非法"(400/413/422 一类)时的取向: failover(换成员再试, 默认) 或 failfast(立刻回上游原文)
 	SettingKeyAlertWebhookURL      SettingKey = "alert_webhook_url"            // 告警事件 webhook 地址, 留空不推送; 余额告警/归零停用等事件 POST JSON 到该地址
 	SettingKeyRouteProbeEnabled    SettingKey = "route_probe_enabled"          // 冷却成员主动探活开关 (R-probe-001); 默认关闭: 每次探测都是一次真实计费请求
 	SettingKeyRouteProbeInterval   SettingKey = "route_probe_interval_seconds" // 主动探活周期(秒), 0 表示停用探活任务; 默认 300
@@ -98,6 +99,9 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyRouteWeightBalance, Value: "15"},
 		{Key: SettingKeyRouteWeightMonthly, Value: "10"},
 		{Key: SettingKeyRouteMonthlyAction, Value: "demote"},
+		// 请求本身非法时的取向: 默认与改造前一致 —— 换个成员再试, 全部成员都拒绝才失败。
+		// 用户要求两种都要, 因此这里只定默认值, 另一种由使用方显式切换（热生效, 不必重启）。
+		{Key: SettingKeyRequestFaultAction, Value: "failover"},
 	}
 }
 
@@ -191,6 +195,13 @@ func (s *Setting) Validate() error {
 		// 包月用尽后的动作只有两种: 降权(还能被选到) 或 剔除(不再参与)。默认降权, 见默认值表。
 		if s.Value != "demote" && s.Value != "exclude" {
 			return fmt.Errorf("route monthly exhausted action must be demote or exclude")
+		}
+		return nil
+	case SettingKeyRequestFaultAction:
+		// 请求本身非法时只有两种取向: 换成员再试(failover, 默认) 或 立刻回上游原文(failfast)。
+		// 越界直接报错而不是静默回落, 免得用户以为改成了别的取值。
+		if s.Value != "failover" && s.Value != "failfast" {
+			return fmt.Errorf("relay request fault action must be failover or failfast")
 		}
 		return nil
 	case SettingKeyAlertWebhookURL:
