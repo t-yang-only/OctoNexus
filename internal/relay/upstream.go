@@ -20,6 +20,7 @@ import (
 	"github.com/looplj/axonhub/llm/transformer/anthropic"
 	"github.com/looplj/axonhub/llm/transformer/openai"
 	"github.com/looplj/axonhub/llm/transformer/openai/responses"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -121,7 +122,9 @@ func sendPassthroughStream(ctx context.Context, format llm.APIFormat, request *h
 		if readErr != nil {
 			return nil, readErr
 		}
-		return nil, fmt.Errorf("upstream responded %s: %s", response.Status, failure)
+		// 带上状态码: 上层据此区分「确定性错误」（不重试, 见 retry.go）与「可恢复错误」。
+		return nil, newUpstreamStatusError(response.StatusCode,
+			fmt.Sprintf("upstream responded %s: %s", response.Status, failure))
 	}
 
 	events := httpclient.NewDefaultSSEDecoder(ctx, response.Body)
@@ -161,6 +164,7 @@ func (m *conversionMiddleware) OnOutboundRawRequest(_ context.Context, request *
 	if err := applyChannelConfig(m.channel, request); err != nil {
 		return nil, err
 	}
+	normalizeDeveloperRole(m.format, request)
 	body, err := carryOverSamplingParams(m.clientBody, m.format, request.Body)
 	if err != nil {
 		return nil, err
@@ -172,6 +176,48 @@ func (m *conversionMiddleware) OnOutboundRawRequest(_ context.Context, request *
 		}
 	}
 	return request, nil
+}
+
+// normalizeDeveloperRole 把转换后的 chat completions 请求里 messages 的 developer 角色归一化为 system。
+//
+// 为什么需要（对齐上游 PR #360 对 #19 回归的修复）：developer 是 OpenAI Responses 协议里 system 的替代角色，
+// 客户端（Codex 等）会用它携带指令；而不少 OpenAI 兼容中转站只认 system，收到 developer 直接报错。
+// 归一化后语义等价、兼容性更好，且只在上游协议是 chat completions 时改写。
+func normalizeDeveloperRole(format llm.APIFormat, request *httpclient.Request) {
+	if format != llm.APIFormatOpenAIChatCompletion || request == nil {
+		return
+	}
+	body := request.Body
+	if len(body) == 0 {
+		body = request.JSONBody
+	}
+	if len(body) == 0 {
+		return
+	}
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.IsArray() {
+		return
+	}
+	rewritten := body
+	changed := false
+	for index, message := range messages.Array() {
+		if message.Get("role").String() != "developer" {
+			continue
+		}
+		next, err := sjson.SetBytes(rewritten, fmt.Sprintf("messages.%d.role", index), "system")
+		if err != nil {
+			return
+		}
+		rewritten = next
+		changed = true
+	}
+	if !changed {
+		return
+	}
+	request.Body = rewritten
+	if len(request.JSONBody) > 0 {
+		request.JSONBody = slices.Clone(rewritten)
+	}
 }
 
 // responsesCarriedParams 是转换成 Responses 上游时会被转换层丢掉的采样参数（NM-DS-005 实测：

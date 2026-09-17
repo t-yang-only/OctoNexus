@@ -300,7 +300,10 @@ def main():
            "member_max_attempts=2 但上游收到 %d 次: %s" % (len(tries), tries))
 
     # I6 判据 0=关闭: 同样静默的上游, 3 秒时请求仍在途中（旧行为没有被悄悄改变）。
+    # I7 同时验证: 客户端在首字节之后放弃**不计**成员失败 —— 线上假死探针的 123 次超时取消
+    #    就是这样把 11 个健康成员误判成假死并降级的（见日志包 README）。
     inflight = {}
+    failed_before_abort = channel_model_failed()
 
     def fire():
         inflight["result"] = relay_stream(GROUP_OFF, timeout=8)
@@ -314,6 +317,10 @@ def main():
            config_off == 0 and still,
            "idle=%s 在途=%s（客户端 8 秒超时，请求自行收尾）" % (config_off, still))
     worker.join(timeout=30)
+    failed_after_abort = channel_model_failed()
+    record("I7 客户端首字节后放弃不计成员失败",
+           failed_before_abort is not None and failed_after_abort == failed_before_abort,
+           "成员失败计数 %s→%s（客户端主动断开不是成员故障）" % (failed_before_abort, failed_after_abort))
 
     return 0
 
