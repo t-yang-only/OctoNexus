@@ -40,13 +40,16 @@ MOCK_BASE = os.environ.get("OCTOPUS_MOCK_BASE", "http://127.0.0.1:18099/v1")
 CHANNEL = "DS-TEST-retry"
 GOOD, BAD, REJECT400, REJECT401 = "mock-good", "mock-bad", "mock-reject400", "mock-reject401"
 CONV = "mock-chatonly"  # 转换路径专用成员: 它只说 messages, chat 客户端命中它时必然被转换
+RESP = "mock-plain"     # 转换路径专用成员: 它只说 responses, 用来覆盖 Responses 形状的请求体
 GROUP_CAP, GROUP_400_SOLO, GROUP_400_PAIR, GROUP_401_PAIR, GROUP_MANUAL, GROUP_DEV = (
     "DS-TEST-retrycap", "DS-TEST-retry400solo", "DS-TEST-retry400pair",
     "DS-TEST-retry401pair", "DS-TEST-retrymanual", "DS-TEST-retrydev")
 GROUP_CONV = "DS-TEST-retryconv"
-KEY_MAIN, KEY_CONV = "mockkey", "convkey"
+GROUP_RESP = "DS-TEST-retryresp"
+KEY_MAIN, KEY_CONV, KEY_RESP = "mockkey", "convkey", "respkey"
 CHANNEL_KEY_SECRET = "mock-secret-not-a-real-key"
 CONV_KEY_SECRET = "mock-secret-conv-not-a-real-key"
+RESP_KEY_SECRET = "mock-secret-resp-not-a-real-key"
 
 # max_attempts=2 ⇒ 单成员上限 max(6, 1×2×2)=6（见 internal/relay/retry.go attemptCap）。
 EXPECTED_SOLO_CAP = 6
@@ -198,21 +201,24 @@ def ensure_channel():
     existing = scalar("select id from channels where name=?", (CHANNEL,))
     if existing:
         call("DELETE", "/api/v1/channel/delete/%d" % existing)
-    models = [GOOD, BAD, REJECT400, REJECT401, CONV]
+    models = [GOOD, BAD, REJECT400, REJECT401, CONV, RESP]
     payload = {"name": CHANNEL, "dialect": "generic", "enabled": True, "base_url": MOCK_BASE,
                "keys": [{"name": KEY_MAIN, "key": CHANNEL_KEY_SECRET, "enabled": True},
-                        {"name": KEY_CONV, "key": CONV_KEY_SECRET, "enabled": True}],
+                        {"name": KEY_CONV, "key": CONV_KEY_SECRET, "enabled": True},
+                        {"name": KEY_RESP, "key": RESP_KEY_SECRET, "enabled": True}],
                "models": models}
     call("POST", "/api/v1/channel/create", payload)
     cid = scalar("select id from channels where name=?", (CHANNEL,))
     if not cid:
         return None
     # protocols 位: 2=chat / 4=responses / 8=messages（见 lossless 套件 PINS）。前四个成员说全协议,
-    # CONV 固定只说 messages —— chat 客户端命中它时必然走转换路径。
+    # CONV 只说 messages、RESP 只说 responses —— chat 客户端命中它们时必然走转换路径,
+    # 且两条转换路径的上游请求体形状不同（messages 数组 vs input 数组）。
     call("POST", "/api/v1/channel/update", dict(payload, id=cid,
                                                 grants=[{"model_name": m, "key_name": KEY_MAIN, "protocols": 14}
                                                         for m in (GOOD, BAD, REJECT400, REJECT401)]
-                                                       + [{"model_name": CONV, "key_name": KEY_CONV, "protocols": 8}]))
+                                                       + [{"model_name": CONV, "key_name": KEY_CONV, "protocols": 8},
+                                                          {"model_name": RESP, "key_name": KEY_RESP, "protocols": 4}]))
     return cid
 
 
@@ -250,7 +256,8 @@ def group_item_id(group_id):
 
 
 def remove_fixtures():
-    for name in (GROUP_CAP, GROUP_400_SOLO, GROUP_400_PAIR, GROUP_401_PAIR, GROUP_MANUAL, GROUP_DEV, GROUP_CONV):
+    for name in (GROUP_CAP, GROUP_400_SOLO, GROUP_400_PAIR, GROUP_401_PAIR, GROUP_MANUAL, GROUP_DEV,
+                 GROUP_CONV, GROUP_RESP):
         gid = scalar("select id from groups where name=?", (name,))
         if gid:
             call("DELETE", "/api/v1/group/delete/%d" % gid)
@@ -263,7 +270,7 @@ def main():
     call("POST", "/api/v1/user/login", {"username": "admin", "password": "admin"})
     cid = ensure_channel()
     grant = grants()
-    if not cid or len(grant) < 5:
+    if not cid or len(grant) < 6:
         record("R0 装置就位", False, "渠道/授权创建失败 channel=%s grants=%s" % (cid, grant))
         return 1
     ensure_group(GROUP_CAP, [grant[BAD]])
@@ -273,6 +280,7 @@ def main():
     manual_id = ensure_group(GROUP_MANUAL, [grant[BAD]], mode="manual")
     ensure_group(GROUP_DEV, [grant[GOOD]])
     ensure_group(GROUP_CONV, [grant[CONV]])
+    ensure_group(GROUP_RESP, [grant[RESP]])
     item = group_item_id(manual_id) if manual_id else None
     if manual_id and item:
         call("POST", "/api/v1/group/update/%d" % manual_id, {"active_item_id": item})
@@ -382,6 +390,28 @@ def main():
            status == 200 and converted and no_dev and kept,
            "HTTP %s 耗时 %ss 上游路径=%s 上游角色=%s developer残留=%s 文本保留=%s" % (
                status, secs, row.get("path"), roles, not no_dev, kept))
+
+    # R9 同一条不变量的 Responses 形状：Chat 客户端 → 只说 responses 的成员, 上游正文用的是顶层 input 数组,
+    # 角色不在 messages 里。分协议位实测发现这里曾经漏网（T-devrole-001）—— R8 只盖 messages 形状,
+    # 少这条就会让「developer 一律改写成 system」在 Responses 路径上失效。
+    offset = mark()
+    status, secs, body = relay(GROUP_RESP, messages=[
+        {"role": "developer", "content": "be terse"},
+        {"role": "user", "content": "ping"},
+    ])
+    rows = [r for r in rows_since(offset) if r.get("model") == RESP]
+    row = rows[-1] if rows else {}
+    upstream = row.get("body") or {}
+    raw = json.dumps(upstream, ensure_ascii=False)
+    is_responses = "/v1/responses" in (row.get("path") or "")
+    items = upstream.get("input")
+    item_roles = [x.get("role") for x in items] if isinstance(items, list) else []
+    no_dev = "developer" not in raw
+    kept = "be terse" in raw
+    record("R9 Responses 形状的转换路径也不留 developer",
+           status == 200 and is_responses and no_dev and kept,
+           "HTTP %s 耗时 %ss 上游路径=%s input条目角色=%s developer残留=%s 文本保留=%s" % (
+               status, secs, row.get("path"), item_roles, not no_dev, kept))
 
     return 0
 

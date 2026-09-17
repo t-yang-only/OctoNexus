@@ -50,7 +50,7 @@ LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requests.js
 _lock = threading.Lock()
 
 MODELS = ["mock-good", "mock-slow", "mock-bad", "mock-chatonly", "mock-stall",
-          "mock-reject400", "mock-reject401"]
+          "mock-reject400", "mock-reject401", "mock-plain"]
 
 # FORCED 是运行期行为覆盖: 模型名 → "ok"/"bad"/"slow"。探活用例要证明"上游恢复后冷却被提前解除",
 # 就需要在实例运行中把某个模型从失败翻成健康, 改模型名做不到 (成员模型名是落库配置)。
