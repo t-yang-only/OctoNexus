@@ -235,6 +235,65 @@ func TestSmartModeIsRegisteredAndBackupSafe(t *testing.T) {
 	}
 }
 
+// TestRankedHedgeCandidatesStaysInsideTier 守住智能路由与首字竞速的交叉点（T-smart-004）：
+// 竞速只能在选中那一档内进行。否则简单请求会把靠前的强成员一起拉进竞速跑一遍，
+// 复杂度分档的成本控制被竞速绕过（而竞速本身就是要多发请求的）。
+func TestRankedHedgeCandidatesStaysInsideTier(t *testing.T) {
+	ResetRouteState(21)
+	defer ResetRouteState(21)
+	group := model.Group{
+		ID:   21,
+		Name: "smart-hedge",
+		Mode: model.GroupModeSmart,
+		Items: []model.GroupItem{
+			{ID: 31, Available: true, Priority: 1},
+			{ID: 32, Available: true, Priority: 2},
+			{ID: 33, Available: true, Priority: 3},
+		},
+		RelayConfig: model.GroupRelayConfig{SmartRouteThreshold: 50},
+	}
+	deps := routeDeps{}
+	ids := func(list []model.GroupItem) []int {
+		out := make([]int, 0, len(list))
+		for _, item := range list {
+			out = append(out, item.ID)
+		}
+		return out
+	}
+	contains := func(list []int, want int) bool {
+		for _, value := range list {
+			if value == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	// 简单请求（执行引擎档 = 第 3 名成员）：候选里不能有决策档成员。
+	simpleCandidates := ids(deps.rankedHedgeCandidatesWithFeatures(group, SmartFeatures{Score: 10}))
+	if contains(simpleCandidates, 31) || contains(simpleCandidates, 32) {
+		t.Fatalf("简单请求把决策档成员拉进了竞速: %v", simpleCandidates)
+	}
+	if !contains(simpleCandidates, 33) {
+		t.Fatalf("简单请求的竞速候选里没有执行档成员: %v", simpleCandidates)
+	}
+
+	// 复杂请求（决策引擎档 = 前 2 名成员）：候选里不能有执行档成员。
+	complexCandidates := ids(deps.rankedHedgeCandidatesWithFeatures(group, SmartFeatures{Score: 90}))
+	if contains(complexCandidates, 33) {
+		t.Fatalf("复杂请求把执行档成员拉进了竞速: %v", complexCandidates)
+	}
+	if len(complexCandidates) != 2 {
+		t.Fatalf("复杂请求的竞速候选 = %v, 期望决策档两名成员", complexCandidates)
+	}
+
+	// 其它模式一律不受影响：failover 仍是全体成员参与。
+	group.Mode = model.GroupModeFailover
+	if got := ids(deps.rankedHedgeCandidatesWithFeatures(group, SmartFeatures{Score: 10})); len(got) != 3 {
+		t.Fatalf("failover 模式下竞速候选 = %v, 期望全体 3 名成员", got)
+	}
+}
+
 func equalInts(left, right []int) bool {
 	if len(left) != len(right) {
 		return false
