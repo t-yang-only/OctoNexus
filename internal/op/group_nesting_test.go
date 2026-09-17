@@ -69,6 +69,63 @@ func TestSyncGroupItemsNestedRef(t *testing.T) {
 	}
 }
 
+// TestSyncGroupItemsPersistsSmartTier 覆盖智能路由显式档位的落库与清空（T-smart-007）：
+// 新建时带上档位、重排后仍带上、显式清空（提交空串）要真的写回空值。
+func TestSyncGroupItemsPersistsSmartTier(t *testing.T) {
+	conn := openAutoGroupTestDB(t)
+	ids := seedNestingGroups(t, conn, "tier-parent", "tier-child")
+
+	if err := conn.Transaction(func(tx *gorm.DB) error {
+		return syncGroupItems(tx, ids["tier-parent"], []model.GroupItemInput{
+			{ChildGroupID: ids["tier-child"], SmartTier: model.GroupSmartTierDecision},
+		})
+	}); err != nil {
+		t.Fatalf("sync with tier: %v", err)
+	}
+	var first []model.GroupItem
+	if err := conn.Where("group_id = ?", ids["tier-parent"]).Find(&first).Error; err != nil {
+		t.Fatalf("load items: %v", err)
+	}
+	if len(first) != 1 || first[0].SmartTier != model.GroupSmartTierDecision {
+		t.Fatalf("落库档位 = %q, 期望 %q", first[0].SmartTier, model.GroupSmartTierDecision)
+	}
+
+	// 同一引用改成执行档：走的是「更新既有行」的分支，档位必须随之改写。
+	if err := conn.Transaction(func(tx *gorm.DB) error {
+		return syncGroupItems(tx, ids["tier-parent"], []model.GroupItemInput{
+			{ChildGroupID: ids["tier-child"], SmartTier: model.GroupSmartTierExecution},
+		})
+	}); err != nil {
+		t.Fatalf("update tier: %v", err)
+	}
+	var second []model.GroupItem
+	if err := conn.Where("group_id = ?", ids["tier-parent"]).Find(&second).Error; err != nil {
+		t.Fatalf("reload items: %v", err)
+	}
+	if second[0].ID != first[0].ID {
+		t.Fatalf("成员主键变了: %d -> %d", first[0].ID, second[0].ID)
+	}
+	if second[0].SmartTier != model.GroupSmartTierExecution {
+		t.Fatalf("更新后的档位 = %q, 期望 %q", second[0].SmartTier, model.GroupSmartTierExecution)
+	}
+
+	// 提交空串 = 改回「按顺序自动切分」：零值也必须落库，不能被 GORM 的零值忽略挡下。
+	if err := conn.Transaction(func(tx *gorm.DB) error {
+		return syncGroupItems(tx, ids["tier-parent"], []model.GroupItemInput{
+			{ChildGroupID: ids["tier-child"]},
+		})
+	}); err != nil {
+		t.Fatalf("clear tier: %v", err)
+	}
+	var third []model.GroupItem
+	if err := conn.Where("group_id = ?", ids["tier-parent"]).Find(&third).Error; err != nil {
+		t.Fatalf("reload items: %v", err)
+	}
+	if third[0].SmartTier != model.GroupSmartTierAuto {
+		t.Fatalf("清空后的档位 = %q, 期望空串", third[0].SmartTier)
+	}
+}
+
 // TestSyncGroupItemsMixedRefs 授权与子分组混合集合: 互斥形状逐条校验, 全非法输入被拒。
 func TestSyncGroupItemsMixedRefs(t *testing.T) {
 	conn := openAutoGroupTestDB(t)

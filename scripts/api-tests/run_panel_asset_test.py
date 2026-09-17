@@ -165,6 +165,16 @@ def main():
         "缺 %s" % (missing_decision or "无"),
     )
 
+    # P13 智能路由的显式档位（T-smart-007）：档位按钮的文案与提示进产物，三语齐全。
+    tier_markers = ["smart_tier", "tierDecision", "tierExecution", "智能路由档位", "智能路由檔位",
+                    "Smart routing tier"]
+    missing_tier = [marker for marker in tier_markers if marker not in bundle]
+    record(
+        "P13 智能路由显式档位进产物（字段 + 按钮文案 + 三语提示）",
+        not missing_tier,
+        "缺 %s" % (missing_tier or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(

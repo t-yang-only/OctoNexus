@@ -12,6 +12,8 @@
   S5 决策引擎渠道停用 → 复杂请求回退到执行引擎档且仍成功（省钱不能变成不可用）
   S6 流式请求同样按复杂度分档
   S7 其它模式不受影响（同分组切回 failover 时按成员顺序选，不看请求形状）
+  S10 显式档位（T-smart-007）：成员顺序与档位刻意相反，分档看声明而不是顺序；清空档位后回到顺序口径
+  S10d 显式档位 × 首字竞速：竞速只在声明的档内进行（与 S8 同一纪律，档位来源不同）
 """
 import http.client
 import io
@@ -43,6 +45,10 @@ CHANNEL_BAD = "DS-TEST-smart-bad"
 CHILD_DECISION = "DS-TEST-smart-child-decision"  # 决策链：1 个成员（故意比执行链小）
 CHILD_EXECUTION = "DS-TEST-smart-child-execution"  # 执行链：2 个成员
 GROUP_CHILD = "DS-TEST-smart-child"
+# S10 用的分组（T-smart-007）：显式档位与成员顺序刻意相反。
+GROUP_TIER = "DS-TEST-smart-tier"
+# S10d 用的分组（T-smart-007 × 竞速）：显式档位 + 开启首字竞速，竞速也只能在选中档内进行。
+GROUP_TIER_HEDGE = "DS-TEST-smart-tier-hedge"
 
 COOKIE = {}
 RESULTS = []
@@ -155,7 +161,8 @@ def complex_body(rounds=8, tools=8, pad=0):
 
 
 def cleanup():
-    for name in (GROUP, GROUP_ORDER, GROUP_HEDGE, GROUP_CHILD, CHILD_DECISION, CHILD_EXECUTION):
+    for name in (GROUP, GROUP_ORDER, GROUP_HEDGE, GROUP_CHILD, CHILD_DECISION, CHILD_EXECUTION,
+                 GROUP_TIER, GROUP_TIER_HEDGE):
         gid = scalar("select id from groups where name=?", (name,))
         if gid:
             call("DELETE", "/api/v1/group/delete/%d" % gid)
@@ -407,6 +414,85 @@ def main():
         child_detail.append("%s → HTTP %s 上游尝试=%s（应全为 %s 且不含 %s）" % (
             label, status, seen, expect_model, forbid_model))
     record("S9 档位按顶层成员切分（子分组整条链归档，不被切开）", child_ok, "; ".join(child_detail))
+
+    # S10 显式档位（T-smart-007）：成员顺序与档位刻意相反，用来证明分档看的是声明而不是顺序。
+    # 装置：第一位是快渠道（便宜）但声明 execution，第二位是强渠道但声明 decision。
+    # 顺序口径下简单请求会走第二位（强、贵），显式口径下必须走第一位（快）；复杂请求同理反过来 ——
+    # 两个方向都与顺序口径相反，所以这条用例能真正分辨「按声明」还是「按顺序」。
+    old_tier_gid = scalar("select id from groups where name=?", (GROUP_TIER,))
+    if old_tier_gid:
+        call("DELETE", "/api/v1/group/delete/%d" % old_tier_gid)
+    status, tier_payload = call("POST", "/api/v1/group/create", {
+        "name": GROUP_TIER, "mode": "smart",
+        "items": [{"channel_grant_id": grant_fast, "smart_tier": "execution"},
+                  {"channel_grant_id": grant_strong, "smart_tier": "decision"}],
+        "relay_config": {"member_max_attempts": 1, "member_retry_interval_seconds": 1,
+                         "member_cooldown_seconds": 1, "member_affinity_seconds": 0,
+                         "smart_route_threshold": 50}})
+    tier_gid = scalar("select id from groups where name=?", (GROUP_TIER,))
+    if status != 200 or not tier_gid:
+        record("S10a 简单请求走显式标记的执行档", False,
+               "分组创建失败: status=%s payload=%s" % (status, tier_payload))
+    else:
+        # 先确认档位真的落库并回读得到（提交 → 存储 → 回读 三段都要对）。
+        # 读取响应统一带 data 外壳（resp.ResponseStruct），成员在 data.items 里。
+        _st, detail = call("GET", "/api/v1/group/get/%d" % tier_gid)
+        group_items = ((detail or {}).get("data") or {}).get("items") or []
+        tiers = [(item.get("model_name"), item.get("smart_tier")) for item in group_items]
+        want_tiers = [(MODEL_FAST, "execution"), (MODEL_STRONG, "decision")]
+        record("S10 档位落库并回读", tiers == want_tiers, "回读 %s, 期望 %s" % (tiers, want_tiers))
+
+        _st, served = served_by(GROUP_TIER, simple_body())
+        record("S10a 简单请求走显式标记的执行档", served == MODEL_FAST,
+               "上游实际服务 = %s, 期望 %s（顺序口径会给 %s）" % (served, MODEL_FAST, MODEL_STRONG))
+
+        _st, served = served_by(GROUP_TIER, complex_body())
+        record("S10b 复杂请求走显式标记的决策档", served == MODEL_STRONG,
+               "上游实际服务 = %s, 期望 %s（顺序口径会给 %s）" % (served, MODEL_STRONG, MODEL_FAST))
+
+        # S10c 同二进制差分对照：把档位清空（提交不带 smart_tier），行为必须回到顺序口径。
+        # 只改这一个变量结果就反转，才能排除「碰巧」。
+        call("POST", "/api/v1/group/update/%d" % tier_gid, {
+            "items": [{"channel_grant_id": grant_fast}, {"channel_grant_id": grant_strong}]})
+        _st, detail = call("GET", "/api/v1/group/get/%d" % tier_gid)
+        cleared = [item.get("smart_tier") or ""
+                   for item in (((detail or {}).get("data") or {}).get("items") or [])]
+        _st, served = served_by(GROUP_TIER, simple_body())
+        record("S10c 清空档位后回到顺序口径", cleared == ["", ""] and served == MODEL_STRONG,
+               "回读档位=%s 上游实际服务=%s, 期望档位全空且服务=%s" % (cleared, served, MODEL_STRONG))
+
+    # S10d 显式档位 × 首字竞速（交叉点纪律）：档位收敛后竞速也必须只在选中那一档内进行。
+    # 装置：三名成员 —— 快渠道声明 execution、两条强渠道凭据声明 decision，开启竞速（宽度 3、1ms）。
+    # 复杂请求只能在决策档内竞速（两次尝试都是强渠道），简单请求不该出现任何强渠道尝试。
+    old_hedge_gid = scalar("select id from groups where name=?", (GROUP_TIER_HEDGE,))
+    if old_hedge_gid:
+        call("DELETE", "/api/v1/group/delete/%d" % old_hedge_gid)
+    status, hedge_payload = call("POST", "/api/v1/group/create", {
+        "name": GROUP_TIER_HEDGE, "mode": "smart",
+        "items": [{"channel_grant_id": grant_fast, "smart_tier": "execution"},
+                  {"channel_grant_id": strong_grants[0], "smart_tier": "decision"},
+                  {"channel_grant_id": strong_grants[1], "smart_tier": "decision"}],
+        "relay_config": {"member_max_attempts": 1, "member_retry_interval_seconds": 1,
+                         "member_cooldown_seconds": 1, "member_affinity_seconds": 0,
+                         "smart_route_threshold": 50,
+                         "hedge_enabled": True, "hedge_width": 3, "hedge_after_ms": 1,
+                         "hedge_peak_in_flight": 0}})
+    if status != 200 or not scalar("select id from groups where name=?", (GROUP_TIER_HEDGE,)):
+        record("S10d 显式档位 × 竞速不越档", False, "分组创建失败: status=%s payload=%s" % (status, hedge_payload))
+    else:
+        hedge_detail = []
+        hedge_ok = True
+        for label, body, expect_model, forbid_model in (
+                ("简单请求", simple_body(), MODEL_FAST, MODEL_STRONG),
+                ("复杂请求", complex_body(), MODEL_STRONG, MODEL_FAST)):
+            offset = mark()
+            _st, _raw = relay(GROUP_TIER_HEDGE, body)
+            seen = [row.get("model") for row in rows_since(offset)]
+            ok = _st == 200 and seen and forbid_model not in seen and all(m == expect_model for m in seen)
+            hedge_ok = hedge_ok and ok
+            hedge_detail.append("%s → HTTP %s 上游尝试=%s（应全为 %s 且不含 %s）" % (
+                label, _st, seen, expect_model, forbid_model))
+        record("S10d 显式档位 × 竞速不越档（竞速也在声明的档内）", hedge_ok, "; ".join(hedge_detail))
 
     passed = sum(1 for _n, ok, _d in RESULTS if ok)
     print("\nSMART_ROUTE_TEST total=%d pass=%d fail=%d" % (len(RESULTS), passed, len(RESULTS) - passed))

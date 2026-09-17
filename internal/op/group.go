@@ -212,7 +212,7 @@ func GroupCreate(req *model.GroupCreateRequest, ctx context.Context) (*model.Gro
 		if err := model.ValidateGroupItemRef(item.ChannelGrantID, item.ChildGroupID); err != nil {
 			return nil, err
 		}
-		group.Items[i] = model.GroupItem{ChannelGrantID: item.GrantRefPtr(), ChildGroupID: item.ChildRefPtr(), Priority: i + 1}
+		group.Items[i] = model.GroupItem{ChannelGrantID: item.GrantRefPtr(), ChildGroupID: item.ChildRefPtr(), Priority: i + 1, SmartTier: item.SmartTier}
 	}
 	// 子分组引用在落库前校验: 引用存在性可查, 自引用因新分组还没有主键而无法表达。
 	if err := validateGroupTreeRefs(db.GetDB(), group.Items); err != nil {
@@ -326,15 +326,23 @@ func syncGroupItems(tx *gorm.DB, groupID int, requested []model.GroupItemInput) 
 		ref := [2]int{requestedItem.ChannelGrantID, requestedItem.ChildGroupID}
 		current, ok := existingByRef[ref]
 		if !ok {
-			newItem := model.GroupItem{GroupID: groupID, ChannelGrantID: requestedItem.GrantRefPtr(), ChildGroupID: requestedItem.ChildRefPtr(), Priority: priority + 1}
+			newItem := model.GroupItem{GroupID: groupID, ChannelGrantID: requestedItem.GrantRefPtr(), ChildGroupID: requestedItem.ChildRefPtr(), Priority: priority + 1, SmartTier: requestedItem.SmartTier}
 			if err := tx.Create(&newItem).Error; err != nil {
 				return fmt.Errorf("failed to create group item: %w", err)
 			}
 			continue
 		}
+		// 位置与档位分属两次改动, 合并成一次写入; 档位必须显式写空串才能清掉（Updates 的 map 形式不受零值忽略影响）。
+		updates := map[string]any{}
 		if current.Priority != priority+1 {
+			updates["priority"] = priority + 1
+		}
+		if current.SmartTier != requestedItem.SmartTier {
+			updates["smart_tier"] = requestedItem.SmartTier
+		}
+		if len(updates) > 0 {
 			if err := tx.Model(&model.GroupItem{}).Where("id = ?", current.ID).
-				Update("priority", priority+1).Error; err != nil {
+				Updates(updates).Error; err != nil {
 				return fmt.Errorf("failed to update group item: %w", err)
 			}
 		}
@@ -532,16 +540,30 @@ func FlattenGroupItemsWithTopCounts(group model.Group) ([]model.GroupItem, []int
 }
 
 func flattenInto(group model.Group, depth int, path []int, seen map[int]struct{}, out *[]model.GroupItem) {
+	flattenIntoWithTier(group, depth, path, seen, out, model.GroupSmartTierAuto)
+}
+
+// flattenIntoWithTier 是展平的实际实现；tier 是外层成员声明的智能路由档位，用来下传给整条链。
+//
+// 档位是**顶层成员粒度**的（子分组整条链归档），所以一个被标记为决策引擎档的子分组，
+// 它内部的每一条成员也必须带上同一个档位 —— 否则展平之后档位就丢在子分组那一层，
+// 标在子分组上等于没标。内层自己声明的档位优先于外层下传的值（就近原则）。
+func flattenIntoWithTier(group model.Group, depth int, path []int, seen map[int]struct{}, out *[]model.GroupItem, tier string) {
 	if depth > model.GroupItemMaxDepth {
 		return
 	}
 	for _, item := range group.Items {
+		inherited := tier
+		if item.SmartTier != model.GroupSmartTierAuto {
+			inherited = item.SmartTier
+		}
 		childID := item.ChildRef()
 		if childID == 0 {
 			if _, dup := seen[item.ID]; dup {
 				continue
 			}
 			seen[item.ID] = struct{}{}
+			item.SmartTier = inherited
 			*out = append(*out, item)
 			continue
 		}
@@ -552,7 +574,7 @@ func flattenInto(group model.Group, depth int, path []int, seen map[int]struct{}
 		if slices.Contains(path, childID) {
 			continue
 		}
-		flattenInto(child, depth+1, append(path, childID), seen, out)
+		flattenIntoWithTier(child, depth+1, append(path, childID), seen, out, inherited)
 	}
 }
 

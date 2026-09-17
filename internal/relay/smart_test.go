@@ -423,6 +423,58 @@ func TestRankedHedgeCandidatesStaysInsideTier(t *testing.T) {
 	}
 }
 
+// TestSmartTierItemsHonoursExplicitTier 覆盖显式档位（T-smart-007）：
+// 只要有成员声明了档位，整批成员就改按声明切分，顺序不再参与分档。
+func TestSmartTierItemsHonoursExplicitTier(t *testing.T) {
+	// 三名成员：第 1 名标执行档、第 2 名未声明、第 3 名标决策档。
+	// 顺序口径下前两名归决策档，显式口径必须无视这一点。
+	items := []model.GroupItem{
+		{ID: 1, Priority: 1, SmartTier: model.GroupSmartTierExecution},
+		{ID: 2, Priority: 2},
+		{ID: 3, Priority: 3, SmartTier: model.GroupSmartTierDecision},
+	}
+	ids := func(list []model.GroupItem) []int {
+		out := make([]int, 0, len(list))
+		for _, item := range list {
+			out = append(out, item.ID)
+		}
+		return out
+	}
+	// decisionMembers 传「顺序口径下前两名」= 2：显式口径生效时它必须被忽略。
+	decisionMembers := SmartDecisionMembers([]int{1, 1, 1}, true)
+	if got := ids(smartTierItems(items, decisionMembers, true)); !equalInts(got, []int{3}) {
+		t.Fatalf("复杂请求的档位 = %v, 期望显式决策档 [3]", got)
+	}
+	if got := ids(smartTierItems(items, decisionMembers, false)); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("简单请求的档位 = %v, 期望显式执行档 + 未声明 [1 2]", got)
+	}
+}
+
+// TestSmartTierItemsFallsBackWhenDeclaredTierIsEmpty 覆盖「标错一边」：
+// 全部成员都标成决策引擎档，而请求是简单的 —— 目标档为空，此时必须回退全体成员而不是返回空集，
+// 否则一个标注问题会把请求变成失败。
+func TestSmartTierItemsFallsBackWhenDeclaredTierIsEmpty(t *testing.T) {
+	items := []model.GroupItem{
+		{ID: 1, SmartTier: model.GroupSmartTierDecision},
+		{ID: 2, SmartTier: model.GroupSmartTierDecision},
+	}
+	got := smartTierItems(items, 0, false)
+	if len(got) != len(items) {
+		t.Fatalf("执行档为空时的回退结果 = %d 名, 期望全体 %d 名", len(got), len(items))
+	}
+}
+
+// TestSmartTierItemsWithoutDeclarationKeepsOrderSplit 是上一组用例的对照：
+// 没有任何成员声明档位时，必须逐字保持既有的顺序对半口径（显式档位是新增能力，不能改变老分组的行为）。
+func TestSmartTierItemsWithoutDeclarationKeepsOrderSplit(t *testing.T) {
+	items := []model.GroupItem{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}}
+	decisionMembers := SmartDecisionMembers([]int{1, 1, 1, 1}, true)
+	got := smartTierItems(items, decisionMembers, true)
+	if len(got) != 2 || got[0].ID != 1 || got[1].ID != 2 {
+		t.Fatalf("未声明档位时的复杂档 = %v, 期望顺序口径的前两名 [1 2]", got)
+	}
+}
+
 func equalInts(left, right []int) bool {
 	if len(left) != len(right) {
 		return false
