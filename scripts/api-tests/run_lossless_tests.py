@@ -10,6 +10,7 @@
 Run: python run_lossless_tests.py
 """
 
+import hashlib
 import http.client
 import json
 import os
@@ -130,6 +131,40 @@ def last_upstream_body(since):
     return {}
 
 
+def credential_audit(since, channel_keys, client_key):
+    """核对窗口内的上游请求带的是谁的凭据 —— 客户端凭据绝不能出现, 渠道密钥必须出现。
+
+    mock 只落盘凭据的哈希前缀（见 mock_upstream._redact = 类型前缀 + sha256 前 12 位）,
+    故这里按同一算法比对哈希, 断言与读数都不涉及凭据原文。
+    这条断言非做不可的原因: mock 不校验密钥, 所以"上游收到错的凭据"不会让任何功能用例变红,
+    只能靠这里直接看上游实际收到的头。
+    """
+    forms_channel = set()
+    for value in channel_keys:
+        forms_channel |= {"bearer:" + hashlib.sha256(("Bearer " + value).encode()).hexdigest()[:12],
+                          "key:" + hashlib.sha256(value.encode()).hexdigest()[:12]}
+    forms_client = {"bearer:" + hashlib.sha256(("Bearer " + client_key).encode()).hexdigest()[:12],
+                    "key:" + hashlib.sha256(client_key.encode()).hexdigest()[:12]}
+    total = carried = 0
+    leaked = []
+    with open(MOCK_LOG, "r", encoding="utf-8", errors="ignore") as fh:
+        lines = fh.readlines()[since:]
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if entry.get("method") != "POST":
+            continue
+        total += 1
+        forms = {entry.get("authorization"), entry.get("x_api_key")} - {None}
+        if forms & forms_channel:
+            carried += 1
+        if forms & forms_client:
+            leaked.append(entry.get("model") or "?")
+    return total, carried, leaked
+
+
 def shape_ok(client, raw):
     """客户端拿到的响应必须是该协议的形状。"""
     try:
@@ -219,12 +254,21 @@ def main():
     key = api_key()
     time.sleep(1)
 
+    # 凭据隔离: 客户端凭据（octopus API Key）绝不能出现在上游请求里, 上游收到的必须是渠道自己的密钥。
+    # mock 不校验密钥, 故"凭据带错"不会让任何功能用例变红, 只能逐条直接看上游实际收到的头。
+    channel_keys = ["mock-any"]  # ensure_fixtures 里三个凭据配的是同一个值
+    cred_total, cred_carried, cred_leaked = 0, 0, []
+
     for client in CLIENTS:
         for pin, _bit in PINS:
             group = GROUPS[pin]
             since = log_len()
             st, raw, sent = send(client, group, key)
             entry = last_upstream_body(since)
+            rows_total, rows_carried, rows_leaked = credential_audit(since, channel_keys, key)
+            cred_total += rows_total
+            cred_carried += rows_carried
+            cred_leaked += ["%s→%s" % (client, m) for m in rows_leaked]
             body_text = json.dumps(entry.get("body") or {}, ensure_ascii=False)
             upstream_path = entry.get("path") or "?"
 
@@ -262,11 +306,22 @@ def main():
     since = log_len()
     st, raw, _ = send("messages", GROUPS["chat"], key, stream=True)
     entry = last_upstream_body(since)
+    rows_total, rows_carried, rows_leaked = credential_audit(since, channel_keys, key)
+    cred_total += rows_total
+    cred_carried += rows_carried
+    cred_leaked += ["messages流式→%s" % m for m in rows_leaked]
     upstream_stream = bool((entry.get("body") or {}).get("stream"))
     has_text = ("chat ok" in raw) or ("mock chat" in raw)
     has_terminal = ("stop_reason" in raw) or ("message_stop" in raw) or ("end_turn" in raw)
     record("流式无损[messages → chat]", st == 200 and upstream_stream and has_text and has_terminal,
            f"HTTP {st} 上游 stream={upstream_stream} SSE含上游文本={has_text} 含终止事件={has_terminal} 片段={raw[:120]!r}")
+
+    # 覆盖 3 客户端协议 × 3 上游协议位 + 1 条流式, 共 10 次上游请求。
+    record("凭据隔离[10 条协议路径]",
+           cred_total >= 10 and cred_carried == cred_total and not cred_leaked,
+           "上游请求 %d 条, 携带渠道密钥 %d 条, 携带客户端凭据 %d 条%s" % (
+               cred_total, cred_carried, len(cred_leaked),
+               (" 泄露=%s" % ",".join(cred_leaked[:3])) if cred_leaked else ""))
 
     print()
     total = len(RESULTS)
