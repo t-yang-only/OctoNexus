@@ -6,6 +6,7 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/notify"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/poolstore"
 	"github.com/bestruirui/octopus/internal/relay"
 	"github.com/bestruirui/octopus/internal/server"
 	"github.com/bestruirui/octopus/internal/task"
@@ -54,6 +55,18 @@ var startCmd = &cobra.Command{
 
 		// 告警 webhook 的设置读取源注入 notify 包 (避免 notify→op 导入环)。
 		notify.SetSettingSource(op.SettingGetString)
+
+		// 号池声明式适配器 (R-pool-ext-001 第三批): 先按设置注入域名白名单, 再把已存的适配器装回注册表。
+		// 单个适配器失效（白名单被收紧、站点改了路径）只记日志, 不阻塞启动——号池是排查现场的地方,
+		// 一个接不上的第三方工具包不该让整个实例起不来。
+		if loaded, failures := poolstore.LoadAll(); len(failures) > 0 {
+			log.Warnf("pool declarative adapters: 已装载 %d 个, %d 个失败", loaded, len(failures))
+			for _, failure := range failures {
+				log.Warnf("pool declarative adapter: %v", failure)
+			}
+		} else if loaded > 0 {
+			log.Infof("pool declarative adapters: 已装载 %d 个", loaded)
+		}
 
 		if err := op.UserInit(); err != nil {
 			log.Errorf("user init error: %v", err)

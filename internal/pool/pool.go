@@ -138,7 +138,9 @@ var registry = struct {
 	mu       sync.RWMutex
 	adapters map[string]Adapter
 	order    []string
-}{adapters: make(map[string]Adapter)}
+	builtin  map[string]bool // 内置适配器：运行时注册不可替换、不可移除。
+	runtime  map[string]bool // 运行时（声明式）注册的适配器：可替换、可移除。
+}{adapters: make(map[string]Adapter), builtin: make(map[string]bool), runtime: make(map[string]bool)}
 
 // Register 注册一个号池适配器。
 //
@@ -175,7 +177,91 @@ func Register(adapter Adapter) error {
 	}
 	registry.adapters[info.Kind] = adapter
 	registry.order = append(registry.order, info.Kind)
+	if info.Builtin {
+		registry.builtin[info.Kind] = true
+	}
 	return nil
+}
+
+// validateAdapterInfo 是 Register 与 RegisterRuntime 共用的自描述校验。
+func validateAdapterInfo(info AdapterInfo) error {
+	if info.Kind == "" {
+		return fmt.Errorf("%w: empty kind", ErrInvalidAdapter)
+	}
+	if info.Title == "" {
+		return fmt.Errorf("%w: kind %q has no title", ErrInvalidAdapter, info.Kind)
+	}
+	seen := false
+	for _, capability := range info.Capabilities {
+		if !allCapabilities[capability] {
+			return fmt.Errorf("%w: kind %q declares unknown capability %q", ErrInvalidAdapter, info.Kind, capability)
+		}
+		if capability == CapList {
+			seen = true
+		}
+	}
+	if !seen {
+		return fmt.Errorf("%w: kind %q must declare the %q capability", ErrInvalidAdapter, info.Kind, CapList)
+	}
+	return nil
+}
+
+// RegisterRuntime 注册或替换一个**运行时**适配器（声明式注册走这里）。
+//
+// 与 Register 的两点差异，都是刻意的：
+//   - 同名可替换：声明式适配器的 spec 是用户可改的，改完要能当场生效，不必重启；
+//     但内置 kind 一律不可占用、也不可替换——否则一份 JSON 就能顶掉官方账号适配器。
+//   - 单独记在 runtime 集合里：这样 UnregisterRuntime 只敢删运行时注册的那些。
+func RegisterRuntime(adapter Adapter) error {
+	if adapter == nil {
+		return fmt.Errorf("%w: nil adapter", ErrInvalidAdapter)
+	}
+	info := adapter.Info()
+	if err := validateAdapterInfo(info); err != nil {
+		return err
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.builtin[info.Kind] {
+		return fmt.Errorf("%w: kind %q 是内置适配器，不能被运行时注册覆盖", ErrDuplicateKind, info.Kind)
+	}
+	if _, exists := registry.adapters[info.Kind]; exists && !registry.runtime[info.Kind] {
+		return fmt.Errorf("%w: kind %q 已被非运行时适配器占用", ErrDuplicateKind, info.Kind)
+	}
+	if _, exists := registry.adapters[info.Kind]; !exists {
+		registry.order = append(registry.order, info.Kind)
+	}
+	registry.adapters[info.Kind] = adapter
+	registry.runtime[info.Kind] = true
+	return nil
+}
+
+// UnregisterRuntime 移除一个运行时注册的适配器；内置适配器与启动期注册的适配器都不可移除。
+func UnregisterRuntime(kind string) error {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.builtin[kind] {
+		return fmt.Errorf("%w: kind %q 是内置适配器，不能移除", ErrUnknownKind, kind)
+	}
+	if !registry.runtime[kind] {
+		return fmt.Errorf("%w: kind %q 不是运行时注册的适配器", ErrUnknownKind, kind)
+	}
+	delete(registry.adapters, kind)
+	delete(registry.runtime, kind)
+	for i, existing := range registry.order {
+		if existing == kind {
+			registry.order = append(registry.order[:i], registry.order[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
+// BuiltinKind 报告某个 kind 是否是内置适配器（供接口层判断"这个能不能删/能不能覆盖"）。
+func BuiltinKind(kind string) bool {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	return registry.builtin[kind]
 }
 
 // unregister 仅供测试使用：注册表是包级状态，单测之间要能互相隔离。
