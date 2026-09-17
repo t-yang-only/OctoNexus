@@ -68,6 +68,8 @@ SUITES = [
      "流式无进展上限（首帧后静默不再挂到客户端放弃 / 记账为真实失败 / 不换目标重试 / 0=关闭）", "instance,mock,db"),
     ("retry", "run_retry_test.py",
      "重试语义（尝试上限终结 / 确定性错误不重试 / 成员问题立即换人 / developer 角色归一化）", "instance,mock,db"),
+    ("balance", "run_balance_test.py",
+     "总余额聚合（渠道余额折算合计 / 换算口径 / 标准协议余额端点 / 未读到余额只计数）", "instance,mock,db"),
     ("weighted", "run_weighted_test.py", "加权综合选路（换权重换选择 / 全 0 退化 priority / 越界权重拒绝）", "instance,mock,db"),
     ("smart", "run_smart_route_test.py",
      "智能路由（按请求特征分档：复杂→决策引擎 / 简单→执行引擎 / 阈值两侧 / 档不可用回退）", "instance,mock,db"),

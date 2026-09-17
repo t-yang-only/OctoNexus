@@ -232,6 +232,18 @@
                 "tokens": "Tokens",
                 "cost": "Cost"
             }
+        },
+        "balance": {
+            "title": "Total Balance",
+            "subtitle": "Channel balances converted to one unit",
+            "unitHint": "Conversion: {points} points = 1 unit",
+            "knownChannels": "Channels with balance",
+            "unknownChannels": "Channels without balance",
+            "monthlyRemaining": "Remaining calls",
+            "keys": "Keys {enabled}/{total} enabled",
+            "monthly": "Monthly left {left}/{total}",
+            "unknown": "No balance yet",
+            "empty": "No channel balance yet: wait for a quota scan or refresh from the pool page."
         }
     },
     "setting": {

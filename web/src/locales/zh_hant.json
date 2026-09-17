@@ -232,6 +232,18 @@
                 "tokens": "Token",
                 "cost": "費用"
             }
+        },
+        "balance": {
+            "title": "總餘額",
+            "subtitle": "各渠道剩餘額度按統一換算口徑合計",
+            "unitHint": "換算口徑：{points} 點 = 1 單位",
+            "knownChannels": "已知餘額渠道",
+            "unknownChannels": "未讀到餘額渠道",
+            "monthlyRemaining": "剩餘次數合計",
+            "keys": "憑據 {enabled}/{total} 啟用",
+            "monthly": "包月剩餘 {left}/{total}",
+            "unknown": "未讀到餘額",
+            "empty": "還沒有渠道餘額資料：等餘額掃描跑過一輪，或到號池裡手動重新整理一次。"
         }
     },
     "setting": {

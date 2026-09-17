@@ -8,6 +8,7 @@ import { buttonVariants } from '@/components/ui/button';
 import Logo from '@/components/modules/logo';
 import { Activity } from './activity';
 import { Total } from './total';
+import { Balance } from './balance';
 import { StatsChart } from './chart';
 import { Rank } from './rank';
 import { ModelMonitor } from './monitor';
@@ -20,6 +21,7 @@ function HomeSections() {
     return (
         <div className="@container/home space-y-6">
             <Total />
+            <Balance />
             <Activity />
             <StatsChart />
             <Rank />

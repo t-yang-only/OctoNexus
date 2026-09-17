@@ -232,6 +232,18 @@
                 "tokens": "Token",
                 "cost": "费用"
             }
+        },
+        "balance": {
+            "title": "总余额",
+            "subtitle": "各渠道剩余额度按统一口径折算合计",
+            "unitHint": "换算口径：{points} 点 = 1 单位",
+            "knownChannels": "已知余额渠道",
+            "unknownChannels": "未读到余额渠道",
+            "monthlyRemaining": "剩余次数合计",
+            "keys": "凭据 {enabled}/{total} 启用",
+            "monthly": "包月剩余 {left}/{total}",
+            "unknown": "未读到余额",
+            "empty": "还没有渠道余额数据：等余额扫描跑过一轮，或到号池里手动刷新一次。"
         }
     },
     "setting": {
