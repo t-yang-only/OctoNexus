@@ -56,6 +56,8 @@ type ChannelBalanceRow struct {
 	MonthlyQuota     float64 `json:"monthly_quota"`
 	MonthlyUsed      float64 `json:"monthly_used"`
 	MonthlyRemaining float64 `json:"monthly_remaining"` // 剩余次数（包月额度 - 已用）
+	// BalanceSource 说明这条余额是哪来的：api = 从上游读到的，manual = 人在面板里录的（无接口站点）。
+	BalanceSource string `json:"balance_source,omitempty"`
 	KeyCount         int     `json:"key_count"`         // 该渠道的凭据总数
 	KeyEnabled       int     `json:"key_enabled"`       // 其中启用中的凭据数
 }
@@ -82,6 +84,10 @@ type BalanceSummary struct {
 	KnownChannels         int                 `json:"known_channels"`
 	UnknownChannels       int                 `json:"unknown_channels"`
 	Channels              []ChannelBalanceRow `json:"channels"`
+	// ManualTotal 是手动订阅贡献的余额（已计入 Total）；ManualSubscriptions 是全部手动记录的明细。
+	ManualTotal         float64                 `json:"manual_total"`
+	ManualSubscriptions []ManualSubscriptionRow `json:"manual_subscriptions"`
+	ManualExpired       int                     `json:"manual_expired"`
 	Keys                  []APIKeyBalanceRow  `json:"keys"`
 	GeneratedAt           int64               `json:"generated_at"`
 }
