@@ -112,6 +112,44 @@ def send(client, group, key, stream=False, timeout=120):
     return resp.status, raw, body
 
 
+def build_developer_body(client, group):
+    """客户端用 developer 角色携带指令：chat 放进 messages, responses 放进 input 数组。
+    （Anthropic 客户端没有 developer 角色, 不在本契约的客户端侧范围内。）"""
+    if client == "chat":
+        return {"model": group, "max_tokens": MAXTOK,
+                "messages": [{"role": "developer", "content": MARK_SYS},
+                             {"role": "user", "content": MARK_U1}]}
+    return {"model": group, "max_output_tokens": MAXTOK,
+            "input": [{"role": "developer", "content": [{"type": "input_text", "text": MARK_SYS}]},
+                      {"role": "user", "content": [{"type": "input_text", "text": MARK_U1}]}]}
+
+
+def send_developer(client, group, key, timeout=120):
+    path = {"chat": "/v1/chat/completions", "responses": "/v1/responses"}[client]
+    body = build_developer_body(client, group)
+    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + key}
+    conn = http.client.HTTPConnection(RELAY_HOST, RELAY_PORT, timeout=timeout)
+    conn.request("POST", path, body=json.dumps(body), headers=headers)
+    resp = conn.getresponse()
+    raw = resp.read().decode("utf-8", "replace")
+    conn.close()
+    return resp.status, raw, body
+
+
+def upstream_roles(body):
+    """上游正文里出现的角色：chat 形状看 messages[*].role, responses 形状看 input[*].role。"""
+    roles = []
+    for field in ("messages", "input"):
+        items = body.get(field) if isinstance(body, dict) else None
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict) and item.get("role"):
+                    roles.append(item["role"])
+        elif isinstance(items, str):
+            roles.append("%s=字符串" % field)
+    return roles
+
+
 def log_len():
     if not os.path.exists(MOCK_LOG):
         return 0
@@ -308,6 +346,30 @@ def main():
                 record(f"直通逐字段相等[{client}]", not diff and mapped,
                        ("除 model 外逐字段一致，且 model 已映射为上游模型名 %r" % got.get("model")) if (not diff and mapped)
                        else ("差异=" + json.dumps({k: v for k, v in list(diff.items())[:3]}, ensure_ascii=False)[:200] + " model=%r" % got.get("model")))
+
+    # developer 角色契约（T-devrole-001）：客户端用 developer 角色携带指令时, 上游正文里不许再出现 developer,
+    # 且这条指令的文本必须仍在（不是被整条丢掉）。chat / responses 两种客户端协议 × 3 个上游协议位 = 6 条路径,
+    # 每条都单独报出上游路径与实际角色 —— 上一条缺陷（Responses 形状漏网）正是漏在"没有人逐个路径看角色"。
+    for client in ("chat", "responses"):
+        checks = []
+        bad = []
+        for pin, _bit in PINS:
+            since = log_len()
+            st, raw, sent = send_developer(client, GROUPS[pin], key)
+            entry = last_upstream_body(since)
+            upstream = entry.get("body") or {}
+            body_text = json.dumps(upstream, ensure_ascii=False)
+            roles = upstream_roles(upstream)
+            clean = "developer" not in body_text
+            kept = MARK_SYS in body_text
+            line = "%s→%s 路径=%s 角色=%s 残留=%s 文本=%s" % (
+                client, pin, entry.get("path") or "?", roles, not clean, kept)
+            checks.append(line)
+            if not (st == 200 and clean and kept):
+                bad.append("HTTP %s %s" % (st, line))
+        record("developer 契约[%s 客户端 × 3 上游协议]" % client, not bad,
+               ("6→3 条路径全部无 developer 残留且指令文本保留: " + "; ".join(checks)) if not bad
+               else ("有问题: " + "; ".join(bad) + " || 其余: " + "; ".join(checks)))
 
     # 流式：Anthropic 入 → Chat 上游出，SSE 必须带上游增量文本
     since = log_len()
