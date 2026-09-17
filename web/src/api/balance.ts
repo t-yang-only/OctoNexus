@@ -1,5 +1,6 @@
 import { queryOptions, useQuery } from '@tanstack/react-query';
 import { apiRequest } from './client';
+import type { ManualSubscriptionRow } from './subscription';
 
 /**
  * 总余额（T-balance-001）
@@ -21,6 +22,8 @@ export interface ChannelBalanceRow {
     monthly_quota: number;
     monthly_used: number;
     monthly_remaining: number;
+    /** balance_source: api = 从上游读到的；manual = 人在面板里录的（无接口站点，见手动订阅）。 */
+    balance_source?: 'api' | 'manual';
     key_count: number;
     key_enabled: number;
 }
@@ -46,6 +49,11 @@ export interface BalanceSummary {
     unknown_channels: number;
     channels: ChannelBalanceRow[];
     keys: APIKeyBalanceRow[];
+    /** 手动订阅贡献的余额（已含在 total 里）。 */
+    manual_total: number;
+    manual_subscriptions: ManualSubscriptionRow[];
+    /** 已过期的手动订阅条数（不计入总额，面板据此提醒续费）。 */
+    manual_expired: number;
     generated_at: number;
 }
 

@@ -27,6 +27,11 @@ func InitCache() error {
 	if err := statsRefreshCache(ctx); err != nil {
 		return fmt.Errorf("stats refresh cache error: %v", err)
 	}
+	// 手动订阅（R-acct-004）：它是总余额的一部分，必须与其它缓存一起就位，
+	// 否则重启后的第一份快照会少算用户手录的余额。
+	if err := ManualSubscriptionRefresh(ctx); err != nil {
+		return fmt.Errorf("manual subscription refresh cache error: %v", err)
+	}
 	return nil
 }
 

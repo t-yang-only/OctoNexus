@@ -72,6 +72,8 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.OfficialAccount{},
 		&model.JumpToken{},
 		&model.UsageHourly{},
+		// 手动订阅（R-acct-004）：纯新增表，没有存量数据要迁移，因此不需要单独的迁移文件。
+		&model.ManualSubscription{},
 		&migrate.MigrationRecord{},
 	); err != nil {
 		return err
