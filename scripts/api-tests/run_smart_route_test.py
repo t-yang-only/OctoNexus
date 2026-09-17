@@ -39,6 +39,10 @@ GROUP = "DS-TEST-smart"
 GROUP_ORDER = "DS-TEST-smart-order"      # 用于 S7：同两个成员，模式切回 failover
 GROUP_HEDGE = "DS-TEST-smart-hedge"      # 用于 S8：四个成员（决策档两名 + 执行档两名）+ 开启竞速
 CHANNEL_BAD = "DS-TEST-smart-bad"
+# S9 用的子分组（T-smart-006）：档位按**顶层成员**切分，子分组（一条链）整体归档，不会被从中间切开。
+CHILD_DECISION = "DS-TEST-smart-child-decision"  # 决策链：1 个成员（故意比执行链小）
+CHILD_EXECUTION = "DS-TEST-smart-child-execution"  # 执行链：2 个成员
+GROUP_CHILD = "DS-TEST-smart-child"
 
 COOKIE = {}
 RESULTS = []
@@ -151,7 +155,7 @@ def complex_body(rounds=8, tools=8, pad=0):
 
 
 def cleanup():
-    for name in (GROUP, GROUP_ORDER, GROUP_HEDGE):
+    for name in (GROUP, GROUP_ORDER, GROUP_HEDGE, GROUP_CHILD, CHILD_DECISION, CHILD_EXECUTION):
         gid = scalar("select id from groups where name=?", (name,))
         if gid:
             call("DELETE", "/api/v1/group/delete/%d" % gid)
@@ -234,6 +238,35 @@ def ensure_group_hedge(name, grant_ids):
     return status == 200
 
 
+def ensure_child_group(name, grant_ids):
+    """子分组：普通 failover 分组（链内自己选），供上层智能路由按顶层成员切档。"""
+    gid = scalar("select id from groups where name=?", (name,))
+    if gid:
+        call("DELETE", "/api/v1/group/delete/%d" % gid)
+    status, _ = call("POST", "/api/v1/group/create", {
+        "name": name, "mode": "failover",
+        "items": [{"channel_grant_id": g} for g in grant_ids],
+        "relay_config": {"member_max_attempts": 1, "member_retry_interval_seconds": 1,
+                         "member_cooldown_seconds": 1, "member_affinity_seconds": 0}})
+    if status != 200:
+        return None
+    return scalar("select id from groups where name=?", (name,))
+
+
+def ensure_group_by_children(name, child_ids):
+    """上层智能路由分组：成员是两个子分组（决策链在前、执行链在后）。"""
+    gid = scalar("select id from groups where name=?", (name,))
+    if gid:
+        call("DELETE", "/api/v1/group/delete/%d" % gid)
+    status, _ = call("POST", "/api/v1/group/create", {
+        "name": name, "mode": "smart",
+        "items": [{"child_group_id": cid} for cid in child_ids],
+        "relay_config": {"member_max_attempts": 1, "member_retry_interval_seconds": 1,
+                         "member_cooldown_seconds": 1, "member_affinity_seconds": 0,
+                         "smart_route_threshold": 50}})
+    return status == 200
+
+
 def main():
     call("POST", "/api/v1/user/login", {"username": "admin", "password": "admin"})
     cleanup()
@@ -253,6 +286,12 @@ def main():
     # 奇数/偶数档位切分口径见 SmartTierItems: 4 名成员 → 前 2 后 2。
     if not ensure_group_hedge(GROUP_HEDGE, strong_grants + fast_grants):
         record("S0 装置就位", False, "竞速用例分组创建失败")
+        return 1
+    # S9 用的两个子分组：决策链 1 个成员、执行链 2 个成员（故意不等长，用来暴露"按展平条数对半切"的错法）。
+    child_decision = ensure_child_group(CHILD_DECISION, [strong_grants[0]])
+    child_execution = ensure_child_group(CHILD_EXECUTION, fast_grants)
+    if not child_decision or not child_execution or not ensure_group_by_children(GROUP_CHILD, [child_decision, child_execution]):
+        record("S0 装置就位", False, "子分组用例装置失败")
         return 1
     record("S0 装置就位", True, "两个渠道（各两条凭据）+ 智能路由分组 + 竞速分档分组就位")
     time.sleep(1)
@@ -341,6 +380,25 @@ def main():
         hedge_detail.append("%s → HTTP %s 上游尝试=%s（应为 %s 且不含 %s）" % (
             label, status, seen, expect_model, forbid_model))
     record("S8 竞速不越档（简单不碰强渠道 / 复杂不碰快渠道）", hedge_ok, "; ".join(hedge_detail))
+
+    # S9 档位按顶层成员切分（T-smart-006）：子分组是一条链，整体归入某一档。
+    # 装置故意做成「决策链 1 个成员 + 执行链 2 个成员」——按展平后的条数对半切会把执行链的第一个成员
+    # 算进决策档（复杂请求于是会落到便宜的那条链上）；按顶层成员切则复杂只走强链、简单只走快链。
+    child_cases = (
+        ("复杂请求", complex_body(), MODEL_STRONG, MODEL_FAST),
+        ("简单请求", simple_body(), MODEL_FAST, MODEL_STRONG),
+    )
+    child_detail = []
+    child_ok = True
+    for label, body, expect_model, forbid_model in child_cases:
+        offset = mark()
+        status, _raw = relay(GROUP_CHILD, body)
+        seen = [row.get("model") for row in rows_since(offset)]
+        ok = status == 200 and seen and forbid_model not in seen and all(m == expect_model for m in seen)
+        child_ok = child_ok and ok
+        child_detail.append("%s → HTTP %s 上游尝试=%s（应全为 %s 且不含 %s）" % (
+            label, status, seen, expect_model, forbid_model))
+    record("S9 档位按顶层成员切分（子分组整条链归档，不被切开）", child_ok, "; ".join(child_detail))
 
     passed = sum(1 for _n, ok, _d in RESULTS if ok)
     print("\nSMART_ROUTE_TEST total=%d pass=%d fail=%d" % (len(RESULTS), passed, len(RESULTS) - passed))

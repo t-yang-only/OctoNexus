@@ -508,10 +508,27 @@ func groupRefreshCache(ctx context.Context) error {
 // 冷却/探测/亲和的键是展平后具体成员行 ID (跨树唯一), 子分组不持有独立路由状态;
 // 缺失的子分组引用直接跳过 (GroupDel 已在写侧级联, 残留只是脏缓存的瞬态)。
 func FlattenGroupItems(group model.Group) []model.GroupItem {
+	flat, _ := FlattenGroupItemsWithTopCounts(group)
+	return flat
+}
+
+// FlattenGroupItemsWithTopCounts 与 FlattenGroupItems 完全同语义（同一个遍历实现），
+// 额外返回**每个顶层成员**贡献的展平成员条数（与 group.Items 等长、按引用顺序）。
+//
+// 用途（T-smart-006）：智能路由的档位必须在**顶层成员**粒度上切分 —— 子分组是一条链，
+// 若按展平后的成员条数对半切，链会被从中间切开（例如决策链 1 个成员 + 执行链 2 个成员时，
+// 复杂请求会把执行链的第一个成员算进决策档）。展平成员在遍历顺序上按顶层成员分段且连续，
+// 所以「前 k 个顶层成员贡献的条数之和」就是切分点在平面表里的下标。
+func FlattenGroupItemsWithTopCounts(group model.Group) ([]model.GroupItem, []int) {
 	seen := make(map[int]struct{})
 	out := make([]model.GroupItem, 0, len(group.Items))
-	flattenInto(group, 0, []int{group.ID}, seen, &out)
-	return out
+	counts := make([]int, 0, len(group.Items))
+	for _, item := range group.Items {
+		before := len(out)
+		flattenInto(model.Group{ID: group.ID, Items: []model.GroupItem{item}}, 0, []int{group.ID}, seen, &out)
+		counts = append(counts, len(out)-before)
+	}
+	return out, counts
 }
 
 func flattenInto(group model.Group, depth int, path []int, seen map[int]struct{}, out *[]model.GroupItem) {

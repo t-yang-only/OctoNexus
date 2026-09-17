@@ -39,6 +39,16 @@ type SmartFeatures struct {
 	Score  int // 0..100 的复杂度评分
 }
 
+// SmartRoute 是智能路由一次请求的完整判定输入：请求特征 + 档位切分点。
+//
+// DecisionMembers 是**决策引擎档在展平成员列表里的条数**（其余归执行引擎档）。它由调用方按顶层成员结构
+// 算好（见 SmartDecisionMembers）：顶层成员（可能是子分组）整体归入某一档，子分组不会被从中间切开。
+// 为 0（调用方没给结构，例如直接走兼容外壳）或 ≥ 成员总数（只有一个顶层成员）时退回整体对半 / 全量口径。
+type SmartRoute struct {
+	Features        SmartFeatures
+	DecisionMembers int
+}
+
 // smartScore 把三个特征归一化到 0..100 后等权平均（阶跃文档列的三个依据权重相同）。
 // 任一特征为 0 就是 0 分，不需要额外惩罚 —— 平均本身就让"只有一项大"的请求拿到中等分。
 func smartScore(rounds, tokens, tools int) int {
@@ -94,22 +104,56 @@ func SmartComplex(features SmartFeatures, threshold int) bool {
 	return features.Score >= threshold
 }
 
-// SmartTierItems 按成员顺序把成员切成两档：靠前的是决策引擎档，靠后的是执行引擎档。
-// 成员数为 1 时只有决策引擎档（此时两档等价，选谁都一样）；成员数为奇数时多出来的那一个归决策引擎档，
-// 保证「复杂请求可用的成员数 ≥ 简单请求可用的成员数」—— 复杂请求更需要选择余地。
-func SmartTierItems(items []model.GroupItem, complex bool) []model.GroupItem {
+// SmartTierTopCount 返回按顶层成员条数切分时，决策引擎档包含几个顶层成员：
+// 靠前的一半（奇数多出来的那一个归决策引擎档），保证「复杂请求可用的成员数 ≥ 简单请求可用的成员数」
+// —— 复杂请求更需要选择余地。顶层成员数为 1 时两档都是它（等价于不分档）。
+func SmartTierTopCount(topCount int, complex bool) int {
+	if topCount <= 0 {
+		return 0
+	}
+	half := (topCount + 1) / 2
+	if complex {
+		return half
+	}
+	if half >= topCount {
+		return topCount
+	}
+	return half
+}
+
+// SmartDecisionMembers 把「决策档的顶层成员数」换算成展平列表里的条数（front 为 True 时取前 k 个顶层成员之和）：
+// topCounts[i] 是第 i 个顶层成员展平后的成员条数（见 op.FlattenGroupItemsWithTopCounts）。
+// 展平成员按顶层成员分段且连续，所以前缀和就是档位在平面表里的下标。
+func SmartDecisionMembers(topCounts []int, complex bool) int {
+	top := SmartTierTopCount(len(topCounts), complex)
+	total := 0
+	for i := 0; i < top && i < len(topCounts); i++ {
+		total += topCounts[i]
+	}
+	return total
+}
+
+// smartTierItems 按档位切出本次请求要用的成员：前 decisionMembers 个归决策引擎档，其余归执行引擎档。
+// decisionMembers 为 0 或 ≥ 成员总数时退回「整体对半 / 全量」口径（调用方没给顶层结构时的兜底）。
+func smartTierItems(items []model.GroupItem, decisionMembers int, complex bool) []model.GroupItem {
 	if len(items) == 0 {
 		return nil
 	}
-	if complex {
-		half := (len(items) + 1) / 2
-		return items[:half]
+	if decisionMembers <= 0 {
+		// 调用方没给顶层结构（例如直接走兼容外壳）：退回整体对半的旧口径。
+		decisionMembers = (len(items) + 1) / 2
 	}
-	half := (len(items) + 1) / 2
-	if half >= len(items) {
+	if decisionMembers > len(items) {
+		decisionMembers = len(items)
+	}
+	if complex {
+		return items[:decisionMembers]
+	}
+	if decisionMembers >= len(items) {
+		// 只有一个顶层成员（整条链都在「决策档」）：两档都是它，不能退化成空集。
 		return items
 	}
-	return items[half:]
+	return items[decisionMembers:]
 }
 
 // pickGroupItemSmart 智能路由的选路：先按复杂度选定档位，再在该档内沿用既有选路
@@ -118,10 +162,10 @@ func SmartTierItems(items []model.GroupItem, complex bool) []model.GroupItem {
 // 回退的理由：档位只是「优先考虑谁」，不是「只许用谁」。目标档的成员全被冷却或渠道停用时，
 // 回退到全体成员仍能出发 —— 否则智能路由就成了新的失败来源（这是它最容易踩的坑：
 // 简单请求占多数，若执行引擎档整档掉线而这里只回退一次就放弃，会把「省钱」变成「不可用」）。
-func pickGroupItemSmart(group model.Group, deps routeDeps, balanceEnabled bool, features SmartFeatures) model.GroupItem {
+func pickGroupItemSmart(group model.Group, deps routeDeps, balanceEnabled bool, smart SmartRoute) model.GroupItem {
 	threshold := group.RelayConfig.SmartRouteThreshold
-	complex := SmartComplex(features, threshold)
-	tiered := SmartTierItems(group.Items, complex)
+	complex := SmartComplex(smart.Features, threshold)
+	tiered := smartTierItems(group.Items, smart.DecisionMembers, complex)
 	if len(tiered) == 0 {
 		return model.GroupItem{}
 	}
@@ -134,14 +178,12 @@ func pickGroupItemSmart(group model.Group, deps routeDeps, balanceEnabled bool, 
 }
 
 // smartTierNames 给日志/测试用：把成员按档位分组后返回两边的主键列表（保持原顺序）。
-func smartTierNames(items []model.GroupItem) map[string][]int {
+func smartTierNames(items []model.GroupItem, decisionMembers int) map[string][]int {
 	out := map[string][]int{"decision": {}, "execution": {}}
-	decision := SmartTierItems(items, true)
-	execution := SmartTierItems(items, false)
-	for _, item := range decision {
+	for _, item := range smartTierItems(items, decisionMembers, true) {
 		out["decision"] = append(out["decision"], item.ID)
 	}
-	for _, item := range execution {
+	for _, item := range smartTierItems(items, decisionMembers, false) {
 		out["execution"] = append(out["execution"], item.ID)
 	}
 	return out

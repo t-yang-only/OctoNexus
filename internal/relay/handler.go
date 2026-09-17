@@ -120,8 +120,16 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			// 加权轮询 flag (T-route-002) 默认关: 关时行为与原路径完全一致;
 			// 开时仅改 failover 候选定序, 冷却/探测/亲和仍归顶层 RouteState。
 			// 已被上游以"请求本身非法"拒绝的成员在本请求内不再重复尝试（其余成员正常参与选路）。
-			items := dropRejectedMembers(op.FlattenGroupItems(group), rejectedItems)
-			item := pickGroupItemHotWithFeatures(group.WithItems(items), smartFeatures)
+			// 展平同时取回每个顶层成员贡献的条数：智能路由的档位按**顶层成员**切分，
+			// 子分组（一条链）整体归入某一档，不会被从中间切开（T-smart-006）。
+			flat, topCounts := op.FlattenGroupItemsWithTopCounts(group)
+			items := dropRejectedMembers(flat, rejectedItems)
+			smart := SmartRoute{
+				Features: smartFeatures,
+				DecisionMembers: SmartDecisionMembers(topCounts,
+					SmartComplex(smartFeatures, group.RelayConfig.SmartRouteThreshold)),
+			}
+			item := pickGroupItemHotWithFeatures(group.WithItems(items), smart)
 			if item.ID == 0 {
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
 					return
@@ -171,7 +179,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				}
 				// 智能路由下竞速只在选中那一档内进行（见 rankedHedgeCandidatesWithFeatures）：
 				// 否则简单请求会连强成员一起跑，复杂度分档的成本控制被竞速绕过。
-				candidates := hotRouteDeps().rankedHedgeCandidatesWithFeatures(group.WithItems(op.FlattenGroupItems(group)), smartFeatures)
+				candidates := hotRouteDeps().rankedHedgeCandidatesWithFeatures(group.WithItems(flat), smart)
 				for _, candidate := range candidates {
 					if len(hedgeTargets) >= settings.width-1 {
 						break
