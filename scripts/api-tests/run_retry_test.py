@@ -39,9 +39,14 @@ MOCK_BASE = os.environ.get("OCTOPUS_MOCK_BASE", "http://127.0.0.1:18099/v1")
 
 CHANNEL = "DS-TEST-retry"
 GOOD, BAD, REJECT400, REJECT401 = "mock-good", "mock-bad", "mock-reject400", "mock-reject401"
+CONV = "mock-chatonly"  # 转换路径专用成员: 它只说 messages, chat 客户端命中它时必然被转换
 GROUP_CAP, GROUP_400_SOLO, GROUP_400_PAIR, GROUP_401_PAIR, GROUP_MANUAL, GROUP_DEV = (
     "DS-TEST-retrycap", "DS-TEST-retry400solo", "DS-TEST-retry400pair",
     "DS-TEST-retry401pair", "DS-TEST-retrymanual", "DS-TEST-retrydev")
+GROUP_CONV = "DS-TEST-retryconv"
+KEY_MAIN, KEY_CONV = "mockkey", "convkey"
+CHANNEL_KEY_SECRET = "mock-secret-not-a-real-key"
+CONV_KEY_SECRET = "mock-secret-conv-not-a-real-key"
 
 # max_attempts=2 ⇒ 单成员上限 max(6, 1×2×2)=6（见 internal/relay/retry.go attemptCap）。
 EXPECTED_SOLO_CAP = 6
@@ -193,17 +198,21 @@ def ensure_channel():
     existing = scalar("select id from channels where name=?", (CHANNEL,))
     if existing:
         call("DELETE", "/api/v1/channel/delete/%d" % existing)
-    models = [GOOD, BAD, REJECT400, REJECT401]
+    models = [GOOD, BAD, REJECT400, REJECT401, CONV]
     payload = {"name": CHANNEL, "dialect": "generic", "enabled": True, "base_url": MOCK_BASE,
-               "keys": [{"name": "mockkey", "key": "mock-secret-not-a-real-key", "enabled": True}],
+               "keys": [{"name": KEY_MAIN, "key": CHANNEL_KEY_SECRET, "enabled": True},
+                        {"name": KEY_CONV, "key": CONV_KEY_SECRET, "enabled": True}],
                "models": models}
     call("POST", "/api/v1/channel/create", payload)
     cid = scalar("select id from channels where name=?", (CHANNEL,))
     if not cid:
         return None
+    # protocols 位: 2=chat / 4=responses / 8=messages（见 lossless 套件 PINS）。前四个成员说全协议,
+    # CONV 固定只说 messages —— chat 客户端命中它时必然走转换路径。
     call("POST", "/api/v1/channel/update", dict(payload, id=cid,
-                                                grants=[{"model_name": m, "key_name": "mockkey", "protocols": 14}
-                                                        for m in models]))
+                                                grants=[{"model_name": m, "key_name": KEY_MAIN, "protocols": 14}
+                                                        for m in (GOOD, BAD, REJECT400, REJECT401)]
+                                                       + [{"model_name": CONV, "key_name": KEY_CONV, "protocols": 8}]))
     return cid
 
 
@@ -241,7 +250,7 @@ def group_item_id(group_id):
 
 
 def remove_fixtures():
-    for name in (GROUP_CAP, GROUP_400_SOLO, GROUP_400_PAIR, GROUP_401_PAIR, GROUP_MANUAL, GROUP_DEV):
+    for name in (GROUP_CAP, GROUP_400_SOLO, GROUP_400_PAIR, GROUP_401_PAIR, GROUP_MANUAL, GROUP_DEV, GROUP_CONV):
         gid = scalar("select id from groups where name=?", (name,))
         if gid:
             call("DELETE", "/api/v1/group/delete/%d" % gid)
@@ -254,7 +263,7 @@ def main():
     call("POST", "/api/v1/user/login", {"username": "admin", "password": "admin"})
     cid = ensure_channel()
     grant = grants()
-    if not cid or len(grant) < 4:
+    if not cid or len(grant) < 5:
         record("R0 装置就位", False, "渠道/授权创建失败 channel=%s grants=%s" % (cid, grant))
         return 1
     ensure_group(GROUP_CAP, [grant[BAD]])
@@ -263,6 +272,7 @@ def main():
     ensure_group(GROUP_401_PAIR, [grant[REJECT401], grant[GOOD]])
     manual_id = ensure_group(GROUP_MANUAL, [grant[BAD]], mode="manual")
     ensure_group(GROUP_DEV, [grant[GOOD]])
+    ensure_group(GROUP_CONV, [grant[CONV]])
     item = group_item_id(manual_id) if manual_id else None
     if manual_id and item:
         call("POST", "/api/v1/group/update/%d" % manual_id, {"active_item_id": item})
@@ -334,7 +344,7 @@ def main():
     offset = mark()
     status, secs, body = relay(GROUP_400_PAIR)
     rows = [r for r in rows_since(offset) if r.get("model") == GOOD]
-    channel_key = "mock-secret-not-a-real-key"  # ensure_channel 里配置的渠道密钥
+    channel_key = CHANNEL_KEY_SECRET  # ensure_channel 里配置的渠道密钥
     client_key = api_key() or ""
     channel_bearer = "bearer:" + hashlib.sha256(("Bearer " + channel_key).encode()).hexdigest()[:12]
     channel_header = "key:" + hashlib.sha256(channel_key.encode()).hexdigest()[:12]
@@ -352,6 +362,26 @@ def main():
            status == 200 and len(seen) >= 1 and len(carried) == len(seen) and not leaked and not leaked_any,
            "HTTP %s 上游请求 %d 条, 携带渠道密钥 %d 条, 携带客户端凭据 %d 条（任意头部 %d 条）" % (
                status, len(seen), len(carried), len(leaked), len(leaked_any)))
+
+    # R8 转换路径同样要改写 developer：R6 守的是同协议直通（protocol.go 的 buildPassthroughRequest），
+    # 这里守跨协议转换（upstream.go 的转换中间件）——两条路径各有守位, 少一个就会漏（变异检查发现的覆盖缺口）。
+    offset = mark()
+    status, secs, body = relay(GROUP_CONV, messages=[
+        {"role": "developer", "content": "be terse"},
+        {"role": "user", "content": "ping"},
+    ])
+    rows = [r for r in rows_since(offset) if r.get("model") == CONV]
+    row = rows[-1] if rows else {}
+    converted = "/v1/messages" in (row.get("path") or "")
+    upstream = row.get("body") or {}
+    raw = json.dumps(upstream, ensure_ascii=False)
+    roles = [x.get("role") for x in (upstream.get("messages") or [])]
+    no_dev = "developer" not in raw
+    kept = "be terse" in raw
+    record("R8 转换路径 developer 角色同样改写为 system",
+           status == 200 and converted and no_dev and kept,
+           "HTTP %s 耗时 %ss 上游路径=%s 上游角色=%s developer残留=%s 文本保留=%s" % (
+               status, secs, row.get("path"), roles, not no_dev, kept))
 
     return 0
 
