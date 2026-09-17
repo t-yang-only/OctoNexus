@@ -68,6 +68,20 @@ def _redact(value):
     return kind + hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
+def header_digests(headers):
+    """所有请求头的「小写名 → 值指纹」—— 用于断言客户端凭据没有从**任何头部**漏到上游。
+
+    只落指纹（与 _redact 同款算法），不落原文；authorization / x_api_key 这两个字段仍是
+    正面断言用的显式列，这里是它们的补集：自定义头也在记录范围内。
+    """
+    out = {}
+    for name, value in headers.items():
+        digest = _redact(value)
+        if digest:
+            out[name.lower()] = digest
+    return out
+
+
 def redact_path(path):
     """路径里可能整段就是凭据（Server酱 的 /<SendKey>.send）—— 落盘前一律换成指纹。
 
@@ -233,6 +247,7 @@ class Handler(BaseHTTPRequestHandler):
             "body": body,
             "authorization": _redact(self.headers.get("Authorization")),
             "x_api_key": _redact(self.headers.get("x-api-key")),
+            "headers": header_digests(self.headers),
             "anthropic_version": self.headers.get("anthropic-version"),
             "body_keys": sorted(body.keys()),
         })

@@ -344,10 +344,14 @@ def main():
     # 窗口内可能有后台探活等并发请求, 故不强求"恰好一条", 但**每一条**都必须是渠道密钥、且一条都不许带客户端凭据。
     carried = [pair for pair in seen if channel_bearer in pair or channel_header in pair]
     leaked = [pair for pair in seen if client_bearer in pair or client_header in pair]
+    # 除两个凭据列外, 任何头部的指纹里也不许出现客户端凭据；再兜一层：整行里不许出现凭据原文。
+    leaked_any = [r for r in rows
+                  if {client_bearer, client_header} & set((r.get("headers") or {}).values())
+                  or (client_key and client_key in json.dumps(r, ensure_ascii=False))]
     record("R7 客户端凭据不透传给上游",
-           status == 200 and len(seen) >= 1 and len(carried) == len(seen) and not leaked,
-           "HTTP %s 上游请求 %d 条, 携带渠道密钥 %d 条, 携带客户端凭据 %d 条" % (
-               status, len(seen), len(carried), len(leaked)))
+           status == 200 and len(seen) >= 1 and len(carried) == len(seen) and not leaked and not leaked_any,
+           "HTTP %s 上游请求 %d 条, 携带渠道密钥 %d 条, 携带客户端凭据 %d 条（任意头部 %d 条）" % (
+               status, len(seen), len(carried), len(leaked), len(leaked_any)))
 
     return 0
 
