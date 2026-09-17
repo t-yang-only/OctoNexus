@@ -133,11 +133,32 @@ func SmartDecisionMembers(topCounts []int, complex bool) int {
 	return total
 }
 
-// smartTierItems 按档位切出本次请求要用的成员：前 decisionMembers 个归决策引擎档，其余归执行引擎档。
-// decisionMembers 为 0 或 ≥ 成员总数时退回「整体对半 / 全量」口径（调用方没给顶层结构时的兜底）。
+// smartTierItems 按档位切出本次请求要用的成员。
+//
+// 两种口径，显式优先：
+//  1. 显式口径：只要有任意一个成员声明了档位（GroupItem.SmartTier，顶层声明会随展平下传给整条链），
+//     就按声明切分 —— 复杂请求取 decision 档，简单请求取其余成员（execution 档 + 未声明的）。
+//     目标档为空时返回全体成员：这是「标错一边」的兜底，档位是"优先考虑谁"而不是"只许用谁"。
+//  2. 顺序口径（既有行为，逐字不变）：前 decisionMembers 个归决策引擎档，其余归执行引擎档。
+//     decisionMembers 为 0 或 ≥ 成员总数时退回「整体对半 / 全量」口径（调用方没给顶层结构时的兜底）。
 func smartTierItems(items []model.GroupItem, decisionMembers int, complex bool) []model.GroupItem {
 	if len(items) == 0 {
 		return nil
+	}
+	if hasExplicitSmartTier(items) {
+		tiered := make([]model.GroupItem, 0, len(items))
+		for _, item := range items {
+			inDecision := item.SmartTier == model.GroupSmartTierDecision
+			if inDecision == complex {
+				tiered = append(tiered, item)
+			}
+		}
+		if len(tiered) == 0 {
+			// 声明的档位与本次请求的档位对不上（例如所有成员都标成决策引擎档，而这是个简单请求）：
+			// 回退全体成员而不是返回空集 —— 空集会让请求直接失败，把一个标注问题升级成故障。
+			return items
+		}
+		return tiered
 	}
 	if decisionMembers <= 0 {
 		// 调用方没给顶层结构（例如直接走兼容外壳）：退回整体对半的旧口径。
@@ -154,6 +175,17 @@ func smartTierItems(items []model.GroupItem, decisionMembers int, complex bool) 
 		return items
 	}
 	return items[decisionMembers:]
+}
+
+// hasExplicitSmartTier 报告这批成员里有没有人显式声明了档位。
+// 声明与否决定整批成员走显式口径还是顺序口径，所以只要有一个就算。
+func hasExplicitSmartTier(items []model.GroupItem) bool {
+	for _, item := range items {
+		if item.SmartTier != model.GroupSmartTierAuto {
+			return true
+		}
+	}
+	return false
 }
 
 // pickGroupItemSmart 智能路由的选路：先按复杂度选定档位，再在该档内沿用既有选路

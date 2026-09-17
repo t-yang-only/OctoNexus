@@ -76,6 +76,7 @@ export const GroupCard = memo(function GroupCard({ group, now }: { group: Group;
                 channel_name: item.channel_name,
                 key_name: '',
                 protocols: 0,
+                smart_tier: item.smart_tier ?? '',
                 item_id: item.id,
             }
             : {
@@ -89,6 +90,7 @@ export const GroupCard = memo(function GroupCard({ group, now }: { group: Group;
                 channel_name: item.channel_name,
                 key_name: item.key_name,
                 protocols: item.protocols,
+                smart_tier: item.smart_tier ?? '',
                 item_id: item.id,
             }),
         [group.items]
@@ -106,13 +108,21 @@ export const GroupCard = memo(function GroupCard({ group, now }: { group: Group;
 
     // 成员为整体替换, 拖拽与移除都直接提交当前排列, 优先级由提交顺序决定。
     // 双引用载荷：授权成员给 channel_grant_id，子分组成员给 child_group_id，另一侧填 0。
+// memberPayload 把界面成员转成提交载荷：双引用（授权 / 子分组）互斥，另一侧填 0。
+// smart_tier 只在有值时出现，空串不发 —— 后端收到空值等于「未声明」，与缺省同义。
+function memberPayload(m: SelectedMember) {
+    const base = m.kind === 'child'
+        ? { channel_grant_id: 0, child_group_id: m.child_group_id }
+        : { channel_grant_id: m.channel_grant_id, child_group_id: 0 };
+    return m.smart_tier ? { ...base, smart_tier: m.smart_tier } : base;
+}
+
     const submitMembers = useCallback((next: SelectedMember[]) => {
         updateGroup.mutate(
             {
                 id: group.id,
-                items: next.map((m) => m.kind === 'child'
-                    ? { channel_grant_id: 0, child_group_id: m.child_group_id }
-                    : { channel_grant_id: m.channel_grant_id, child_group_id: 0 }),
+                // 档位随成员整表提交：漏掉它会让一次拖拽把显式档位悄悄清空。
+                items: next.map((m) => memberPayload(m)),
             },
             { onSuccess, onError },
         );
@@ -149,18 +159,18 @@ export const GroupCard = memo(function GroupCard({ group, now }: { group: Group;
             || values.relay_config.hedge_after_ms !== group.relay_config.hedge_after_ms
             || values.relay_config.hedge_peak_in_flight !== group.relay_config.hedge_peak_in_flight
         ) payload.relay_config = values.relay_config;
-        // 成员集合与顺序有任一处不同就整体提交; 后端按引用（授权/子分组）匹配, 已有成员保留其主键与统计。
+        // 成员集合, 顺序或智能路由档位有任一处不同就整体提交; 后端按引用（授权/子分组）匹配, 已有成员保留其主键与统计。
+        // 档位必须算进这份差异里: 只改档位不动顺序时, 提交条件若不看档位就会静默丢弃这次修改。
         const refKey = (m: { channel_grant_id: number; child_group_id: number }) =>
             m.child_group_id ? `c:${m.child_group_id}` : `g:${m.channel_grant_id}`;
-        const nextRefs = values.members.map((m) => refKey(m));
+        const tierSuffix = (m: { smart_tier?: string }) => (m.smart_tier ? `@${m.smart_tier}` : '');
+        const nextRefs = values.members.map((m) => refKey(m) + tierSuffix(m));
         const currentRefs = (group.items || []).map((item) => refKey({
             channel_grant_id: item.channel_grant_id ?? 0,
             child_group_id: item.child_group_id ?? 0,
-        }));
+        }) + tierSuffix({ smart_tier: item.smart_tier }));
         if (nextRefs.length !== currentRefs.length || nextRefs.some((id, i) => id !== currentRefs[i])) {
-            payload.items = values.members.map((m) => m.kind === 'child'
-                ? { channel_grant_id: 0, child_group_id: m.child_group_id }
-                : { channel_grant_id: m.channel_grant_id, child_group_id: 0 });
+            payload.items = values.members.map((m) => memberPayload(m));
         }
 
         if (Object.keys(payload).length === 1) {

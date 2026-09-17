@@ -257,12 +257,16 @@ function SortSection({
     onRemove,
     removingIds,
     onClear,
+    smartMode,
+    onTierChange,
 }: {
     members: SelectedMember[];
     onReorder: (members: SelectedMember[]) => void;
     onRemove: (id: string) => void;
     removingIds: Set<string>;
     onClear: () => void;
+    smartMode?: boolean;
+    onTierChange?: (id: string, tier: string) => void;
 }) {
     const t = useTranslations('group');
 
@@ -300,6 +304,8 @@ function SortSection({
                     onRemove={onRemove}
                     removingIds={removingIds}
                     showConfirmDelete={false}
+                    smartMode={smartMode}
+                    onTierChange={onTierChange}
                 />
             </div>
         </div>
@@ -491,6 +497,12 @@ export function GroupEditor({
         setRemovingIds(new Set());
     }, []);
 
+    // handleTierChange 改单个成员的智能路由档位（空串 = 按成员顺序自动切分）。
+    // 档位只影响 mode=smart 下的分档，所以只改本地状态；提交时随成员一并送出。
+    const handleTierChange = useCallback((id: string, tier: string) => {
+        setSelectedMembers((prev) => prev.map((m) => (m.id === id ? { ...m, smart_tier: tier } : m)));
+    }, []);
+
     const isValid = groupKey.length > 0 && selectedMembers.length > 0;
 
     const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -567,6 +579,8 @@ export function GroupEditor({
                                     onRemove={handleRemoveMember}
                                     removingIds={removingIds}
                                     onClear={handleClearMembers}
+                                    smartMode={mode === 'smart'}
+                                    onTierChange={handleTierChange}
                                 />
                             </div>
                             <ChildPickerSection

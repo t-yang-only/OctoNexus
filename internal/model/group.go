@@ -159,6 +159,22 @@ func (group Group) WithItems(flat []GroupItem) Group {
 	return group
 }
 
+// 智能路由（mode=smart）成员的显式档位取值。空值 = 未声明，此时按成员顺序自动对半切分（既有行为）。
+const (
+	GroupSmartTierAuto      = ""          // 未声明档位：按顶层成员顺序自动对半切分。
+	GroupSmartTierDecision  = "decision"  // 决策引擎档：强/贵，复杂请求优先用它。
+	GroupSmartTierExecution = "execution" // 执行引擎档：快/便宜，简单请求优先用它。
+)
+
+// IsValidSmartTier 报告显式档位取值是否合法；空值合法（= 未声明，回落到顺序口径）。
+func IsValidSmartTier(tier string) bool {
+	switch tier {
+	case GroupSmartTierAuto, GroupSmartTierDecision, GroupSmartTierExecution:
+		return true
+	}
+	return false
+}
+
 // 分组内一个可选择的成员项: 或引用一条渠道授权, 或引用一个子分组, 二者互斥。
 // 引用渠道授权时该成员即一个可转发的上游目标; 引用子分组时选路把子分组展平后的成员并入本分组
 // (op.FlattenGroupItems 递归展开), 本层只负责把引用存对: 二者必须且只能给一个,
@@ -172,6 +188,11 @@ type GroupItem struct {
 	ChildGroupID   *int          `json:"child_group_id,omitempty" gorm:"index:idx_group_child,unique"`                       // 引用的子分组 ID; 授权成员为 NULL。
 	ChannelGrant   *ChannelGrant `json:"-" gorm:"foreignKey:ChannelGrantID;references:ID;constraint:OnDelete:CASCADE"`       // 仅用于声明级联外键, 授权被删除时成员随之删除; 读取时不填充, 展示所需字段见下方。
 	Priority       int           `json:"priority" gorm:"not null"`                                                           // Priority 决定界面展示和故障转移模式下的成员切换顺序。
+	// SmartTier 是智能路由（mode=smart）的显式档位：留空 = 按成员顺序自动对半切分（既有行为，逐字不变），
+	// decision = 决策引擎档（强/贵，复杂请求优先用它），execution = 执行引擎档（快/便宜）。
+	// 只要有任意一个成员显式声明了档位，整个分组就改走显式口径：声明 decision 的进决策档，
+	// 其余（含未声明的）进执行档；目标档为空时选路会回退全体成员，所以「标错一边」不会让功能不可用。
+	SmartTier string `json:"smart_tier,omitempty" gorm:"size:16" binding:"omitempty,oneof=decision execution"`
 
 	ChannelID      int      `json:"channel_id" gorm:"-"`       // 授权所属渠道 ID。
 	ChannelName    string   `json:"channel_name" gorm:"-"`     // 授权所属渠道名称。
@@ -240,6 +261,9 @@ type GroupUpdateRequest struct {
 type GroupItemInput struct {
 	ChannelGrantID int `json:"channel_grant_id"` // 待引用的渠道授权 ID; 引用子分组时为 0。
 	ChildGroupID   int `json:"child_group_id"`   // 待引用的子分组 ID; 引用渠道授权时为 0。
+	// SmartTier 是智能路由（mode=smart）的显式档位：留空 = 按成员顺序自动对半切分，
+	// decision = 决策引擎档，execution = 执行引擎档。非法取值在绑定层挡下（400），不会落到这里。
+	SmartTier string `json:"smart_tier,omitempty" binding:"omitempty,oneof=decision execution"`
 }
 
 // GrantRefPtr 返回授权引用的落库形状: 未引用时为 nil (NULL)。

@@ -44,6 +44,10 @@ export interface GroupItem {
     protocols: number; // 该授权支持的 Protocol 位掩码。
     child_group_name: string; // 子分组成员的目标分组名称；授权成员为空。
     available: boolean; // 为假表示该成员当前无法转发，但仍会列出以便移除。
+    // smart_tier 是智能路由（mode=smart）的显式档位：空 = 按成员顺序自动对半切分（既有行为），
+    // 'decision' = 决策引擎档（强/贵），'execution' = 执行引擎档（快/便宜）。
+    // 顶层成员的档位会随展平下传给整条链（子分组整条链归档），因此标在子分组上也生效。
+    smart_tier?: string;
 }
 
 // GroupRuntime 是分组的实时路由状态。
@@ -68,6 +72,8 @@ export interface Group {
 
 // GroupItemInput 是提交的成员，按渠道授权主键或子分组主键引用，二者互斥由后端校验；提交顺序即优先级顺序。
 export interface GroupItemInput {
+    // smart_tier 只在智能路由下有值：空/缺省 = 按成员顺序自动对半切分，'decision'/'execution' = 显式档位。
+    smart_tier?: string;
     channel_grant_id: number; // 待引用的渠道授权 ID；引用子分组时为 0。
     child_group_id: number; // 待引用的子分组 ID；引用渠道授权时为 0。
 }

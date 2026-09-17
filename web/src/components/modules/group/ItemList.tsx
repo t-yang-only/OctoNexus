@@ -15,6 +15,15 @@ import { useTranslations } from 'use-intl';
 import type { Group } from '@/api/group';
 import { MemberStatus } from './MemberStatus';
 
+// SMART_TIER_CYCLE 是成员档位的切换顺序：未声明（按顺序自动切分）-> 决策引擎 -> 执行引擎 -> 未声明。
+const SMART_TIER_CYCLE = ['', 'decision', 'execution'] as const;
+
+// nextSmartTier 返回点击一次之后的档位；未知取值一律回落到「未声明」，不扩散脏值。
+function nextSmartTier(tier?: string): string {
+    const index = SMART_TIER_CYCLE.indexOf((tier ?? '') as (typeof SMART_TIER_CYCLE)[number]);
+    return SMART_TIER_CYCLE[index < 0 ? 0 : (index + 1) % SMART_TIER_CYCLE.length];
+}
+
 export interface SelectedMember {
     id: string;
     kind: 'grant' | 'child';
@@ -26,6 +35,9 @@ export interface SelectedMember {
     channel_name: string;
     key_name: string;
     protocols: number;
+    // smart_tier 是智能路由的显式档位：空/缺省 = 按成员顺序自动切分（既有行为），
+    // 'decision'/'execution' = 显式指定该成员属于哪一档。
+    smart_tier?: string;
     item_id?: number;
 }
 
@@ -55,6 +67,8 @@ function MemberItem({
     showConfirmDelete = true,
     layoutScope,
     dnd,
+    smartMode,
+    onTierChange,
 }: {
     member: SelectedMember;
     onRemove: (id: string) => void;
@@ -66,6 +80,8 @@ function MemberItem({
     showConfirmDelete?: boolean;
     layoutScope?: string;
     dnd: MemberItemDnd;
+    smartMode?: boolean; // 智能路由模式下才显示档位按钮：其它模式不读这个字段，显示了只会让人分心。
+    onTierChange?: (id: string, tier: string) => void;
 }) {
     const t = useTranslations('group');
     const { Icon, className: iconClassName } = getModelIcon(member.name);
@@ -149,6 +165,34 @@ function MemberItem({
                     <span className="shrink-0 inline-flex items-center gap-1 rounded border border-border/60 px-1 text-[10px] leading-4 text-muted-foreground">
                         {t('form.childBadge')}
                     </span>
+                )}
+
+                {/* 智能路由档位：留空=按成员顺序自动对半切分，点一下在 自动/决策/执行 之间轮换。 */}
+                {smartMode && onTierChange && (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onTierChange(member.id, nextSmartTier(member.smart_tier));
+                                }}
+                                className={cn(
+                                    'shrink-0 rounded border px-1 text-[10px] leading-4 transition-colors',
+                                    (member.smart_tier ?? '') === 'decision' && 'border-violet-500/60 text-violet-600 dark:text-violet-400',
+                                    (member.smart_tier ?? '') === 'execution' && 'border-emerald-500/60 text-emerald-600 dark:text-emerald-400',
+                                    (member.smart_tier ?? '') === '' && 'border-border/60 text-muted-foreground'
+                                )}
+                            >
+                                {(member.smart_tier ?? '') === 'decision'
+                                    ? t('form.tierDecision')
+                                    : (member.smart_tier ?? '') === 'execution'
+                                        ? t('form.tierExecution')
+                                        : t('form.tierAuto')}
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">{t('form.tierHint')}</TooltipContent>
+                    </Tooltip>
                 )}
 
                 {group && <MemberStatus group={group} itemId={member.item_id} now={now} active={isActive} activeClassName="p-1" />}
@@ -238,6 +282,10 @@ interface MemberListProps {
      */
     showConfirmDelete?: boolean;
     layoutScope?: string;
+    /** 智能路由模式下显示成员档位按钮；其它模式不显示。 */
+    smartMode?: boolean;
+    /** 档位变更回调：id 为成员键，tier 取 '' | 'decision' | 'execution'。 */
+    onTierChange?: (id: string, tier: string) => void;
 }
 
 export function MemberList({
@@ -254,6 +302,8 @@ export function MemberList({
     onDragFinish,
     removingIds = new Set(),
     showConfirmDelete = true,
+    smartMode,
+    onTierChange,
     layoutScope: externalLayoutScope,
 }: MemberListProps) {
     const internalLayoutScope = useId();
@@ -346,6 +396,8 @@ export function MemberList({
                                 isRemoving={false}
                                 showConfirmDelete={showConfirmDelete}
                                 layoutScope={layoutScope}
+                                smartMode={smartMode}
+                                onTierChange={onTierChange}
                                 dnd={{
                                     innerRef: draggableProvided.innerRef,
                                     draggableProps: draggableProvided.draggableProps,
@@ -379,6 +431,8 @@ export function MemberList({
                                                 isRemoving={removingIds.has(member.id)}
                                                 showConfirmDelete={showConfirmDelete}
                                                 layoutScope={layoutScope}
+                                    smartMode={smartMode}
+                                    onTierChange={onTierChange}
                                                 dnd={{
                                                     innerRef: draggableProvided.innerRef,
                                                     draggableProps: draggableProvided.draggableProps,
