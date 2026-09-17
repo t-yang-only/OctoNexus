@@ -37,6 +37,7 @@ import hashlib
 import json
 import os
 import re
+import select
 import sys
 import threading
 import time
@@ -147,13 +148,39 @@ class Handler(BaseHTTPRequestHandler):
             if events:
                 self.wfile.write(("data: " + json.dumps(_scale_usage_payload(events[0], scale)) + "\n\n").encode("utf-8"))
                 self.wfile.flush()
-            time.sleep(STALL_SECONDS)
+            self._stall_watch_peer()
             return
         for ev in events:
             self.wfile.write(("data: " + json.dumps(_scale_usage_payload(ev, scale)) + "\n\n").encode("utf-8"))
             self.wfile.flush()
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
+
+    def _stall_watch_peer(self):
+        """静默等待, 并记录对端(relay)何时关掉这条上游连接。
+
+        只有盯着这条连接, 才能把「客户端走了就停」与「一直挂到无进展上限」区分开:
+        事件行 {"event": "stall_peer_closed", "closed_after": 秒数或 null} 供套件断言,
+        closed_after=null 表示等到 STALL_SECONDS 上限对端都没关（即后台空转）。
+        事件行不带 method/model, 因此不会被各套件的「上游尝试次数」统计计入。
+        """
+        started = time.time()
+        closed_after = None
+        while time.time() - started < STALL_SECONDS:
+            try:
+                ready, _, _ = select.select([self.connection], [], [], 0.25)
+            except (OSError, ValueError):
+                ready = []
+            if not ready:
+                continue
+            try:
+                if not self.connection.recv(1):
+                    closed_after = round(time.time() - started, 2)
+                    break
+            except OSError:
+                closed_after = round(time.time() - started, 2)
+                break
+        log_request({"event": "stall_peer_closed", "closed_after": closed_after})
 
     def do_GET(self):
         if self.path.rstrip("/").endswith("/__control"):

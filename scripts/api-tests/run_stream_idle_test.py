@@ -16,10 +16,13 @@ member_stream_idle_timeout_seconds 设为 2 秒。
   I4 成员统计: 该成员 request_failed +1（走 markFailed 而不是 markCanceled）。
   I5 不换目标重试: member_max_attempts=2, 但上游只收到 1 次尝试（首字节已提交 → 不可重试）。
   I6 判据 0=关闭: idle=0 的分组同样静默, 3 秒时请求仍在途中（看门狗没有擅自改变旧行为）。
+  I7 客户端首字节后放弃: 不计成员失败（线上假死探针的误判就是这一条）。
+  I8 客户端放弃后上游连接被中止: idle=0 时不靠看门狗, 也必须随即关掉上游（不后台空转）。
 
 Run: python run_stream_idle_test.py    （实例 + mock 必须在跑）
 """
 
+import http.client
 import json
 import os
 import sqlite3
@@ -30,8 +33,9 @@ import urllib.error
 import urllib.request
 
 ADMIN = os.environ.get("OCTOPUS_ADMIN_URL", "http://127.0.0.1:13303")
-RELAY = "http://%s:%s" % (os.environ.get("OCTOPUS_RELAY_HOST", "127.0.0.1"),
-                          os.environ.get("OCTOPUS_RELAY_PORT", "11234"))
+RELAY_HOST = os.environ.get("OCTOPUS_RELAY_HOST", "127.0.0.1")
+RELAY_PORT = int(os.environ.get("OCTOPUS_RELAY_PORT", "11234"))
+RELAY = "http://%s:%s" % (RELAY_HOST, RELAY_PORT)
 DB = os.environ.get("OCTOPUS_DB", r"D:\奇怪的软件\octopus\data\data.db")
 MOCK_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requests.jsonl")
 
@@ -104,10 +108,35 @@ def attempts_since(offset):
         fh.seek(offset)
         for line in fh.read().splitlines():
             try:
-                out.append(json.loads(line).get("model"))
+                entry = json.loads(line)
             except ValueError:
                 continue
+            if entry.get("event"):
+                continue  # 探针事件行（如 stall_peer_closed）不是一次上游请求
+            out.append(entry.get("model"))
     return out
+
+
+def wait_peer_closed(offset, timeout=6.0):
+    """等 mock 落下「对端已关闭」事件, 返回 closed_after 秒数; 等不到返回 None。
+
+    closed_after=null 是 mock「等到静默上限都没等到关闭」的记录, 与超时一样返回 None ——
+    但两者都不会在本用例的 6 秒窗口内出现, 所以 None 就等价于「没关」。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(MOCK_LOG):
+            with open(MOCK_LOG, "r", encoding="utf-8", errors="replace") as fh:
+                fh.seek(offset)
+                for line in fh.read().splitlines():
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue
+                    if entry.get("event") == "stall_peer_closed":
+                        return entry.get("closed_after")
+        time.sleep(0.2)
+    return None
 
 
 def relay_stream(model, timeout=60, sink=None):
@@ -304,6 +333,7 @@ def main():
     #    就是这样把 11 个健康成员误判成假死并降级的（见日志包 README）。
     inflight = {}
     failed_before_abort = channel_model_failed()
+    i67_offset = mark()  # I9 要用这次调用的上游连接关闭时刻做反向对照
 
     def fire():
         inflight["result"] = relay_stream(GROUP_OFF, timeout=8)
@@ -321,6 +351,33 @@ def main():
     record("I7 客户端首字节后放弃不计成员失败",
            failed_before_abort is not None and failed_after_abort == failed_before_abort,
            "成员失败计数 %s→%s（客户端主动断开不是成员故障）" % (failed_before_abort, failed_after_abort))
+
+    # I9 反向对照: 客户端还在等的时候, 上游连接不会被提前关掉; 客户端一放弃就随即关闭。
+    #    I6/I7 这次调用客户端等满 8 秒才超时放弃, 于是 mock 侧看到的关闭时刻应当落在 8 秒附近。
+    #    若看到的是"立刻关"或"一直不关", 就说明 I8 的 0.0 秒并非"察觉客户端断开"所致。
+    closed_wait = wait_peer_closed(i67_offset, timeout=6.0)
+    record("I9 客户端在等时上游不提前关, 放弃时随即关",
+           isinstance(closed_wait, (int, float)) and 7.0 <= closed_wait <= 11.0,
+           "客户端等满 8 秒才放弃, mock 侧看到连接在 %s 秒后关闭（<7 秒＝上游被提前关掉）" % closed_wait)
+
+    # I8 客户端中途放弃 → 上游连接必须随即被中止。
+    # 这是「客户端断开后后台还在空转」(上游 #338) 的正面证据: 用 idle=0 的分组（看门狗关闭），
+    # 于是上游连接若是被关掉, 只能是 relay 察觉客户端断开后主动中止的, 不是无进展上限兜的。
+    abort_offset = mark()
+    key8 = api_key()
+    conn8 = http.client.HTTPConnection(RELAY_HOST, RELAY_PORT, timeout=30)
+    conn8.request("POST", "/v1/chat/completions",
+                  body=json.dumps({"model": GROUP_OFF, "max_tokens": 8, "stream": True,
+                                   "messages": [{"role": "user", "content": "ping"}]}),
+                  headers={"Content-Type": "application/json", "Authorization": "Bearer " + key8})
+    resp8 = conn8.getresponse()
+    first_block = resp8.read1(4096) if hasattr(resp8, "read1") else resp8.read(64)
+    conn8.close()  # 客户端放弃（不做优雅收尾, 直接关连接）
+    closed_after = wait_peer_closed(abort_offset, timeout=6.0)
+    record("I8 客户端放弃后上游连接被中止",
+           bool(first_block) and closed_after is not None and closed_after <= 4.0,
+           "首块已到=%s 客户端断开后 %s 秒内上游连接关闭（None＝等到 6 秒窗口结束都没关）" % (
+               bool(first_block), closed_after))
 
     return 0
 
