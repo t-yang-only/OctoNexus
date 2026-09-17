@@ -1,5 +1,7 @@
 requests.jsonl
 real_logs.json
 display.cjs
+grants.cjs
+state.cjs
 *.log
 __pycache__/

@@ -721,7 +721,9 @@
             "backToStats": "返回统计",
             "grantClearAll": "清空全部模型",
             "modelRemove": "移除模型",
-            "grantRemove": "移除该凭据的授权"
+            "grantRemove": "移除该凭据的授权",
+            "grantUnsupported": "该凭据不支持此模型",
+            "grantPruned": "已丢弃 {count} 条该凭据不支持的模型授权"
         }
     },
   "unifiedPool": {

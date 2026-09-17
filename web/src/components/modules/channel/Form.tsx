@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, Plus, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useTranslations } from 'use-intl';
 import {
     type ChannelDetail,
@@ -20,6 +21,7 @@ import { IconButton } from '@/components/common/IconButton';
 import {
     emptyFormState,
     fromChannel,
+    pruneUnsupportedGrants,
     toChannelDetail,
     type ChannelFormState,
 } from './state';
@@ -95,10 +97,14 @@ function ChannelFormFields({ channel, onBack }: { channel?: ChannelDetail; onBac
     };
 
     // 新建与编辑都一趟完成且都提交整份配置: 授权按名称引用, 与凭据和模型在同一次请求里原子生效。
+    // 提交前按各凭据的探测结论再收敛一次: 界面挡的是新勾选, 这里兜住探测之前就已存在的无效授权,
+    // 被删掉的条数如实提示, 不静默改动用户既有配置。
     const submit = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         if (!canSubmit) return;
-        const detail = toChannelDetail(state, channel?.id ?? 0);
+        const { next, removed } = pruneUnsupportedGrants(state);
+        if (removed > 0) toast.warning(t('grantPruned', { count: removed }));
+        const detail = toChannelDetail(next, channel?.id ?? 0);
         const mutation = channel ? updateChannel : createChannel;
         mutation.mutate(detail, { onSuccess: () => setIsOpen(false) });
     };

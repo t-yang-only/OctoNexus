@@ -13,13 +13,15 @@ import {
 } from '@/components/ui/select';
 import { IconButton } from '@/components/common/IconButton';
 import { useModelProbe } from './probe';
+import { declareModel, isPairSupported, supportedKeyNames } from './grants';
 import { grantKey, type ChannelFormState } from './state';
 
 // GrantCells 渲染一行右侧固定的四格: chat, response, message 三个协议勾选和一个删除。
 // 表头, 模型行, 凭据子行的差别只是这一行覆盖的 (模型 × 凭据) 范围与删除动作, 勾选,
 // 三态和写入是同一套逻辑, 故三级共用此段, 列宽与对齐也因此天然一致。
 // 三个协议列固定, 凭据作为模型的子行, 故列数不随凭据数变化。
-function GrantCells({ state, setState, models, keyNames, remove, icon: Icon, tip }: {
+// 该凭据供不了的模型不参与三态计算也不接受勾选: 计进去会让全选显示为选不满, 写进去会存下无效授权。
+function GrantCells({ state, setState, models, keyNames, remove, icon: Icon, tip, unsupportedTip }: {
     state: ChannelFormState;
     setState: (next: ChannelFormState) => void;
     models: string[]; // 本行覆盖的模型名。
@@ -27,19 +29,24 @@ function GrantCells({ state, setState, models, keyNames, remove, icon: Icon, tip
     remove?: () => void; // 为空表示本行没有删除动作, 末格仍占位以保持列对齐。
     icon: LucideIcon; // 删除格的图标, 表头用橡皮, 模型与凭据行用垃圾桶。
     tip: string; // 删除格的提示, 三级的删除语义不同。
+    unsupportedTip: string; // 单组合格不可用时的提示, 说明为什么勾不上。
 }) {
-    // cell 渲染一个协议格: 覆盖范围内全部组合都开为 true, 全关为 false, 其余为半选。
+    // cell 渲染一个协议格: 覆盖范围内全部可用组合都开为 true, 全关为 false, 其余为半选。
     const cell = (bit: number) => {
         let on = 0;
+        let total = 0;
         for (const modelName of models) {
             for (const keyName of keyNames) {
+                if (!isPairSupported(state.keyModels, modelName, keyName)) continue;
+                total += 1;
                 if ((state.grants.get(grantKey(modelName, keyName)) ?? 0) & bit) on += 1;
             }
         }
-        const total = models.length * keyNames.length;
         const value = total === 0 || on === 0 ? false : on === total ? true : 'indeterminate';
+        // 单组合格才给提示: 批量格的不可用原因分散在多个凭据上, 说清反倒要另开一处说明。
+        const single = models.length === 1 && keyNames.length === 1;
         return (
-            <span className="w-7 flex justify-center">
+            <span className="w-7 flex justify-center" title={single && total === 0 ? unsupportedTip : undefined}>
                 <Checkbox
                     checked={value}
                     disabled={total === 0}
@@ -48,6 +55,7 @@ function GrantCells({ state, setState, models, keyNames, remove, icon: Icon, tip
                         const grants = new Map(state.grants);
                         for (const modelName of models) {
                             for (const keyName of keyNames) {
+                                if (!isPairSupported(state.keyModels, modelName, keyName)) continue;
                                 const mapKey = grantKey(modelName, keyName);
                                 const current = grants.get(mapKey) ?? 0;
                                 const protocols = value === true ? current & ~bit : current | bit;
@@ -124,8 +132,10 @@ export function FormGrants({ state, setState }: {
             protocols |= state.grants.get(grantKey(modelName, activeKey)) ?? 0;
         }
         const grants = new Map(state.grants);
+        // 手填即人工声明该凭据供这个模型, 否则刚加上的组合会被它自己的探测结论判成不可用而锁死。
+        const keyModels = activeKey ? declareModel(state.keyModels, activeKey, name) : state.keyModels;
         if (activeKey) grants.set(grantKey(name, activeKey), protocols || Protocol.OpenAIResponse);
-        setState({ ...state, models: [...state.models, name], grants });
+        setState({ ...state, models: [...state.models, name], grants, keyModels });
         setAdding('');
     };
 
@@ -194,6 +204,7 @@ export function FormGrants({ state, setState }: {
                         remove={() => setState({ ...state, models: [], grants: new Map() })}
                         icon={Eraser}
                         tip={t('grantClearAll')}
+                        unsupportedTip={t('grantUnsupported')}
                     />
                 </div>
 
@@ -202,7 +213,9 @@ export function FormGrants({ state, setState }: {
                         <p className="px-3 py-6 text-center text-sm text-muted-foreground">{t('modelNoSelected')}</p>
                     ) : state.models.map((modelName) => {
                         const isOpen = expanded.has(modelName);
-                        const granted = keyNames.filter(
+                        // 分母只数供得了该模型的凭据: 供不了的凭据本就不该被授权, 计进去这个分数是假的。
+                        const usableKeys = supportedKeyNames(state.keyModels, modelName, keyNames);
+                        const granted = usableKeys.filter(
                             (keyName) => (state.grants.get(grantKey(modelName, keyName)) ?? 0) !== 0
                         ).length;
                         return (
@@ -220,7 +233,7 @@ export function FormGrants({ state, setState }: {
                                         <ChevronRight className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                                         <span className="text-sm truncate">{modelName}</span>
                                         <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                                            {granted}/{keyNames.length}
+                                            {granted}/{usableKeys.length}
                                         </span>
                                     </button>
                                     <GrantCells
@@ -229,24 +242,33 @@ export function FormGrants({ state, setState }: {
                                         remove={() => removeModel(modelName)}
                                         icon={Trash2}
                                         tip={t('modelRemove')}
+                                        unsupportedTip={t('grantUnsupported')}
                                     />
                                 </div>
 
-                                {/* 未授权的凭据也要列出, 否则没有入口给它打勾; 压暗以区分于已授权的凭据。 */}
+                                {/* 未授权的凭据也要列出, 否则没有入口给它打勾; 压暗以区分于已授权的凭据。
+                                    供不了该模型的凭据同样列出但不可勾选, 并写明原因: 藏着不显示会让用户以为配置丢了。 */}
                                 {isOpen && state.keys.map((channelKey) => {
                                     const protocols = state.grants.get(grantKey(modelName, channelKey.name)) ?? 0;
+                                    const usable = isPairSupported(state.keyModels, modelName, channelKey.name);
                                     return (
                                         <div
                                             key={channelKey.name}
                                             className={`flex items-center gap-1 pl-9 pr-3 py-1.5 bg-muted/20 ${protocols === 0 ? 'opacity-45' : ''}`}
                                         >
                                             <span className="flex-1 text-xs text-muted-foreground truncate">{channelKey.name}</span>
+                                            {!usable && (
+                                                <span className="min-w-0 truncate text-xs text-muted-foreground">
+                                                    {t('grantUnsupported')}
+                                                </span>
+                                            )}
                                             <GrantCells
                                                 state={state} setState={setState}
                                                 models={[modelName]} keyNames={[channelKey.name]}
                                                 remove={protocols !== 0 ? () => removeGrant(modelName, channelKey.name) : undefined}
                                                 icon={Trash2}
                                                 tip={t('grantRemove')}
+                                                unsupportedTip={t('grantUnsupported')}
                                             />
                                         </div>
                                     );
