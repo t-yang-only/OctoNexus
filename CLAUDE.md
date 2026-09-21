@@ -1,7 +1,9 @@
 # Project Instructions
 
 OctoNexus（原 Octopus）：个人自用的 LLM API 聚合网关，Go 后端 + React 前端，单二进制部署。
-上游仓库 https://github.com/bestruirui/octopus ，本地二次开发的改动记录在 `docs/worklog/`。
+本项目是**独立项目**（不是 GitHub 分叉），代码血缘来自上游 https://github.com/bestruirui/octopus ：
+remote `origin` = 本项目仓库 `t-yang-only/OctoNexus`，remote `upstream` = 上游仓库（只读参考，用来对照上游 PR/issue）。
+项目定位、升级内容与发布口径见 `docs/项目定位.md`；逐条改动记录在 `docs/worklog/`。
 
 ## Tech Stack
 

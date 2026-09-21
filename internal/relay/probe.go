@@ -169,7 +169,7 @@ func probeMember(ctx context.Context, target probeTarget) (probeResult, error) {
 		return result, fmt.Errorf("apply channel config: %w", err)
 	}
 
-	client, closeIdle, err := resolveUpstreamClient(channel)
+	client, closeIdle, err := resolveUpstreamClientForKey(channel, grant.ChannelKey)
 	if err != nil {
 		return result, fmt.Errorf("resolve upstream client: %w", err)
 	}

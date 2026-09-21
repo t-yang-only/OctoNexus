@@ -1,6 +1,11 @@
-import { Wallet, Layers, Coins, AlertCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Wallet, Layers, Coins, AlertCircle, RefreshCw, PencilLine } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'use-intl';
-import { useBalanceSummary } from '@/api/balance';
+import { toast } from 'sonner';
+import { useBalanceSummary, rescanBalances, setChannelManualBalance, type ChannelBalanceRow } from '@/api/balance';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ManualSubscriptions } from './manual-subscription';
 import { AnimatedNumber } from '@/components/common/AnimatedNumber';
 
@@ -11,9 +16,14 @@ import { AnimatedNumber } from '@/components/common/AnimatedNumber';
 //   把「还没读到」显示成 0 会让人以为账号已经空了。
 // - 剩余次数是包月口径（包月额度 - 已用）; 没配包月的渠道不计入。
 // - 换算口径 points_per_unit 由设置项 balance_points_per_unit 决定, 默认 500000 点 = 1 单位。
+// - 读不到的渠道**必须说清为什么**（reason_text）并允许人工录入：
+//   实测 16 个渠道里 14 个站点根本没有 new-api 的余额接口，只说"未读到"用户无从下手。
 export function Balance() {
     const { data } = useBalanceSummary();
     const t = useTranslations('home.balance');
+    const queryClient = useQueryClient();
+    const [editing, setEditing] = useState<number | null>(null);
+    const [draft, setDraft] = useState({ points: '', note: '' });
 
     const total = data?.total ?? 0;
     const currency = data?.currency ?? 'USD';
@@ -21,6 +31,28 @@ export function Balance() {
     const channels = data?.channels ?? [];
     const knownChannels = channels.filter((item) => item.known);
     const unknown = data?.unknown_channels ?? 0;
+    const reasons = data?.reason_counts ?? {};
+
+    const rescan = useMutation({
+        mutationFn: () => rescanBalances(),
+        onSuccess: (summary) => {
+            // 扫描结果直接写回缓存，用户不必等 30 秒的下一次轮询。
+            queryClient.setQueryData(['balance', 'summary'], summary);
+            toast.success(t('rescanDone', { known: summary.known_channels, unknown: summary.unknown_channels }));
+        },
+        onError: (error: Error) => toast.error(error.message),
+    });
+
+    const saveManual = useMutation({
+        mutationFn: (row: ChannelBalanceRow) => setChannelManualBalance(row.channel_id, Number(draft.points) || 0, draft.note),
+        onSuccess: (summary) => {
+            queryClient.setQueryData(['balance', 'summary'], summary);
+            setEditing(null);
+            setDraft({ points: '', note: '' });
+            toast.success(t('savedManual'));
+        },
+        onError: (error: Error) => toast.error(error.message),
+    });
 
     return (
         <section className="rounded-3xl bg-card border-border border p-5 text-card-foreground space-y-4">
@@ -34,16 +66,27 @@ export function Balance() {
                         <span className="text-xs text-muted-foreground">{t('subtitle')}</span>
                     </div>
                 </div>
-                <div className="text-right">
-                    <div className="flex items-baseline gap-1 justify-end">
-                        <span className="text-2xl">
-                            <AnimatedNumber value={total.toFixed(2)} />
+                <div className="flex items-center gap-4">
+                    <div className="text-right">
+                        <div className="flex items-baseline gap-1 justify-end">
+                            <span className="text-2xl">
+                                <AnimatedNumber value={total.toFixed(2)} />
+                            </span>
+                            <span className="text-sm text-muted-foreground">{currency}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                            {t('unitHint', { points: pointsPerUnit.toLocaleString() })}
                         </span>
-                        <span className="text-sm text-muted-foreground">{currency}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                        {t('unitHint', { points: pointsPerUnit.toLocaleString() })}
-                    </span>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={rescan.isPending}
+                        onClick={() => rescan.mutate()}
+                    >
+                        <RefreshCw className={`size-4 ${rescan.isPending ? 'animate-spin' : ''}`} />
+                        {t('rescan')}
+                    </Button>
                 </div>
             </header>
 
@@ -67,29 +110,102 @@ export function Balance() {
                 )}
             </div>
 
+            {/* 一句总览：把"未读到"的原因摊开，用户才知道下一步该做什么。 */}
+            {unknown > 0 && (
+                <div className="rounded-2xl border border-border/60 px-3 py-2 text-xs text-muted-foreground space-y-1">
+                    <p>{t('reasonSummary')}</p>
+                    <ul className="flex flex-wrap gap-x-4 gap-y-1">
+                        {Object.entries(reasons).map(([code, count]) => (
+                            <li key={code}>{t(`reason.${code}` as never)}：{count}</li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
             {channels.length > 0 && (
                 <ul className="space-y-2">
                     {channels.map((channel) => (
                         <li
                             key={channel.channel_id}
-                            className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 px-3 py-2 text-sm"
+                            className="rounded-2xl border border-border/60 px-3 py-2 text-sm"
                         >
-                            <div className="flex flex-col min-w-0">
-                                <span className="truncate">{channel.channel_name}</span>
-                                <span className="text-xs text-muted-foreground">
-                                    {t('keys', { enabled: channel.key_enabled, total: channel.key_count })}
-                                    {channel.monthly_quota > 0 &&
-                                        ` · ${t('monthly', { left: channel.monthly_remaining.toLocaleString(), total: channel.monthly_quota.toLocaleString() })}`}
-                                </span>
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="flex flex-col min-w-0">
+                                    <span className="truncate">{channel.channel_name}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                        {t('keys', { enabled: channel.key_enabled, total: channel.key_count })}
+                                        {channel.monthly_quota > 0 &&
+                                            ` · ${t('monthly', { left: channel.monthly_remaining.toLocaleString(), total: channel.monthly_quota.toLocaleString() })}`}
+                                    </span>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-2">
+                                    <span className="font-medium">
+                                        {channel.known
+                                            ? `${channel.balance.toFixed(2)} ${currency}`
+                                            : t('unknown')}
+                                        {channel.balance_source === 'manual' && (
+                                            <span className="ml-1 text-xs text-muted-foreground">{t('manualSource')}</span>
+                                        )}
+                                    </span>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        title={t('manualHint')}
+                                        onClick={() => {
+                                            setEditing(channel.channel_id);
+                                            setDraft({ points: channel.remaining > 0 ? String(channel.remaining) : '', note: channel.note ?? '' });
+                                        }}
+                                    >
+                                        <PencilLine className="size-4" />
+                                    </Button>
+                                </div>
                             </div>
-                            <span className="shrink-0 font-medium">
-                                {channel.known
-                                    ? `${channel.balance.toFixed(2)} ${currency}`
-                                    : t('unknown')}
-                                {channel.balance_source === 'manual' && (
-                                    <span className="ml-1 text-xs text-muted-foreground">{t('manualSource')}</span>
-                                )}
-                            </span>
+                            {/* 读不到就说清为什么；能读到的站点不显示这一行。 */}
+                            {!channel.known && channel.reason_text && (
+                                <p className="mt-1 text-xs text-destructive/80">{channel.reason_text}</p>
+                            )}
+                            {!channel.known && !channel.reason_text && channel.note && (
+                                <p className="mt-1 text-xs text-muted-foreground">{channel.note}</p>
+                            )}
+                            {channel.known && channel.manual_at && (
+                                <p className="mt-1 text-xs text-muted-foreground">{t('manualAt', { at: channel.manual_at })}</p>
+                            )}
+
+                            {editing === channel.channel_id && (
+                                <div className="mt-2 flex flex-wrap items-end gap-2">
+                                    <div className="space-y-1">
+                                        <label className="text-xs text-muted-foreground" htmlFor={`points-${channel.channel_id}`}>
+                                            {t('manualPoints')}
+                                        </label>
+                                        <Input
+                                            id={`points-${channel.channel_id}`}
+                                            value={draft.points}
+                                            onChange={(event) => setDraft({ ...draft, points: event.target.value })}
+                                            placeholder="0"
+                                            className="rounded-xl h-9 w-32"
+                                        />
+                                    </div>
+                                    <div className="space-y-1 flex-1 min-w-[12rem]">
+                                        <label className="text-xs text-muted-foreground" htmlFor={`note-${channel.channel_id}`}>
+                                            {t('manualNote')}
+                                        </label>
+                                        <Input
+                                            id={`note-${channel.channel_id}`}
+                                            value={draft.note}
+                                            onChange={(event) => setDraft({ ...draft, note: event.target.value })}
+                                            placeholder={t('manualNotePlaceholder')}
+                                            className="rounded-xl h-9"
+                                        />
+                                    </div>
+                                    <Button size="sm" disabled={saveManual.isPending} onClick={() => saveManual.mutate(channel)}>
+                                        {t('save')}
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                                        {t('cancel')}
+                                    </Button>
+                                    <span className="text-xs text-muted-foreground">{t('manualUnitHint', { points: pointsPerUnit.toLocaleString() })}</span>
+                                </div>
+                            )}
                         </li>
                     ))}
                 </ul>

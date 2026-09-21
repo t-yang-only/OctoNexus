@@ -9,6 +9,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/secret"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -337,10 +338,20 @@ func TestOfficialPoolSyncKeepsExistingKeyWhenCipherKeyChanged(t *testing.T) {
 		t.Fatalf("initial sync: %v", err)
 	}
 	channel, _ := poolChannelOf(t, conn, provider)
-	before := poolKeysOf(t, conn, channel.ID)["ro@example.com"]
+	beforePlain := poolKeysOf(t, conn, channel.ID)["ro@example.com"]
+	if beforePlain.Key != "tok-ro" {
+		t.Fatalf("初始物化应写入明文可读的凭据，实际 %q", beforePlain.Key)
+	}
+	// 轮换后这一行再也解不开，所以"没被改动"的判据必须落在**库内那一行**（密文原样）上，
+	// 而不是解密后的明文比较。
+	beforeRaw := poolRawKeysOf(t, conn, channel.ID)["ro@example.com"]
 
 	// 换掉加密密钥：账号密文解不开，同步应降级为"记原因 + 保留原凭据"。
 	t.Setenv("OCTOPUS_OFFICIAL_KEY", "pool-cipher-key-b")
+	// 密钥是进程内缓存一次的（与渠道凭据一致）：换环境变量后必须重置缓存才生效，
+	// 生产上等价于「改环境变量要重启进程」。
+	secret.ResetKey()
+	t.Cleanup(secret.ResetKey)
 	result, err := OfficialPoolSync(conn, provider)
 	if err != nil {
 		t.Fatalf("sync with rotated cipher key must not fail hard: %v", err)
@@ -348,10 +359,33 @@ func TestOfficialPoolSyncKeepsExistingKeyWhenCipherKeyChanged(t *testing.T) {
 	if len(result.Notes) == 0 {
 		t.Fatal("expected a note explaining the undecryptable account")
 	}
-	after := poolKeysOf(t, conn, channel.ID)["ro@example.com"]
-	if after.ID != before.ID || after.Key != before.Key || !after.Enabled {
-		t.Fatalf("existing key must stay untouched: before=%+v after=%+v", before, after)
+	if result.Keys != 0 || result.Disabled != 0 || result.Refreshed != 0 {
+		t.Fatalf("解不开凭据时不该动任何东西，实际 keys=%d disabled=%d refreshed=%d",
+			result.Keys, result.Disabled, result.Refreshed)
 	}
+	afterRaw := poolRawKeysOf(t, conn, channel.ID)["ro@example.com"]
+	if afterRaw.ID != beforeRaw.ID || afterRaw.Key != beforeRaw.Key || !afterRaw.Enabled {
+		t.Fatalf("existing key must stay untouched: before=%+v after=%+v", beforeRaw, afterRaw)
+	}
+	// 反向自检：切回轮换前那把密钥后，这一行必须还原成可读明文（证明原文没有被破坏）。
+	withOfficialKey(t, "pool-cipher-key-a")
+	if restored := poolKeysOf(t, conn, channel.ID)["ro@example.com"]; restored.Key != "tok-ro" {
+		t.Fatalf("切回原密钥后凭据应可读，实际 %q", restored.Key)
+	}
+}
+
+// poolRawKeysOf 读**未解密**的号池凭据行（库内形状）。密钥轮换后的"没被改动"判据要用它。
+func poolRawKeysOf(t *testing.T, conn *gorm.DB, channelID int) map[string]model.ChannelKey {
+	t.Helper()
+	keys, err := officialPoolRawKeys(conn, channelID)
+	if err != nil {
+		t.Fatalf("list raw pool keys: %v", err)
+	}
+	byName := make(map[string]model.ChannelKey, len(keys))
+	for _, key := range keys {
+		byName[key.Name] = key
+	}
+	return byName
 }
 
 // TestOfficialPoolStatusListReportsMapping 状态快照逐服务商给出账号数、启用凭据数与模型/授权数。

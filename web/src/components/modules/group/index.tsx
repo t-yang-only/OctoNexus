@@ -47,6 +47,7 @@ export function GroupActions() {
 
 // Group 渲染分组列表正文。
 export function Group() {
+    const t = useTranslations('group');
     const { data: groups } = useGroupList(true, true);
     const runtimeNow = useRuntimeClock(groups);
     const searchTerm = usePageActionsStore((state) => state.searchTerms.group || '');
@@ -69,6 +70,22 @@ export function Group() {
 
         return byName;
     }, [sortedGroups, searchTerm, filter]);
+
+    // 空态：VirtualizedGrid 在 items 为空时什么都不渲染 —— 与渠道页同一类问题
+    // （零分组或被搜索/筛选挡掉时，整页只剩标题，用户看不出该去哪儿建分组）。
+    if (visibleGroups.length === 0) {
+        const noGroupAtAll = (groups ?? []).length === 0;
+        return (
+            <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 p-8 text-center">
+                <p className="text-sm font-medium">
+                    {t(noGroupAtAll ? 'empty.title' : 'empty.filteredTitle')}
+                </p>
+                <p className="max-w-sm text-xs text-muted-foreground">
+                    {t(noGroupAtAll ? 'empty.hint' : 'empty.filteredHint')}
+                </p>
+            </div>
+        );
+    }
 
     return (
         <VirtualizedGrid

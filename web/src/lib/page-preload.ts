@@ -8,6 +8,9 @@ export const pageImports = {
     model: () => import('@/components/modules/model'),
     account: () => import('@/components/modules/account'),
     pool: () => import('@/components/modules/pool'),
+    proxy: () => import('@/components/modules/proxy'),
+    price: () => import('@/components/modules/price'),
+    extensions: () => import('@/components/modules/extensions'),
     log: () => import('@/components/modules/log'),
     setting: () => import('@/components/modules/setting'),
 };

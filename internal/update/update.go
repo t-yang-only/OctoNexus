@@ -18,9 +18,19 @@ import (
 	"github.com/charmbracelet/log"
 )
 
+// 更新源指向**本项目仓库**，不是上游 bestruirui/octopus（T-identity-001）。
+//
+// 为什么必须改：本项目是基于上游升级出来的独立项目（已比上游多出上百个提交，模式/设置/数据库列都做了增量）。
+// 更新源若留在上游，产品里的"检查更新"会把上游原版二进制装进来 —— 那不是升级，而是把本项目的能力整套抹掉，
+// 且回滚成本极高（用户会以为"更新坏了"）。宁可明确报"没有可用版本"，也不装错东西。
+//
+// 发布 release 时资产命名必须是 `octopus-<os>-<arch>.zip`（见 core.go 的 assetName 规则），
+// 否则本项目的自动更新通道拿不到包。改动这条口径必须同步 update_test.go。
 const (
-	updateUrl    = "https://github.com/bestruirui/octopus/releases/latest/download"
-	updateApiUrl = "https://api.github.com/repos/bestruirui/octopus/releases/latest"
+	updateOwner  = "t-yang-only"
+	updateRepo   = "OctoNexus"
+	updateUrl    = "https://github.com/" + updateOwner + "/" + updateRepo + "/releases/latest/download"
+	updateApiUrl = "https://api.github.com/repos/" + updateOwner + "/" + updateRepo + "/releases/latest"
 )
 
 type LatestInfo struct {

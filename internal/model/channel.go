@@ -39,6 +39,7 @@ type ChannelConfig struct {
 	AnthropicMessagePath     string         `json:"anthropic_message_path" gorm:"column:anthropic_message_path;default:/v1/messages"`                   // Anthropic Messages 请求路径; 留空由后端填默认路径。
 	Proxy                    bool           `json:"proxy" gorm:"default:false"`                                                                         // 是否使用代理。
 	ChannelProxy             string         `json:"channel_proxy"`                                                                                      // 渠道专用代理地址; 留空表示不用渠道专用代理。
+	ProxyNodeID              int            `json:"proxy_node_id" gorm:"column:proxy_node_id;not null;default:0"`                                       // 渠道级出口节点(R-proxy-001); 0=未绑定。绑定后该渠道全部账号默认走这个节点的本地入站, 不看 Proxy 开关。
 	CustomHeader             []CustomHeader `json:"custom_header" gorm:"serializer:json"`                                                               // 追加到上游请求的 Header。
 	ParamOverride            string         `json:"param_override"`                                                                                     // 请求参数覆盖配置; 留空表示不覆盖。
 	MatchRegex               string         `json:"match_regex"`                                                                                        // 拉取模型列表时的过滤表达式; 留空表示不过滤。
@@ -58,6 +59,12 @@ type Channel struct {
 	ChannelConfig                // 可编辑配置, 平铺为 channels 的各列。
 	Keys          []ChannelKey   `json:"-" gorm:"foreignKey:ChannelID;constraint:OnDelete:CASCADE"` // 渠道下的上游凭据; 不出 JSON, 读取走 ChannelDetail。
 	Models        []ChannelModel `json:"-" gorm:"foreignKey:ChannelID;constraint:OnDelete:CASCADE"` // 渠道提供的模型; 不出 JSON, 读取走 ChannelDetail。
+	// 人工录入的余额（R-balance-002）：接口读不到的站点由用户在面板里录一次。
+	// 单位与自动读数同一口径（额度点），才会按同一比例折算进总余额。
+	// 刻意放在 ChannelConfig 之外：渠道表单整体替换配置时不会覆盖它。
+	BalancePoints float64 `json:"balance_points"` // 剩余额度点; 0 = 未录入
+	BalanceAt     string  `json:"balance_at"`     // 录入时间(RFC3339), 展示用
+	BalanceNote   string  `json:"balance_note"`   // 备注: 读不到的原因或"官网后台显示"
 	StatsMetrics                 // 渠道自身的累计统计。
 }
 
@@ -67,6 +74,9 @@ type ChannelKeyConfig struct {
 	Name    string `json:"name" gorm:"not null;index:idx_channel_key,unique"` // 凭据名称, 界面展示与人工识别用。
 	Key     string `json:"key" gorm:"not null"`                               // 上游访问凭据。
 	Enabled bool   `json:"enabled"`                                           // 是否可用, 禁用后不参与选路但保留统计。
+	// ProxyNodeID 是账号级出口节点(R-proxy-001): 0=未绑定(跟随渠道), >0 时该账号固定走这个节点。
+	// 账号级存在的理由: 同一站点的多个账号必须各自走不同出口 IP, 否则上游一眼就能把它们关联成同一批人。
+	ProxyNodeID int `json:"proxy_node_id" gorm:"column:proxy_node_id;not null;default:0"`
 }
 
 // ChannelKeyInput 是请求侧的凭据形状。
@@ -77,6 +87,8 @@ type ChannelKeyInput struct {
 	Name    string `json:"name"`
 	Key     string `json:"key"`
 	Enabled *bool  `json:"enabled"`
+	// ProxyNodeID 是账号级出口节点（R-proxy-001）：0=跟随渠道/全局。前端选完节点原样提交，后端只做存在性校验。
+	ProxyNodeID *int `json:"proxy_node_id"`
 }
 
 // Resolved 把请求侧凭据解析成落库形状: enabled 未提交时默认启用。
@@ -85,13 +97,18 @@ func (input ChannelKeyInput) Resolved() ChannelKeyConfig {
 	if input.Enabled != nil {
 		enabled = *input.Enabled
 	}
-	return ChannelKeyConfig{Name: input.Name, Key: input.Key, Enabled: enabled}
+	proxyNodeID := 0
+	if input.ProxyNodeID != nil && *input.ProxyNodeID > 0 {
+		proxyNodeID = *input.ProxyNodeID
+	}
+	return ChannelKeyConfig{Name: input.Name, Key: input.Key, Enabled: enabled, ProxyNodeID: proxyNodeID}
 }
 
 // ChannelKeyOutput 把落库形状转回请求形状, 让读写共用同一份 JSON 契约。
 func ChannelKeyOutput(config ChannelKeyConfig) ChannelKeyInput {
 	enabled := config.Enabled
-	return ChannelKeyInput{Name: config.Name, Key: config.Key, Enabled: &enabled}
+	proxyNodeID := config.ProxyNodeID
+	return ChannelKeyInput{Name: config.Name, Key: config.Key, Enabled: &enabled, ProxyNodeID: &proxyNodeID}
 }
 
 // 渠道下的一份上游凭据; 不同凭据通常对应不同的额度与计费。

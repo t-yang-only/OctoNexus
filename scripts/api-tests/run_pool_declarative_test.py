@@ -172,12 +172,13 @@ def main():
         relay_status, relay_payload, _ = call("GET", "/v1/pool/entries?kind=" + KIND, base=RELAY,
                                                headers={"Authorization": "Bearer " + api_key})
         anonymous_status, _, _ = call("GET", "/v1/pool/entries", base=RELAY)
-        write_status, _, _ = call("POST", "/v1/pool/adapters", spec(), base=RELAY,
-                                  headers={"Authorization": "Bearer " + api_key})
+        write_status, write_payload, _ = call("POST", "/v1/pool/adapters", spec(), base=RELAY,
+                                              headers={"Authorization": "Bearer " + api_key})
         record("D8 只读 APIKey 通道：能读 / 未带 Key 401 / 写动作不存在",
                relay_status == 200 and (relay_payload or {}).get("read_only") is True
                and anonymous_status == 401 and write_status in (404, 405),
-               "读=%s 匿名=%s 写=%s" % (relay_status, anonymous_status, write_status))
+               "读=%s 匿名=%s 写=%s(%s)" % (relay_status, anonymous_status, write_status,
+                                            (write_payload or {}).get("_raw", "")))
 
         # D7 移除 → 未知 kind 明确报错 → 可再注册
         status, _, _ = call("DELETE", "/api/v1/pool/adapters/" + KIND)

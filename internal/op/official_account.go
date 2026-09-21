@@ -20,6 +20,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/secret"
 	"gorm.io/gorm"
 )
 
@@ -30,8 +31,10 @@ import (
 //    重启丢在途 state 可接受（重新 authorize 即可）；
 // ③ code→token 交换与套餐/窗口读取都走可注入客户端（生产=真实 HTTP，测试=桩），
 //    one_time_code 绝不落库；
-// ④ AccessCipher/RefreshCipher AES-256-GCM 加密落库，密钥取环境变量
-//    OCTOPUS_OFFICIAL_KEY（任意熵 SHA-256 派生 32B），未配置时 authorize 直接拒绝，
+// ④ AccessCipher/RefreshCipher AES-256-GCM 加密落库，密钥经 internal/secret 的统一口径解析
+//    （环境变量 OCTOPUS_OFFICIAL_KEY → 数据目录 credential.key，首次使用自动生成），
+//    与渠道凭据同一把密钥但靠 AAD（服务商名）互相隔离；
+//    密钥完全不可得（既没设环境变量、也读不到/写不了密钥文件）时 authorize 直接拒绝，
 //    杜绝明文静默入库；响应 JSON 侧靠 `json:"-"` 双保险不出现密文与明文。
 
 var (
@@ -163,13 +166,18 @@ func consumeOfficialState(state string) (officialStateEntry, error) {
 
 // ---------- 凭据加密 (AES-256-GCM) ----------
 
+// officialCipherKey 取官方账号（与号池规格共用）的加密密钥。
+//
+// 必须走 internal/secret 的统一口径（环境变量 → 数据目录 credential.key）。
+// 这里曾经直接读环境变量，导致没设环境变量的正常安装一用号池/官方账号就报
+// "official credential cipher key not configured (set OCTOPUS_OFFICIAL_KEY)"，
+// 而同一实例的渠道凭据加密明明是好的 —— 同一台机器两套密钥口径是缺陷，不是设计。
 func officialCipherKey() ([]byte, error) {
-	secret := strings.TrimSpace(os.Getenv("OCTOPUS_OFFICIAL_KEY"))
-	if secret == "" {
-		return nil, ErrOfficialKeyMissing
+	key, err := secret.CipherKey()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrOfficialKeyMissing, err)
 	}
-	sum := sha256.Sum256([]byte(secret))
-	return sum[:], nil
+	return key, nil
 }
 
 func officialGCM() (cipher.AEAD, error) {
@@ -237,9 +245,10 @@ func OfficialAccountAuthorize(conn *gorm.DB, provider model.OfficialAccountProvi
 	if _, keyErr := officialCipherKey(); keyErr != nil {
 		return account, "", "", keyErr
 	}
-	clientID := strings.TrimSpace(os.Getenv("OCTOPUS_OFFICIAL_CLIENT_ID_" + strings.ToUpper(string(provider))))
+	// 环境变量优先、内置公开客户端 ID 兜底：缺配置时不再直接拒绝（见 official_client_id.go）。
+	clientID := officialOAuthClientID(provider)
 	if clientID == "" {
-		return account, "", "", fmt.Errorf("official OAuth client id not configured for %s (set OCTOPUS_OFFICIAL_CLIENT_ID_%s)", provider, strings.ToUpper(string(provider)))
+		return account, "", "", fmt.Errorf("official OAuth client id not configured for %s (set %s)", provider, officialOAuthClientIDEnv(provider))
 	}
 	endpoints, ok := OfficialEndpoints[provider]
 	if !ok {
@@ -269,12 +278,17 @@ func OfficialAccountAuthorize(conn *gorm.DB, provider model.OfficialAccountProvi
 
 	q := url.Values{
 		"response_type":         {"code"},
-		"client_id":             {os.Getenv("OCTOPUS_OFFICIAL_CLIENT_ID_" + strings.ToUpper(string(provider)))},
+		"client_id":             {clientID},
 		"redirect_uri":          {officialRedirectURI()},
 		"state":                 {state},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 	}
+	// scope 是必填：缺了 Google 会直接回 400 invalid_request（用户实测）。
+	if scope := officialOAuthScopeFor(provider); scope != "" {
+		q.Set("scope", scope)
+	}
+	officialOAuthExtraParams(provider, q)
 	authorizeURL = endpoints.Authorize + "?" + q.Encode()
 	return account, authorizeURL, state, nil
 }
@@ -401,9 +415,9 @@ func (h *httpTokenExchanger) Exchange(provider model.OfficialAccountProvider, co
 	if strings.TrimSpace(code) == "" {
 		return OfficialTokenBundle{}, fmt.Errorf("authorization code is empty")
 	}
-	clientID := os.Getenv("OCTOPUS_OFFICIAL_CLIENT_ID_" + strings.ToUpper(string(provider)))
-	if strings.TrimSpace(clientID) == "" {
-		return OfficialTokenBundle{}, fmt.Errorf("official OAuth client id not configured for %s (set OCTOPUS_OFFICIAL_CLIENT_ID_%s)", provider, strings.ToUpper(string(provider)))
+	clientID := officialOAuthClientID(provider)
+	if clientID == "" {
+		return OfficialTokenBundle{}, fmt.Errorf("official OAuth client id not configured for %s (set %s)", provider, officialOAuthClientIDEnv(provider))
 	}
 	endpoints, ok := OfficialEndpoints[provider]
 	if !ok {

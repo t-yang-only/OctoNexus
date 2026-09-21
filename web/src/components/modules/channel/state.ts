@@ -12,7 +12,7 @@ export type ChannelFormState = {
     openai_chat_completion_path: string;
     openai_response_path: string;
     anthropic_message_path: string;
-    keys: { name: string; key: string; enabled: boolean }[];
+    keys: { name: string; key: string; enabled: boolean; proxy_node_id: number }[];
     models: string[];
     grants: Map<string, number>; // 键为 grantKey(模型名, 凭据名), 值为 Protocol 位掩码。
     // 各凭据经探测确认支持的模型, 只用于收敛授权范围(全选跳过, 不可勾选, 保存前裁剪), 不提交给后端。
@@ -20,6 +20,7 @@ export type ChannelFormState = {
     keyModels: KeyModelIndex;
     custom_header: ChannelDetail['custom_header'];
     channel_proxy: string;
+    proxy_node_id: number;
     param_override: string;
     match_regex: string;
     // 计费事实: 数字字段留 0 表示未知（后端同样按零值=未知处理）。
@@ -50,6 +51,7 @@ export const emptyFormState: ChannelFormState = {
     keyModels: new Map(),
     custom_header: [],
     channel_proxy: '',
+    proxy_node_id: 0,
     param_override: '',
     match_regex: '',
     billing_mode: '',
@@ -70,12 +72,13 @@ export function fromChannel(channel: ChannelDetail): ChannelFormState {
         openai_chat_completion_path: channel.openai_chat_completion_path,
         openai_response_path: channel.openai_response_path,
         anthropic_message_path: channel.anthropic_message_path,
-        keys: channel.keys.map(({ name, key, enabled }) => ({ name, key, enabled })),
+        keys: channel.keys.map(({ name, key, enabled, proxy_node_id }) => ({ name, key, enabled, proxy_node_id: proxy_node_id ?? 0 })),
         models: [...channel.models],
         grants: new Map(channel.grants.map((g) => [grantKey(g.model_name, g.key_name), g.protocols])),
         keyModels: new Map(),
         custom_header: channel.custom_header,
         channel_proxy: channel.channel_proxy,
+        proxy_node_id: channel.proxy_node_id ?? 0,
         param_override: channel.param_override,
         match_regex: channel.match_regex,
         billing_mode: channel.billing_mode ?? '',
@@ -100,6 +103,7 @@ export function toChannelConfig(state: ChannelFormState) {
         proxy: state.proxy,
         custom_header: state.custom_header.filter((h) => h.header_key.trim() && h.header_value !== ''),
         channel_proxy: state.channel_proxy.trim(),
+        proxy_node_id: state.proxy_node_id,
         param_override: state.param_override.trim(),
         match_regex: state.match_regex.trim(),
         billing_mode: state.billing_mode,
@@ -117,7 +121,7 @@ export function toChannelDetail(state: ChannelFormState, id: number): ChannelDet
     return {
         ...toChannelConfig(state),
         id,
-        keys: state.keys.map(({ name, key, enabled }) => ({ name: name.trim(), key: key.trim(), enabled })),
+        keys: state.keys.map(({ name, key, enabled, proxy_node_id }) => ({ name: name.trim(), key: key.trim(), enabled, proxy_node_id })),
         models: [...state.models],
         grants: [...state.grants]
             .filter(([, protocols]) => protocols !== 0)

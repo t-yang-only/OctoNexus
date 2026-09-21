@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslations } from 'use-intl';
@@ -8,6 +9,7 @@ import {
     useCreateChannel,
     useUpdateChannel,
 } from '@/api/channel';
+import { proxyNodesQueryOptions } from '@/api/proxy';
 import { CHANNEL_PRESETS, type ChannelPreset } from '@/lib/channel-presets';
 import { useMorphingDialog } from '@/components/ui/morphing-dialog';
 import { Button } from '@/components/ui/button';
@@ -65,6 +67,9 @@ function ChannelFormFields({ channel, onBack }: { channel?: ChannelDetail; onBac
     const isPending = createChannel.isPending || updateChannel.isPending;
     // 新建与编辑弹窗可同时存在, 控件 id 需按渠道隔离。
     const idPrefix = channel ? `channel-${channel.id}` : 'new-channel';
+    // 出口节点候选：只列已启用且拿到本地端口的节点；选了发不出去的节点比不给选更糟。
+    const nodesQuery = useQuery(proxyNodesQueryOptions);
+    const readyNodes = (nodesQuery.data?.items ?? []).filter((node) => node.enabled && node.local_port > 0);
 
     // 后端会拒的四项在此先挡: 名称与地址非空, 路径以 / 开头, 至少一份填了 Key 的凭据, 至少一个模型。
     const canSubmit = state.name.trim() !== ''
@@ -217,6 +222,27 @@ function ChannelFormFields({ channel, onBack }: { channel?: ChannelDetail; onBac
 
                     {step === 'advanced' && (
                         <div className="space-y-4 pt-2">
+                            <div className="space-y-2">
+                                <Label htmlFor={`${idPrefix}-proxy-node`}>{t('proxyNode')}</Label>
+                                <Select
+                                    value={String(state.proxy_node_id ?? 0)}
+                                    onValueChange={(value) => setState({ ...state, proxy_node_id: Number(value) })}
+                                >
+                                    <SelectTrigger id={`${idPrefix}-proxy-node`} className="rounded-xl">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {/* 留空即直连：不给默认值，避免"以为走了节点其实直连"这种看不见的偏差。 */}
+                                        <SelectItem value="0">{t('proxyNodeDirect')}</SelectItem>
+                                        {readyNodes.map((node) => (
+                                            <SelectItem key={node.id} value={String(node.id)}>
+                                                {`${node.name} · ${node.local_port}`}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-xs text-muted-foreground">{t('proxyNodeHint')}</p>
+                            </div>
                             {([
                                 ['channel_proxy', t('channelProxy')],
                                 ['match_regex', t('matchRegex')],

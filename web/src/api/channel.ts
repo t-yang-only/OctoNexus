@@ -25,6 +25,9 @@ export type ChannelKey = {
     name: string;
     key: string;
     enabled: boolean;
+    // proxy_node_id 是该凭据的出网节点（代理节点池的主键）；0 = 不单独指定，跟渠道走。
+    // 防关联的粒度就在这一行：同一个上游服务商的两个账号可以分别从两个出口出去。
+    proxy_node_id: number;
 };
 
 // ChannelGrant 是渠道内的一条上游授权：指定模型使用指定凭据时支持的协议集合，也是转发的最小单位。
@@ -72,6 +75,8 @@ export type ChannelDetail = {
     custom_header: CustomHeader[];
     param_override: string;
     channel_proxy: string;
+    // proxy_node_id 是整条渠道的默认出网节点；0 = 直连（或走 channel_proxy 的传统代理设置）。
+    proxy_node_id: number;
     match_regex: string;
     // 计费事实（R-weight-001 第二阶段）: 供加权综合选路折算「实际有多贵」; 留空/0 表示未知。
     billing_mode: string;

@@ -188,6 +188,61 @@ def main():
         "缺 %s" % (missing_manual or "无"),
     )
 
+    # P15 分压与限流监控（T-allocate-001 / T-monitor-001）: 首页那一页要真的进产物 ——
+    # 监控接口路径、分压模式的选项文案、分压设置项的键名与三语文案, 四类标记都要在 bundle 里找到。
+    # 标记挑的是「面板真的会调用/真的会显示」的东西: 页面数据来自 /api/v1/monitor/allocation,
+    # 设置键会被设置页的输入控件写到, 因此都不属于"未被引用会被摇掉"的那类。
+    allocation_markers = [
+        "monitor/allocation",                 # 监控页数据源
+        "route_allocate_health_weight",       # 分压设置项（会被设置控件引用）
+        "route_member_rpm_limit",
+        "route_ratelimit_cooldown_max_seconds",
+        "allocate",                           # 分组模式下拉里的选项值
+        "额度分压", "額度分壓", "Quota spread",
+        "分压与限流监控", "分壓與限流監控", "Quota spread and rate-limit monitor",
+        "剩余请求数", "剩餘請求數", "Remaining requests",
+    ]
+    missing_allocation = [marker for marker in allocation_markers if marker not in bundle]
+    record(
+        "P15 分压与限流监控进产物（接口路径 + 模式文案 + 设置键 + 三语文案）",
+        not missing_allocation,
+        "缺 %s" % (missing_allocation or "无"),
+    )
+
+    # P16 速度维度进产物（T-speed-001）: 「速度不好」的应对也要在面板上可见可调 ——
+    # 五个速度设置键（设置页控件会引用）+ 监控列与卡片 + 三语文案。看门狗倍数与下限这两个键
+    # 是"会被写进设置表"的控件键名，监控列是页面真的渲染的列标题，因此都不是被摇掉的那类。
+    speed_markers = [
+        "route_allocate_speed_weight",        # 速度折扣强度（设置页控件引用）
+        "route_speed_slow_ttfb_ms",
+        "route_speed_slow_tps",
+        "route_speed_first_event_multiple",   # 自适应首帧看门狗倍数
+        "route_speed_first_event_floor_ms",
+        "速度（首帧 / 吞吐）", "速度（首幀 / 吞吐）", "Speed (TTFB / throughput)",
+        "速度应对（首帧与吞吐）", "速度應對（首幀與吞吐）", "Speed countermeasures",
+        "慢成员", "慢成員", "Slow",
+    ]
+    missing_speed = [marker for marker in speed_markers if marker not in bundle]
+    record(
+        "P16 速度维度进产物（设置键 + 监控列 + 三语文案）",
+        not missing_speed,
+        "缺 %s" % (missing_speed or "无"),
+    )
+
+    # P17 入站正文上限（T-bodylimit-001）: 这一项之所以要给面板标记, 是因为它的**默认值**
+    # 必须能被用户改到（Codex 大正文被自家网关挡掉时, 面板上得能找到开关）。
+    bodylimit_markers = [
+        "relay_max_request_body_bytes",
+        "入站请求体上限", "入站請求體上限", "Inbound request body limit",
+        "上限（字节）", "上限（位元組）", "Limit (bytes)",
+    ]
+    missing_bodylimit = [marker for marker in bodylimit_markers if marker not in bundle]
+    record(
+        "P17 入站正文上限进产物（设置键 + 三语文案）",
+        not missing_bodylimit,
+        "缺 %s" % (missing_bodylimit or "无"),
+    )
+
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
     missing_locale = [name for name, marker in locales.items() if marker not in bundle]
     record(

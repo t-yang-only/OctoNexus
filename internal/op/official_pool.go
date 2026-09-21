@@ -76,9 +76,18 @@ func OfficialPoolSync(conn *gorm.DB, provider model.OfficialAccountProvider) (mo
 	}
 	result.ChannelID = channel.ID
 
-	keys, err := officialPoolKeys(target, channel.ID)
+	// 这里刻意用「先取行、再解密」两步，而不是 officialPoolKeys：
+	// 密钥轮换/credential.key 被替换后既有凭据解不开时，既比较不了"内容是否变化"，也无法判断
+	// 哪一行才是既有凭据 —— 继续硬写只会在同名列旁边再造一份。此时按池同步的契约降级为
+	// 「如实记原因 + 一行都不改」，而不是让整轮同步失败。
+	keys, err := officialPoolRawKeys(target, channel.ID)
 	if err != nil {
 		return result, err
+	}
+	if err := DecryptChannelKeyRows(keys); err != nil {
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"号池既有凭据解不开（密钥与加密时不一致，或 credential.key 被替换）：%v；本次未修改任何凭据，请先恢复密钥或重新授权", err))
+		return result, nil
 	}
 	byName := make(map[string]model.ChannelKey, len(keys))
 	for _, key := range keys {
@@ -110,7 +119,7 @@ func OfficialPoolSync(conn *gorm.DB, provider model.OfficialAccountProvider) (mo
 		access, err := officialDecrypt(account.Provider, account.AccessCipher)
 		if err != nil {
 			result.Notes = append(result.Notes, fmt.Sprintf(
-				"账号 %s 凭据解密失败，检查 OCTOPUS_OFFICIAL_KEY 是否与录入时一致：%v", account.ExternalName, err))
+				"账号 %s 凭据解密失败，检查凭据加密密钥是否与录入时一致（OCTOPUS_OFFICIAL_KEY 或数据目录 credential.key）：%v", account.ExternalName, err))
 			continue
 		}
 		if strings.TrimSpace(access) == "" {
@@ -359,13 +368,23 @@ func officialPoolAccounts(conn *gorm.DB, provider model.OfficialAccountProvider)
 }
 
 func officialPoolKeys(conn *gorm.DB, channelID int) ([]model.ChannelKey, error) {
-	var keys []model.ChannelKey
-	if err := conn.Where("channel_id = ?", channelID).Find(&keys).Error; err != nil {
-		return nil, fmt.Errorf("list official pool keys: %w", err)
+	keys, err := officialPoolRawKeys(conn, channelID)
+	if err != nil {
+		return nil, err
 	}
 	// 库内密文、进程内明文：物化同步要拿明文做比较（是否变化）。
 	if err := DecryptChannelKeyRows(keys); err != nil {
 		return nil, err
+	}
+	return keys, nil
+}
+
+// officialPoolRawKeys 只取行、不解密：解密失败要能被调用方单独识别并降级处理
+// （见 OfficialPoolSync 里"解不开就记原因、一行不改"的那段），整轮失败只留给真正的库错误。
+func officialPoolRawKeys(conn *gorm.DB, channelID int) ([]model.ChannelKey, error) {
+	var keys []model.ChannelKey
+	if err := conn.Where("channel_id = ?", channelID).Find(&keys).Error; err != nil {
+		return nil, fmt.Errorf("list official pool keys: %w", err)
 	}
 	return keys, nil
 }
@@ -416,9 +435,9 @@ func (h *httpTokenRefresher) Refresh(provider model.OfficialAccountProvider, ref
 	if !ok {
 		return OfficialTokenBundle{}, fmt.Errorf("no token endpoint for %q", provider)
 	}
-	clientID := strings.TrimSpace(os.Getenv("OCTOPUS_OFFICIAL_CLIENT_ID_" + strings.ToUpper(string(provider))))
+	clientID := officialOAuthClientID(provider)
 	if clientID == "" {
-		return OfficialTokenBundle{}, fmt.Errorf("official OAuth client id not configured for %s (set OCTOPUS_OFFICIAL_CLIENT_ID_%s)", provider, strings.ToUpper(string(provider)))
+		return OfficialTokenBundle{}, fmt.Errorf("official OAuth client id not configured for %s (set %s)", provider, officialOAuthClientIDEnv(provider))
 	}
 	form := url.Values{
 		"grant_type":    {"refresh_token"},

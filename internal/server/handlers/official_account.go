@@ -60,7 +60,8 @@ func officialAccountAuthorize(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, op.ErrOfficialKeyMissing):
-			resp.Error(c, http.StatusServiceUnavailable, "official credential cipher key not configured (set OCTOPUS_OFFICIAL_KEY)")
+			resp.Error(c, http.StatusServiceUnavailable, "credential cipher key unavailable: "+
+				"set OCTOPUS_OFFICIAL_KEY, or make the data directory writable so credential.key can be created/read")
 		default:
 			resp.Error(c, http.StatusBadRequest, err.Error())
 		}

@@ -52,6 +52,40 @@ func DBExportAll(ctx context.Context) (*model.DBDump, error) {
 		return nil, fmt.Errorf("export settings: %w", err)
 	}
 
+	// 出口节点池 / 订阅 / 官方账号 / 手动订阅: 先读模型行, 再映射到带密文的转储形状
+	// （密文字段在模型上是 json:"-", 直接转储会丢凭据）。
+	var nodes []model.ProxyNode
+	if err := conn.Find(&nodes).Error; err != nil {
+		return nil, fmt.Errorf("export proxy_nodes: %w", err)
+	}
+	d.ProxyNodes = make([]model.ProxyNodeExport, 0, len(nodes))
+	for _, row := range nodes {
+		d.ProxyNodes = append(d.ProxyNodes, model.ProxyNodeExport{ProxyNode: row, ParamsOut: row.Params})
+	}
+	var subs []model.ProxySubscription
+	if err := conn.Find(&subs).Error; err != nil {
+		return nil, fmt.Errorf("export proxy_subscriptions: %w", err)
+	}
+	d.ProxySubscriptions = make([]model.ProxySubscriptionExport, 0, len(subs))
+	for _, row := range subs {
+		d.ProxySubscriptions = append(d.ProxySubscriptions, model.ProxySubscriptionExport{ProxySubscription: row, URLCipherOut: row.URLCipher})
+	}
+	var accounts []model.OfficialAccount
+	if err := conn.Find(&accounts).Error; err != nil {
+		return nil, fmt.Errorf("export official_accounts: %w", err)
+	}
+	d.OfficialAccounts = make([]model.OfficialAccountExport, 0, len(accounts))
+	for _, row := range accounts {
+		d.OfficialAccounts = append(d.OfficialAccounts, model.OfficialAccountExport{
+			OfficialAccount:  row,
+			AccessCipherOut:  row.AccessCipher,
+			RefreshCipherOut: row.RefreshCipher,
+		})
+	}
+	if err := conn.Find(&d.ManualSubscriptions).Error; err != nil {
+		return nil, fmt.Errorf("export manual_subscriptions: %w", err)
+	}
+
 	if err := conn.Find(&d.StatsTotal).Error; err != nil {
 		return nil, fmt.Errorf("export stats_total: %w", err)
 	}
@@ -89,6 +123,25 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 
 	conn := db.GetDB().WithContext(ctx)
 	res := &model.DBImportResult{RowsAffected: map[string]int64{}, Skipped: map[string]int64{}}
+
+	// 导入是写入 channel_keys 的第四条路径（另三条：面板保存 syncChannelKeys、官方账号物化、
+	// 启动时的存量补加密）。前三条都经 sealChannelKeyForStore 落库，导入若直插原值，备份里的
+	// 明文凭据就原样进库——静态加密在"导入"这条路上形同虚设（实测：导入 46 条，sealed=0/46，
+	// 要等下一次重启才被启动补加密补上，中间窗口里库内与快照都是明文）。
+	// sealChannelKeyForStore 幂等（空串与已加密原样返回），所以"密文备份导回同一实例"不会二次加密。
+	// 另：备份里本来就带密文、但用本实例密钥解不开的条数（跨实例恢复 / credential.key 换过）如实回报，
+	// 否则表现出来是"导入成功、渠道全报错"。
+	if foreign := countUndecryptableChannelKeys(dump.ChannelKeys); foreign > 0 {
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"有 %d 条渠道凭据是密文但本实例的密钥解不开（备份来自另一实例或 credential.key 已更换），需要重新填写这些凭据",
+			foreign))
+	}
+	for i := range dump.ChannelKeys {
+		dump.ChannelKeys[i].Key = sealChannelKeyForStore(dump.ChannelKeys[i].Key)
+	}
+
+	res.Warnings = append(res.Warnings, importSecretWarnings(dump)...)
+
 	err := conn.Transaction(func(tx *gorm.DB) error {
 		// base tables
 		if n, err := createRowsRaw(tx, dump.Channels, nil, true); err != nil {
@@ -156,6 +209,50 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 			res.RowsAffected["settings"] = n
 		}
 
+		// 出口节点池 / 订阅 / 官方账号 / 手动订阅: 都是配置类行（与转发链没有外键依赖），按主键整行覆盖,
+		// 与 channel_keys / channel_models / llm_infos 同一口径。转储形状里有密文字段, 先映射回模型行。
+		// 四条都必须进事务: 少一条的后果是恢复出来的渠道绑定悬空（转发 fail-closed 全报错）或账号要重授权。
+		nodeRows := make([]model.ProxyNode, 0, len(dump.ProxyNodes))
+		for _, row := range dump.ProxyNodes {
+			node := row.ProxyNode
+			// 密文在转储形状的外层字段里（模型上的 Params 是 json:"-"）: 不回填就等于"行恢复了、凭据没了"。
+			node.Params = row.ParamsOut
+			nodeRows = append(nodeRows, node)
+		}
+		if n, err := createRowsRaw(tx, nodeRows, []clause.Column{{Name: "id"}}, false); err != nil {
+			return fmt.Errorf("import proxy_nodes: %w", err)
+		} else {
+			res.RowsAffected["proxy_nodes"] = n
+		}
+		subRows := make([]model.ProxySubscription, 0, len(dump.ProxySubscriptions))
+		for _, row := range dump.ProxySubscriptions {
+			sub := row.ProxySubscription
+			sub.URLCipher = row.URLCipherOut
+			subRows = append(subRows, sub)
+		}
+		if n, err := createRowsRaw(tx, subRows, []clause.Column{{Name: "id"}}, false); err != nil {
+			return fmt.Errorf("import proxy_subscriptions: %w", err)
+		} else {
+			res.RowsAffected["proxy_subscriptions"] = n
+		}
+		accountRows := make([]model.OfficialAccount, 0, len(dump.OfficialAccounts))
+		for _, row := range dump.OfficialAccounts {
+			account := row.OfficialAccount
+			account.AccessCipher = row.AccessCipherOut
+			account.RefreshCipher = row.RefreshCipherOut
+			accountRows = append(accountRows, account)
+		}
+		if n, err := createRowsRaw(tx, accountRows, []clause.Column{{Name: "id"}}, false); err != nil {
+			return fmt.Errorf("import official_accounts: %w", err)
+		} else {
+			res.RowsAffected["official_accounts"] = n
+		}
+		if n, err := createRowsRaw(tx, dump.ManualSubscriptions, []clause.Column{{Name: "id"}}, false); err != nil {
+			return fmt.Errorf("import manual_subscriptions: %w", err)
+		} else {
+			res.RowsAffected["manual_subscriptions"] = n
+		}
+
 		if n, err := createUpsertAll(tx, dump.StatsTotal, []clause.Column{{Name: "id"}}); err != nil {
 			return fmt.Errorf("import stats_total: %w", err)
 		} else {
@@ -181,6 +278,11 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 	})
 	if err != nil {
 		return nil, err
+	}
+	// 事务已提交, 现在按库内真实状态回报悬空绑定（而不是按转储内容猜）。
+	if dangling := countDanglingProxyNodeRefs(); dangling > 0 {
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"有 %d 条渠道/凭据绑定的出口节点不在库里（备份没带这些节点，或节点名与库内冲突被覆盖），这些成员转发时会直接报错，不会退回直连真实出口", dangling))
 	}
 	return res, nil
 }
@@ -342,6 +444,14 @@ func createRowsRaw(tx *gorm.DB, rows any, columns []clause.Column, doNothing boo
 		return rawCreate(tx, v, "llm_infos", columns, doNothing)
 	case []model.APIKey:
 		return rawCreate(tx, v, "api_keys", columns, doNothing)
+	case []model.ProxyNode:
+		return rawCreate(tx, v, "proxy_nodes", columns, doNothing)
+	case []model.ProxySubscription:
+		return rawCreate(tx, v, "proxy_subscriptions", columns, doNothing)
+	case []model.OfficialAccount:
+		return rawCreate(tx, v, "official_accounts", columns, doNothing)
+	case []model.ManualSubscription:
+		return rawCreate(tx, v, "manual_subscriptions", columns, doNothing)
 	case []model.StatsTotal:
 		return rawCreate(tx, v, "stats_total", columns, doNothing)
 	case []model.StatsDaily:

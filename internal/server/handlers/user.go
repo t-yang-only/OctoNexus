@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
@@ -63,6 +64,11 @@ func changePassword(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
 		return
 	}
+	// 同理：空新密码会把账号变成"没有密码"的状态，直接拒绝。
+	if strings.TrimSpace(user.NewPassword) == "" {
+		resp.Error(c, http.StatusBadRequest, "新密码不能为空")
+		return
+	}
 	if err := op.UserChangePassword(user.OldPassword, user.NewPassword); err != nil {
 		resp.Error(c, http.StatusInternalServerError, resp.ErrDatabase)
 		return
@@ -76,7 +82,15 @@ func changeUsername(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
 		return
 	}
-	if err := op.UserChangeUsername(user.NewUsername); err != nil {
+	// 空用户名必须拒绝：本轮实测踩过 —— 载荷字段写错（用 username 而不是 new_username）时
+	// NewUsername 为空，服务端照单全收，把账号名改成了空串，结果**谁也登不进面板**。
+	// 这种"输入错字段就把自己锁在门外"的失败方式代价太高，入口层直接挡掉。
+	username := strings.TrimSpace(user.NewUsername)
+	if username == "" {
+		resp.Error(c, http.StatusBadRequest, "新用户名不能为空")
+		return
+	}
+	if err := op.UserChangeUsername(username); err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

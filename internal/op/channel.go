@@ -112,7 +112,14 @@ func ChannelUpdate(detail *model.ChannelDetail, ctx context.Context) (*model.Cha
 		if err := tx.Model(&model.Channel{}).Where("id = ?", detail.ID).
 			Select("name", "dialect", "enabled", "base_url",
 				"openai_chat_completion_path", "openai_response_path", "anthropic_message_path",
-				"proxy", "channel_proxy", "custom_header", "param_override", "match_regex").
+				"proxy", "channel_proxy", "custom_header", "param_override", "match_regex",
+				// 计费事实（T-weight billing / T-allocate-001）必须在这份点名清单里:
+				// 渠道保存是整体替换语义, 漏一列就等于"面板上填了、库里没写"——缓存里有值,
+				// 重启之后选项/分压口径就悄悄变成未知（本轮实测踩到: 渠道更新后 billing 列仍为 NULL）。
+				"billing_mode", "multiplier", "per_call_price", "monthly_quota", "monthly_used",
+				// 渠道级出口节点（R-proxy-001）同理: 漏了它，面板上选好节点保存后库里仍是 0，
+				// 转发继续直连真实 IP——"给渠道选出口"这个功能等于没生效，而且没有任何报错。
+				"proxy_node_id").
 			Updates(&model.Channel{ChannelConfig: detail.ChannelConfig}).Error; err != nil {
 			return fmt.Errorf("failed to update channel: %w", err)
 		}
@@ -126,10 +133,19 @@ func ChannelUpdate(detail *model.ChannelDetail, ctx context.Context) (*model.Cha
 	}
 
 	// 缓存条目由提交的配置重建, 统计从原条目搬过来: 它含本轮尚未落库的累加, 比库内的行更新。
+	//
+	// 提交载荷里只有 ChannelConfig, 而 channels 行上还有不在表单里的列（人工录入的余额三列,
+	// R-balance-002）。只按 ChannelConfig 重建缓存, 会让这些列在**缓存里**变成零值——库里还在,
+	// 面板却显示"未录入", 直到重启才恢复。因此这里必须回读一次库。
 	channelStatsNeedUpdateLock.Lock()
 	channel := model.Channel{ID: detail.ID, ChannelConfig: detail.ChannelConfig}
 	if cached, ok := channelCache.Get(detail.ID); ok {
 		channel.StatsMetrics = cached.StatsMetrics
+	}
+	if err := db.GetDB().WithContext(ctx).Select("balance_points", "balance_at", "balance_note").
+		First(&channel, detail.ID).Error; err != nil {
+		// 事务已提交, 这里失败不能把整次保存报成失败; 只是缓存少了人工余额, 下一轮扫描/重启会补回来。
+		log.Warnf("channel %d: 回读非表单列失败, 人工录入的余额在缓存中可能短暂为零: %v", detail.ID, err)
 	}
 	channelCache.Set(detail.ID, channel)
 	channelStatsNeedUpdateLock.Unlock()
@@ -568,7 +584,10 @@ func syncChannelKeys(tx *gorm.DB, channelID int, inputs []model.ChannelKeyInput)
 	}
 	for _, requestedKey := range requested {
 		if current, ok := existingByName[requestedKey.Name]; ok {
-			if current.Key != requestedKey.Key || current.Enabled != requestedKey.Enabled {
+			// 触发条件必须覆盖**每一个会变的列**：只改代理节点（key/enabled 都没动）时若漏进来，
+			// 界面上的选择会被静默丢弃 —— 这正是"新增字段必须加进差异键"那条纪律的又一实例。
+			if current.Key != requestedKey.Key || current.Enabled != requestedKey.Enabled ||
+				current.ProxyNodeID != requestedKey.ProxyNodeID {
 				// operator_disabled 与 enabled 一起写: 这两列是同一件事的两面 —— "谁把它关的"。
 				// 渠道页显式提交启用位就是对这条凭据的最新人工决定: 启用即解开人工停用
 				// (号池同步从此可以再维护它), 停用即落下人工停用 —— 否则界面上的停用会被
@@ -578,6 +597,7 @@ func syncChannelKeys(tx *gorm.DB, channelID int, inputs []model.ChannelKeyInput)
 						"key":               sealChannelKeyForStore(requestedKey.Key),
 						"enabled":           requestedKey.Enabled,
 						"operator_disabled": !requestedKey.Enabled,
+						"proxy_node_id":     requestedKey.ProxyNodeID,
 					}).Error; err != nil {
 					return fmt.Errorf("failed to update channel key: %w", err)
 				}

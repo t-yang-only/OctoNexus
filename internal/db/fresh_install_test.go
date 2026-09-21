@@ -51,6 +51,12 @@ func TestFreshInstallCreatesAllTables(t *testing.T) {
 		&model.JumpToken{},
 		&model.UsageHourly{},
 		&model.ManualSubscription{},
+		&model.ProxyNode{},
+		&model.ProxySubscription{},
+		&model.PriceSnapshot{},
+		&model.UsageSnapshot{},
+		&model.Plugin{},
+		&model.CredentialSource{},
 	}
 	missing := []string{}
 	for _, item := range models {

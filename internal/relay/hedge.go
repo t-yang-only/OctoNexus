@@ -164,6 +164,14 @@ func cloneHTTPRequest(src *httpclient.Request) *httpclient.Request {
 // 而且用户会看到简单请求也在花贵渠道的钱（竞速本身就是要多发一份请求的）。
 // 档内没有可竞速成员时与选路一致地回退到全体成员。其余模式行为与不带特征时逐字一致。
 func (deps routeDeps) rankedHedgeCandidatesWithFeatures(group model.Group, smart SmartRoute) []model.GroupItem {
+	// 额度分压 (T-allocate-001) 的竞速候选与选路同一套权重与定序, 但**只读**:
+	// 竞速是一次预演, 不该推进分配累加器 (否则每次预演都改了下一次当选者, 分配比例被自己的候选计算带偏)。
+	if group.Mode == model.GroupModeAllocate {
+		if ranked := rankedAllocateCandidates(group, deps, smart.Features); len(ranked) > 0 {
+			return ranked
+		}
+		return deps.rankedHedgeCandidates(group)
+	}
 	if group.Mode != model.GroupModeSmart {
 		return deps.rankedHedgeCandidates(group)
 	}
@@ -287,10 +295,10 @@ func runRoundWithHedge(ctx context.Context, group model.Group, primary preparedT
 		var result *upstreamResponse
 		var err error
 		if target.passthrough {
-			result, err = sendPassthrough(roundCtx, format, target.raw, target.channel, target.outbound,
+			result, err = sendPassthrough(roundCtx, format, target.raw, target.channel, target.channelKey, target.outbound,
 				streaming, target.channelModel.Name)
 		} else {
-			result, err = sendConverted(roundCtx, format, target.raw, target.channel, target.outbound, streaming)
+			result, err = sendConverted(roundCtx, format, target.raw, target.channel, target.channelKey, target.outbound, streaming)
 		}
 		if !timer.Stop() {
 			cancelCause(timeoutErr)

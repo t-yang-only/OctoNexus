@@ -53,7 +53,13 @@ func BalanceSummaryGet() model.BalanceSummary {
 		if remaining, ok := ChannelBalance(channel.ID); ok {
 			row.Known = true
 			row.Remaining = remaining
-			row.Balance = model.ConvertBalancePoints(remaining, pointsPerUnit)
+			// 读数自带单位口径：new-api 的 quota 是"点"，要按 balance_points_per_unit 折算；
+			// 而 /user/balance、/usage、OpenAI Billing 报的就是美元，再折一次会变成万分之一个点。
+			if ChannelBalanceInCurrency(channel.ID) {
+				row.Balance = remaining
+			} else {
+				row.Balance = model.ConvertBalancePoints(remaining, pointsPerUnit)
+			}
 			row.BalanceSource = "api"
 			summary.Total += row.Balance
 			summary.KnownChannels++
@@ -68,8 +74,29 @@ func BalanceSummaryGet() model.BalanceSummary {
 			summary.ManualTotal += row.Balance
 			summary.KnownChannels++
 			manualUsedChannels[channel.ID] = true
+		} else if channel.BalancePoints > 0 {
+			// 面板上直接录在渠道行的余额（R-balance-002）：无接口站点最低成本的兜底。
+			// 排在自动读数与手动订阅之后——三者的可信度就是这个顺序。
+			row.Known = true
+			row.Remaining = channel.BalancePoints
+			row.Balance = model.ConvertBalancePoints(channel.BalancePoints, pointsPerUnit)
+			row.BalanceSource = "manual"
+			row.ManualAt = channel.BalanceAt
+			row.Note = channel.BalanceNote
+			summary.Total += row.Balance
+			summary.KnownChannels++
 		} else {
+			// 未读到：带上"为什么"（原因码 + 一句人话），面板才不至于只显示"未读到"。
 			summary.UnknownChannels++
+			row.Note = channel.BalanceNote
+			if key, text := ChannelBalanceReason(channel.ID); key != "" {
+				row.ReasonCode = key
+				row.ReasonText = text
+				if summary.ReasonCounts == nil {
+					summary.ReasonCounts = map[string]int{}
+				}
+				summary.ReasonCounts[key]++
+			}
 		}
 		summary.TotalMonthlyRemaining += row.MonthlyRemaining
 		summary.Channels = append(summary.Channels, row)

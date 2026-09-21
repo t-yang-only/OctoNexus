@@ -23,6 +23,10 @@ type RouteState struct {
 
 	affinityArmed bool   // 当前路由下一次成功后是否开始亲和, 仅故障切换后为真。
 	balanceRound  uint64 // 加权轮询 (T-route-002 L5) 的当选者轮转计数, 仅在 flag 开启时推进, 随状态重置归零。
+	// allocCurrent 是额度分压 (mode=allocate, T-allocate-001) 的平滑加权轮询累加器: 键为展平后的成员行 ID。
+	// 与 balanceRound 的区别: 它保留每个成员的权重余量, 于是权重随余额/健康变化时分配会自动跟着变;
+	// balanceRound 只记"轮到第几次", 只有在权重固定时才等价。未导出, 故不进路由状态流的 JSON。
+	allocCurrent map[int]int
 }
 
 const routeStreamBuffer = 16 // 单个路由流连接的非阻塞消息缓冲容量。
@@ -173,10 +177,43 @@ func recordRouteSuccess(group model.Group, itemID int, latencyMs int64) {
 // recordRouteFailure 上报一轮失败: 达到配置的总尝试次数后将该成员打入冷却并让出当前路由, 返回是否已冷却。
 // failures 为该成员在本请求内包含首次请求的连续失败次数, 由调用方累计。
 func recordRouteFailure(group model.Group, itemID, failures int, latencyMs int64) bool {
+	return recordRouteFailureHint(group, itemID, failures, latencyMs, 0)
+}
+
+// recordRouteFailureHint 与 recordRouteFailure 同一语义, 额外接收上游给出的等待提示
+// (Retry-After 一类, T-allocate-002): 限流是"等一会儿再来"而不是"这个成员坏了", 因此
+//  1. 冷却时长取 max(上游提示, 分组配置的冷却秒数) —— 上游说等 3 秒而我们配的是 60 秒时听我们的,
+//     上游说等 120 秒时听上游的, 且不超过 route_ratelimit_cooldown_max_seconds（默认 300 秒）;
+//  2. 无论是否达到冷却门槛, 都把这次限流记进限流账（供分压选路让开、供监控展示命中次数）。
+//
+// hint<=0 时行为与既有链路逐字一致（测试与内部调用仍走上面那个外壳）。
+func recordRouteFailureHint(group model.Group, itemID, failures int, latencyMs int64, hint time.Duration) bool {
 	// 一次失败一轮即记一次: 质量口径就是"成员尝试成功率", 与成员尝试上限无关。
 	recordMemberOutcome(itemID, false, latencyMs)
 	// 失败同样占用了该成员的配额(连接/上游计数), 故也计入近期负载。
 	recordMemberAttempt(itemID)
+
+	// 等待提示先按设置封顶（route_ratelimit_cooldown_max_seconds, 默认 300 秒）:
+	// 上游给一个坏响应（比如 Retry-After: 3600）时不能把成员冻住一小时。
+	// 封顶后的值同时用于限流账与冷却时长 —— 两处必须用同一个数, 否则会出现"冷却到期了但健康折扣
+	// 还把它按限流中处理"这种自相矛盾的状态。
+	var capMs int64
+	if hint > 0 {
+		capMs = allocateSettingsOf().throttleCapMs
+		if capMs <= 0 {
+			capMs = int64(defaultThrottleCapSeconds) * 1000
+		}
+		if hintMs := hint.Milliseconds(); hintMs > capMs {
+			hint = time.Duration(capMs) * time.Millisecond
+		}
+	}
+
+	// 限流账与模式无关: 手动模式下虽然不打冷却, 但"这把钥匙正在被限流"仍是事实,
+	// 分压选路与监控都要读它（记了不影响手动模式的既有行为）。
+	now := time.Now()
+	if hint > 0 {
+		recordMemberThrottle(itemID, now.UnixMilli(), now.Add(hint).UnixMilli())
+	}
 
 	if group.Mode == model.GroupModeManual {
 		return false
@@ -194,8 +231,15 @@ func recordRouteFailure(group model.Group, itemID, failures int, latencyMs int64
 		return false
 	}
 
-	now := time.Now().UnixMilli()
-	route.Cooldowns[itemID] = now + int64(group.RelayConfig.MemberCooldownSeconds)*1000
+	cooldownMs := int64(group.RelayConfig.MemberCooldownSeconds) * 1000
+	if hint > 0 {
+		// 限流按上游提示等（取较长者）: 比配置短就等配置, 比配置长就等上游。
+		if hinted := hint.Milliseconds(); hinted > cooldownMs {
+			cooldownMs = hinted
+		}
+	}
+	nowMs := now.UnixMilli()
+	route.Cooldowns[itemID] = nowMs + cooldownMs
 	if route.ProbeItemID == itemID {
 		route.ProbeItemID = 0
 	}
@@ -253,6 +297,12 @@ func groupRouteLocked(group model.Group) *RouteState {
 	for itemID := range route.Cooldowns {
 		if !items[itemID] {
 			delete(route.Cooldowns, itemID)
+		}
+	}
+	// 分压累加器同样按成员集合清理: 成员被移除后它的权重余量再无意义, 留着只是内存垃圾。
+	for itemID := range route.allocCurrent {
+		if !items[itemID] {
+			delete(route.allocCurrent, itemID)
 		}
 	}
 	if route.ProbeItemID != 0 && !items[route.ProbeItemID] {
@@ -331,6 +381,10 @@ func pickGroupItemByModeWithFeatures(group model.Group, deps routeDeps, balanceE
 		return pickGroupItemQualityFirst(group, deps.quality)
 	case group.Mode == model.GroupModeLowestLatency:
 		return pickGroupItemLowestLatency(group, deps.latency)
+	case group.Mode == model.GroupModeAllocate:
+		// 额度分压 (T-allocate-001): 按成员各自的剩余请求数按比例分配, 需要本次请求的 token 估算
+		// (把余额折成"还能发多少次"); 其余语义 (冷却/探测/亲和/上限) 与其它模式完全一致。
+		return pickGroupItemAllocate(group, deps, smart.Features)
 	case group.Mode == model.GroupModeWeighted:
 		return pickGroupItemWeighted(group, deps)
 	case group.Mode == model.GroupModeLeastBusy:

@@ -12,6 +12,7 @@ import { Balance } from './balance';
 import { StatsChart } from './chart';
 import { Rank } from './rank';
 import { ModelMonitor } from './monitor';
+import { AllocationMonitor } from './allocation';
 import { useHomeViewStore } from './store';
 
 // HomeSections 汇总首页各统计区块, 屏内正文与分享图舞台共用。
@@ -26,6 +27,7 @@ function HomeSections() {
             <StatsChart />
             <Rank />
             <ModelMonitor />
+            <AllocationMonitor />
         </div>
     );
 }

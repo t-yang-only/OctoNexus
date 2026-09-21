@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 // WeightSettingField 是加权综合选路的一组设置控件（数字或下拉）。
 // 自包含: 自己从设置列表取当前值、自己保存并 toast, 免得为 10 个键再抄一遍父组件的 state/ref/同步样板。
-function WeightSettingField({ settingKey, label, kind, options }: {
+function WeightSettingField({ settingKey, label, kind, options, max, hint }: {
     settingKey: string;
     label: string;
     kind: 'number' | 'select';
     options?: { value: string; label: string }[];
+    // max 是数字控件的上限: 加权维度是 0..100, 而分压设置里还有 token 数/RPM 这类更大的量纲
+    // （T-allocate-001）, 故不能把 100 写死在控件上。
+    max?: string;
+    hint?: string;
 }) {
     const t = useTranslations('setting');
     const settingsQuery = useSettingList();
@@ -52,10 +56,11 @@ function WeightSettingField({ settingKey, label, kind, options }: {
     return (
         <label className="grid gap-1 text-xs text-muted-foreground">
             {label}
+            {hint && <span className="text-[11px] text-muted-foreground/80">{hint}</span>}
             <Input
                 type="number"
                 min="0"
-                max="100"
+                max={max ?? '100'}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 onBlur={() => save(value)}
@@ -386,6 +391,46 @@ export function SettingSystem() {
                         {/* 上游判定"请求本身非法"（400 一类）时的取向: 换成员再试 / 立刻回上游原文 */}
                         <WeightSettingField settingKey="relay_request_fault_action" label={t('routing.requestFaultAction')} kind="select"
                             options={[{ value: 'failover', label: t('routing.requestFaultFailover') }, { value: 'failfast', label: t('routing.requestFaultFailfast') }]} />
+                    </div>
+                </div>
+                {/* 额度分压（allocate 模式, T-allocate-001）：剩余请求数的折算、健康折扣与自限流。
+                    全部设置都由选路层读取（allocateSettingsOf）, 面板只负责写值。 */}
+                <div id="allocate-settings" className="mt-2 grid gap-3 rounded-xl border border-border p-3">
+                    <div>
+                        <p className="text-sm font-medium">{t('routing.allocateTitle')}</p>
+                        <p className="text-xs text-muted-foreground">{t('routing.allocateHint')}</p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <WeightSettingField settingKey="route_allocate_estimate_tokens" label={t('routing.allocateTokens')} hint={t('routing.allocateTokensHint')} kind="number" max="2000000" />
+                        <WeightSettingField settingKey="route_allocate_health_weight" label={t('routing.allocateHealth')} hint={t('routing.allocateHealthHint')} kind="number" />
+                        <WeightSettingField settingKey="route_allocate_slow_latency_ms" label={t('routing.allocateSlowMs')} hint={t('routing.allocateSlowMsHint')} kind="number" max="600000" />
+                        <WeightSettingField settingKey="route_allocate_min_requests" label={t('routing.allocateMinRequests')} hint={t('routing.allocateMinRequestsHint')} kind="number" max="1000000" />
+                        <WeightSettingField settingKey="route_member_rpm_limit" label={t('routing.memberRpmLimit')} hint={t('routing.memberRpmLimitHint')} kind="number" max="1000000" />
+                        <WeightSettingField settingKey="route_member_tpm_limit" label={t('routing.memberTpmLimit')} hint={t('routing.memberTpmLimitHint')} kind="number" max="1000000000" />
+                        <WeightSettingField settingKey="route_ratelimit_cooldown_max_seconds" label={t('routing.throttleCap')} hint={t('routing.throttleCapHint')} kind="number" max="86400" />
+                    </div>
+                    {/* 速度维度（T-speed-001）：把"速度不好"变成两个可调的量——谁算慢、慢成员少拿多少流量,
+                        外加一条"慢成员更早被放弃"的自适应首帧看门狗。 */}
+                    <div className="mt-1 rounded-xl border border-border/60 p-3">
+                        <p className="text-sm font-medium">{t('routing.speedTitle')}</p>
+                        <p className="text-xs text-muted-foreground">{t('routing.speedHint')}</p>
+                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <WeightSettingField settingKey="route_allocate_speed_weight" label={t('routing.speedWeight')} hint={t('routing.speedWeightHint')} kind="number" />
+                            <WeightSettingField settingKey="route_speed_slow_ttfb_ms" label={t('routing.speedSlowTtfb')} hint={t('routing.speedSlowTtfbHint')} kind="number" max="600000" />
+                            <WeightSettingField settingKey="route_speed_slow_tps" label={t('routing.speedSlowTps')} hint={t('routing.speedSlowTpsHint')} kind="number" max="100000" />
+                            <WeightSettingField settingKey="route_speed_first_event_multiple" label={t('routing.speedFeMultiple')} hint={t('routing.speedFeMultipleHint')} kind="number" max="100" />
+                            <WeightSettingField settingKey="route_speed_first_event_floor_ms" label={t('routing.speedFeFloor')} hint={t('routing.speedFeFloorHint')} kind="number" max="600000" />
+                        </div>
+                    </div>
+                    {/* 入站正文上限（T-bodylimit-001）：依赖库把上限写死成 64 MiB，Codex 的 remote compact
+                        这类大正文会被自家网关先拒掉（报错还长得像上游错误）。这里把它变成可调的一项：
+                        0 = 不限制，默认 256 MiB。提示里要写明"开大上限=单请求内存上升"的代价。 */}
+                    <div className="mt-1 rounded-xl border border-border/60 p-3">
+                        <p className="text-sm font-medium">{t('routing.bodyLimitTitle')}</p>
+                        <p className="text-xs text-muted-foreground">{t('routing.bodyLimitHint')}</p>
+                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <WeightSettingField settingKey="relay_max_request_body_bytes" label={t('routing.bodyLimit')} hint={t('routing.bodyLimitHint2')} kind="number" max="4294967296" />
+                        </div>
                     </div>
                 </div>
                 <label className="grid gap-1 text-xs text-muted-foreground"><span className="flex items-center gap-1"><BellRing className="size-3.5" />{t('alerts.webhook')}</span><Input value={alertWebhookUrl} onChange={(e) => setAlertWebhookUrl(e.target.value)} onBlur={() => handleSave(SettingKey.AlertWebhookURL, alertWebhookUrl, initialAlertWebhookUrl.current)} placeholder="https://..." type="url" className="rounded-xl" /></label>
