@@ -55,6 +55,7 @@ export function ChannelActions() {
 
 // Channel 渲染渠道列表正文。
 export function Channel() {
+    const t = useTranslations('channel');
     const { data: statsData } = useChannelStats();
     const searchTerm = usePageActionsStore((state) => state.searchTerms.channel || '');
     const layout = usePageActionsStore((state) => state.layouts.channel || 'grid');
@@ -77,6 +78,23 @@ export function Channel() {
                 : b.channel_name.localeCompare(a.channel_name)
         );
     }, [statsData, searchTerm, filter, sortOrder]);
+
+    // 空态：VirtualizedGrid 在 items 为空时什么都不渲染，用户看到的是一张白纸
+    // （全新安装的「渠道」页就是这样，连"去哪儿加渠道"都看不出来）。
+    // 两种空要分开说：一条渠道都没有，和被搜索/筛选挡掉了。
+    if (visibleChannels.length === 0) {
+        const noChannelAtAll = (statsData ?? []).length === 0;
+        return (
+            <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 p-8 text-center">
+                <p className="text-sm font-medium">
+                    {t(noChannelAtAll ? 'empty.title' : 'empty.filteredTitle')}
+                </p>
+                <p className="max-w-sm text-xs text-muted-foreground">
+                    {t(noChannelAtAll ? 'empty.hint' : 'empty.filteredHint')}
+                </p>
+            </div>
+        );
+    }
 
     return (
         <VirtualizedGrid

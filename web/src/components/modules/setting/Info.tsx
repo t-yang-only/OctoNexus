@@ -19,7 +19,9 @@ export function SettingInfo() {
     const latestVersion = latestInfoQuery.data?.tag_name || '';
 
     // 前端版本与后端当前版本不一致 → 浏览器缓存问题
-    const isCacheMismatch = !!backendNowVersion && backendNowVersion !== APP_VERSION;
+    // 只有确实知道前端版本时才谈得上不匹配：构建没注入版本号时 APP_VERSION 是 'unknown'，
+// 那时警告纯属误报（实测踩过：面板一进设置页就喊版本不一致，让用户去强刷）。
+const isCacheMismatch = !!backendNowVersion && APP_VERSION !== 'unknown' && backendNowVersion !== APP_VERSION;
     // 最新版本与后端当前版本不一致 → 有新版本可更新
     const hasNewVersion = latestVersion && backendNowVersion && latestVersion !== backendNowVersion;
 

@@ -135,6 +135,18 @@ func ResetKey() {
 	keyFrom = ""
 }
 
+// CipherKey 返回统一的 32 字节凭据加密密钥（SHA-256 派生），来源优先级：
+// 环境变量 OCTOPUS_OFFICIAL_KEY → 数据目录下的 credential.key（首次使用时自动生成）。
+//
+// 这是本项目唯一的密钥解析口径：渠道凭据、官方账号凭据、号池声明式规格四处都必须经它取密钥。
+// 曾经的缺陷是官方账号/号池自己直接读环境变量（不经文件回退），于是"没设环境变量的正常安装"
+// 一用号池就报 official credential cipher key not configured —— 同一台机器上渠道凭据加密是好的，
+// 号池却不可用，用户看到的还是一条与环境变量有关的报错。
+// 各处密文的隔离靠 AAD（服务商名 / pool:declarative / credential:channel-key）保证，不靠换密钥。
+func CipherKey() ([]byte, error) {
+	return cipherKey()
+}
+
 func credentialGCM() (cipher.AEAD, error) {
 	key, err := cipherKey()
 	if err != nil {
@@ -150,6 +162,49 @@ func credentialGCM() (cipher.AEAD, error) {
 // IsSealed 报告落库值是不是密文（没有前缀的值按明文处理）。
 func IsSealed(stored string) bool {
 	return strings.HasPrefix(stored, SealedPrefix)
+}
+
+// SealWith 用指定 AAD 把明文加密成落库形状 base64(nonce|ciphertext) 并加前缀。
+//
+// 与 Seal 的唯一区别是 AAD：AAD 表达"这枚密文是给什么用途的"（渠道凭据 / 官方账号 / 号池规格 / 代理节点），
+// 用途不同就解不开——密钥只有一把（CipherKey），用途隔离靠 AAD，不靠再搞一套密钥体系。
+func SealWith(aad, plain string) (string, error) {
+	if plain == "" || IsSealed(plain) {
+		return plain, nil
+	}
+	gcm, err := credentialGCM()
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("credential cipher nonce: %w", err)
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(plain), []byte(aad))
+	return SealedPrefix + base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+// OpenWith 用指定 AAD 解密；未加前缀的值按明文原样返回（存量行不失效）。
+func OpenWith(aad, stored string) (string, error) {
+	if !IsSealed(stored) {
+		return stored, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(stored, SealedPrefix))
+	if err != nil {
+		return "", fmt.Errorf("credential cipher decode: %w", err)
+	}
+	gcm, err := credentialGCM()
+	if err != nil {
+		return "", err
+	}
+	if len(raw) < gcm.NonceSize() {
+		return "", fmt.Errorf("credential cipher truncated")
+	}
+	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], []byte(aad))
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }
 
 // Seal 把明文凭据加密成落库形状 base64(nonce|ciphertext) 并加前缀。

@@ -5,9 +5,11 @@ import { queryClient } from './client';
 import { groupListQueryOptions } from './queries';
 
 // GroupMode 表示分组的手动或故障转移路由模式。
-export type GroupMode = 'manual' | 'failover' | 'lowest_cost' | 'quality_first' | 'lowest_latency' | 'least_busy' | 'lowest_tpm_rpm' | 'weighted' | 'smart';
+export type GroupMode = 'manual' | 'failover' | 'lowest_cost' | 'quality_first' | 'lowest_latency' | 'least_busy' | 'lowest_tpm_rpm' | 'weighted' | 'smart' | 'allocate';
 // smart 是智能路由（对齐阶跃 Step Router 的用法）：按请求特征（轮数/输入量/工具数）判复杂度，
 // 复杂走靠前的成员、简单走靠后的成员；阈值见 relay_config.smart_route_threshold。
+// allocate 是额度分压（T-allocate-001）：按成员各自的剩余请求数按比例分配流量——
+// 每个 key 只有一点钱时，几条小余额的 key 一起顶上一个大的，而不是把流量全压在同一个成员上。
 
 // GroupRelayConfig 保存分组 Relay 配置。
 export interface GroupRelayConfig {

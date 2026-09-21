@@ -1,9 +1,12 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil, Check, RefreshCw } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { IconButton } from '@/components/common/IconButton';
+import { proxyNodesQueryOptions } from '@/api/proxy';
 import { useModelProbe } from './probe';
 import { grantKey, type ChannelFormState } from './state';
 
@@ -20,6 +23,9 @@ export function FormKeys({ state, setState }: {
 }) {
     const t = useTranslations('channel.form');
     const { probe, pendingKey } = useModelProbe();
+    // 出口节点列表：绑定是"用哪个节点出去"，没启用或还没分配端口的节点不能选（选了也发不出去）。
+    const nodesQuery = useQuery(proxyNodesQueryOptions);
+    const readyNodes = (nodesQuery.data?.items ?? []).filter((node) => node.enabled && node.local_port > 0);
     const [editing, setEditing] = useState<number | null>(null);
     const [draft, setDraft] = useState({ name: '', key: '' });
 
@@ -61,7 +67,7 @@ export function FormKeys({ state, setState }: {
         // 名称在渠道内唯一, 递增取一个未占用的默认名。
         let n = state.keys.length + 1;
         while (state.keys.some((k) => k.name === `key-${n}`)) n += 1;
-        setState({ ...state, keys: [...state.keys, { name: `key-${n}`, key: '', enabled: true }] });
+        setState({ ...state, keys: [...state.keys, { name: `key-${n}`, key: '', enabled: true, proxy_node_id: 0 }] });
         setDraft({ name: `key-${n}`, key: '' });
         setEditing(state.keys.length);
     };
@@ -110,6 +116,28 @@ export function FormKeys({ state, setState }: {
                         <span className="text-xs text-muted-foreground tabular-nums">
                             {grantCount(channelKey.name)}
                         </span>
+                        {/* 逐账号出口：同一上游的两个账号分别走不同节点，是"不让它们看起来来自同一处"的关键一步。 */}
+                        <Select
+                            value={String(channelKey.proxy_node_id ?? 0)}
+                            onValueChange={(value) => setState({
+                                ...state,
+                                keys: state.keys.map((k, i) => (i === index
+                                    ? { ...k, proxy_node_id: Number(value) }
+                                    : k)),
+                            })}
+                        >
+                            <SelectTrigger className="rounded-lg h-9 w-40" title={t('keyProxyNode')}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="0">{t('proxyNodeInherit')}</SelectItem>
+                                {readyNodes.map((node) => (
+                                    <SelectItem key={node.id} value={String(node.id)}>
+                                        {`${node.name} · ${node.local_port}`}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                         <Switch
                             checked={channelKey.enabled}
                             onCheckedChange={(checked) => setState({

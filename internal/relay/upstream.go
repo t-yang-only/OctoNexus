@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/rhttp"
 	"github.com/looplj/axonhub/llm"
 	"github.com/looplj/axonhub/llm/httpclient"
@@ -40,7 +42,34 @@ type upstreamResponse struct {
 
 // resolveUpstreamClient 按渠道代理配置取得本轮上游请求使用的客户端。
 // 第二个返回值非 nil 时说明客户端是为渠道专用代理新建的独占实例, 不进共享连接池, 用完须调用它归还空闲连接。
+//
+// 出口优先级（R-proxy-001）: 账号级节点 > 渠道级节点 > 既有的「渠道代理开关 / 渠道专用地址 / 全局代理」。
+// 账号级存在的理由: 同一站点多账号必须各自走不同出口 IP，否则上游靠"同 IP 多账号"就能把它们关联起来。
+//
+// 安全取向: 绑定了节点但节点没就绪（未分配本地端口/已停用/已删除）时**报错**，
+// 绝不静默退回直连 —— 静默直连正好泄露了用户想藏起来的真实出口。
 func resolveUpstreamClient(channel model.Channel) (*http.Client, func(), error) {
+	return resolveUpstreamClientForKey(channel, nil)
+}
+
+// resolveUpstreamClientForKey 是带上"本轮用的是哪条账号凭据"的版本；
+// key 为 nil（探测/无账号上下文）时只看渠道级绑定。
+func resolveUpstreamClientForKey(channel model.Channel, key *model.ChannelKey) (*http.Client, func(), error) {
+	boundNodeID := channel.ProxyNodeID
+	if key != nil && key.ProxyNodeID > 0 {
+		boundNodeID = key.ProxyNodeID
+	}
+	if boundNodeID > 0 {
+		endpoint, err := op.ProxyNodeEndpoint(boundNodeID)
+		if err != nil {
+			return nil, nil, err
+		}
+		client, err := rhttp.New(endpoint)
+		if err != nil {
+			return nil, nil, fmt.Errorf("代理节点出口不可用（%s）: %w", endpoint, err)
+		}
+		return client, client.CloseIdleConnections, nil
+	}
 	switch {
 	case !channel.Proxy:
 		client, err := rhttp.Direct()
@@ -58,12 +87,12 @@ func resolveUpstreamClient(channel model.Channel) (*http.Client, func(), error) 
 }
 
 // sendPassthrough 以同协议透传方式请求上游, 取得的响应无需转换即可回给客户端。
-func sendPassthrough(ctx context.Context, format llm.APIFormat, raw *httpclient.Request, channel model.Channel, outbound transformer.Outbound, streaming bool, modelName string) (*upstreamResponse, error) {
+func sendPassthrough(ctx context.Context, format llm.APIFormat, raw *httpclient.Request, channel model.Channel, channelKey model.ChannelKey, outbound transformer.Outbound, streaming bool, modelName string) (*upstreamResponse, error) {
 	request, err := buildPassthroughRequest(format, raw, channel, outbound, modelName)
 	if err != nil {
 		return nil, err
 	}
-	httpClient, closeIdle, err := resolveUpstreamClient(channel)
+	httpClient, closeIdle, err := resolveUpstreamClientForKey(channel, &channelKey)
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +152,13 @@ func sendPassthroughStream(ctx context.Context, format llm.APIFormat, request *h
 			return nil, readErr
 		}
 		// 带上状态码: 上层据此区分「确定性错误」（不重试, 见 retry.go）与「可恢复错误」。
-		return nil, newUpstreamStatusError(response.StatusCode,
-			fmt.Sprintf("upstream responded %s: %s", response.Status, failure))
+		// 同时把上游的等待提示（Retry-After 一类, T-allocate-002）带上: 流式路径的响应头只在这里可见,
+		// 错过它就只能按分组配置的冷却秒数等（上游说等 3 秒也算 60 秒）。
+		return nil, &upstreamStatusError{
+			status:    response.StatusCode,
+			message:   fmt.Sprintf("upstream responded %s: %s", response.Status, failure),
+			retryHint: retryAfterFromHeader(response.Header, time.Now()),
+		}
 	}
 
 	events := httpclient.NewDefaultSSEDecoder(ctx, response.Body)
@@ -295,7 +329,7 @@ func (m *conversionMiddleware) OnOutboundLlmResponse(_ context.Context, response
 }
 
 // sendConverted 经 axonhub pipeline 把客户端请求转换成渠道协议后请求上游, 响应再转换回客户端协议。
-func sendConverted(ctx context.Context, format llm.APIFormat, raw *httpclient.Request, channel model.Channel, outbound transformer.Outbound, streaming bool) (*upstreamResponse, error) {
+func sendConverted(ctx context.Context, format llm.APIFormat, raw *httpclient.Request, channel model.Channel, channelKey model.ChannelKey, outbound transformer.Outbound, streaming bool) (*upstreamResponse, error) {
 	var inbound transformer.Inbound
 	switch format {
 	case llm.APIFormatOpenAIResponse:
@@ -306,7 +340,7 @@ func sendConverted(ctx context.Context, format llm.APIFormat, raw *httpclient.Re
 		inbound = openai.NewInboundTransformer()
 	}
 
-	httpClient, closeIdle, err := resolveUpstreamClient(channel)
+	httpClient, closeIdle, err := resolveUpstreamClientForKey(channel, &channelKey)
 	if err != nil {
 		return nil, err
 	}

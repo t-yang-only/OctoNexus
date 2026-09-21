@@ -24,6 +24,10 @@ type QuotaScanTarget struct {
 	BaseURL      string
 	MonitorToken string
 	UseProxy     bool
+	// ProxyNodeID 是读余额时要走的出口节点（R-proxy-001）：
+	// 账号级（监控凭据自己的节点）优先于渠道级，与转发同一条口径——
+	// 否则"请求从节点出、余额请求从真实 IP 出"本身就是一条可关联的痕迹。
+	ProxyNodeID int
 }
 
 // QuotaScanTargets 把全部启用且可采集的渠道映射为扫描目标（163 清单 ②）。
@@ -35,25 +39,30 @@ func QuotaScanTargets() []QuotaScanTarget {
 		if !channel.Enabled || channel.BaseURL == "" {
 			continue
 		}
-		token, found := firstEnabledKeyToken(channel.ID)
+		key, found := firstEnabledKey(channel.ID)
 		if !found {
 			continue
+		}
+		nodeID := channel.ProxyNodeID
+		if key.ProxyNodeID > 0 {
+			nodeID = key.ProxyNodeID
 		}
 		targets = append(targets, QuotaScanTarget{
 			ChannelID:    channel.ID,
 			ChannelName:  channel.Name,
 			BaseURL:      channel.BaseURL,
-			MonitorToken: token,
+			MonitorToken: key.Key,
 			UseProxy:     channel.Proxy,
+			ProxyNodeID:  nodeID,
 		})
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].ChannelID < targets[j].ChannelID })
 	return targets
 }
 
-// firstEnabledKeyToken 返回渠道 ID 最小的一枚启用凭据的 Key（监控凭证过渡口径）。
+// firstEnabledKey 返回渠道 ID 最小的一枚启用凭据（监控凭证过渡口径）。
 // Key 属敏感信息：调用方只可放进请求头，禁止写日志。
-func firstEnabledKeyToken(channelID int) (string, bool) {
+func firstEnabledKey(channelID int) (model.ChannelKey, bool) {
 	var best *model.ChannelKey
 	for _, key := range channelKeyCache.GetAll() {
 		if key.ChannelID != channelID || !key.Enabled {
@@ -65,9 +74,9 @@ func firstEnabledKeyToken(channelID int) (string, bool) {
 		}
 	}
 	if best == nil {
-		return "", false
+		return model.ChannelKey{}, false
 	}
-	return best.Key, true
+	return *best, true
 }
 
 // QuotaScanInterval 读取扫描周期；设置缺失/非法回退 5 分钟（P5 低频），0 表示停用任务。

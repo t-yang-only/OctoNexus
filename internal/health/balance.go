@@ -1,5 +1,7 @@
 package health
 
+import "github.com/bestruirui/octopus/internal/model"
+
 // T-quota-001 余额/额度采集与阈值告警（只读采集，不停用）。
 // 设计来源：T-research-002 移植清单 P1/P2/P4/P5（Connector 三件套语义逐行重写，
 // 未复制 api-monitor 文件）；new-api 系余额端点形状按其 connectors/newapi.go 的
@@ -13,7 +15,7 @@ const (
 	BalanceScanDefaultIntervalMinutes = 5
 
 	// BalanceUserSelfPath 是 new-api 系余额端点相对路径。
-	BalanceUserSelfPath = "/api/user/self"
+	BalanceUserSelfPath = model.BalanceUserSelfPathDefault
 )
 
 // BalanceSnapshot 是一次余额采集的快照。

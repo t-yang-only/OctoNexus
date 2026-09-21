@@ -553,6 +553,7 @@ export function GroupEditor({
                                         <SelectItem value="lowest_tpm_rpm">{t('form.lowest_tpm_rpm')}</SelectItem>
                                         <SelectItem value="weighted">{t('form.weighted')}</SelectItem>
                                         <SelectItem value="smart">{t('form.smart')}</SelectItem>
+                                        <SelectItem value="allocate">{t('form.allocate')}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </Field>

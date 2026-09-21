@@ -17,6 +17,7 @@ const (
 	TaskCleanLLM      = "clean_llm"
 	TaskQuotaScan     = "quota_scan"
 	TaskRouteProbe    = "route_probe"
+	TaskNodeProbe     = "node_probe"
 )
 
 func Init() {
@@ -53,4 +54,16 @@ func Init() {
 	// 注册冷却成员主动探活任务 (R-probe-001): 周期按秒配置, 默认 300 秒, 0 表示停用;
 	// 任务本身恒注册, 开关 route_probe_enabled 每轮读取, 用户改开关无需重启。
 	Register(TaskRouteProbe, op.RouteProbeInterval(), false, routeProbeOnce)
+
+	// 注册出口节点定时探活：把不通的节点标记出来（选路与备用出口据此跳过），
+	// 恢复后再自动可用。默认 5 分钟一轮。
+	Register(TaskNodeProbe, 5*time.Minute, false, func() {
+		op.ProxyNodeProbeAll(context.Background())
+	})
+	// 首跑必须延迟：服务刚起来时出口内核还没把节点端口准备好，立刻探活会把**整池**判成不通
+	// （实测 115 个节点全红），反而让健康筛选变成摆设。给内核 90 秒再探第一轮。
+	go func() {
+		time.Sleep(90 * time.Second)
+		op.ProxyNodeProbeAll(context.Background())
+	}()
 }

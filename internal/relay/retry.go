@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/looplj/axonhub/llm/httpclient"
 )
@@ -11,9 +12,14 @@ import (
 // upstreamStatusError 承载上游以非 2xx 结束时的状态码。
 // 错误文本与改造前完全一致（"upstream responded 400 Bad Request: …"），
 // 只额外携带状态码，供重试决策区分「确定性错误」与「可恢复错误」。
+//
+// retryHint（T-allocate-002）是上游在响应头里给出的"多久之后再来"（Retry-After 一类）。
+// 流式路径自己读原始响应，故构造错误时顺手把提示带上；非流式路径的提示由库的 httpclient.Error
+// 提供（见 throttle.go 的 parseRetryHint）。0 表示上游没说，按分组配置的冷却处理。
 type upstreamStatusError struct {
-	status  int
-	message string
+	status    int
+	message   string
+	retryHint time.Duration
 }
 
 func (e *upstreamStatusError) Error() string { return e.message }

@@ -46,11 +46,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 PORT = int(os.environ.get("MOCK_PORT", "18099"))
 SLOW_SECONDS = float(os.environ.get("MOCK_SLOW_SECONDS", "15"))
 STALL_SECONDS = float(os.environ.get("MOCK_STALL_SECONDS", "120"))
+# RATE_LIMIT_RETRY_AFTER 是限流桩回给中转的等待秒数（Retry-After / X-RateLimit-Reset-After）:
+# 用例据此断言「冷却按上游提示走」而不是按分组配置的固定冷却。
+RATE_LIMIT_RETRY_AFTER = int(os.environ.get("MOCK_RATE_LIMIT_RETRY_AFTER", "2"))
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requests.jsonl")
 _lock = threading.Lock()
 
 MODELS = ["mock-good", "mock-slow", "mock-bad", "mock-chatonly", "mock-stall",
-          "mock-reject400", "mock-reject401", "mock-plain"]
+          "mock-reject400", "mock-reject401", "mock-limit429", "mock-plain"]
 
 # FORCED 是运行期行为覆盖: 模型名 → "ok"/"bad"/"slow"。探活用例要证明"上游恢复后冷却被提前解除",
 # 就需要在实例运行中把某个模型从失败翻成健康, 改模型名做不到 (成员模型名是落库配置)。
@@ -267,6 +270,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(status, {"error": {"message": "mock upstream rejected (%d)" % status,
                                                    "type": "mock_reject"}})
                 return
+
+        # 限流桩 (T-allocate-002): 名字里带 limit429 的模型按 429 拒绝, 并带上游真实会带的等待提示,
+        # 用来验证「冷却时长按 Retry-After 走」与「限流账被记下（分压让开 + 监控可见）」。
+        if forced == "limit429" or (forced is None and "limit429" in model):
+            body = json.dumps({"error": {"message": "mock upstream rate limited",
+                                         "type": "rate_limit_error"}}).encode("utf-8")
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Retry-After", str(RATE_LIMIT_RETRY_AFTER))
+            self.send_header("X-RateLimit-Reset-After", str(RATE_LIMIT_RETRY_AFTER))
+            self.end_headers()
+            self.wfile.write(body)
+            return
 
         if self.path.endswith("/chat/completions"):
             return self._chat(model, stream)

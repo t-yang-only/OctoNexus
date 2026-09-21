@@ -62,6 +62,10 @@ SUITES = [
      "手动订阅（无接口站点手录余额并入总额 / 只算一次 / 过期停用不计 / 鉴权与校验）", "instance,mock,db"),
     ("cipher", "run_credential_encryption_test.py",
      "渠道凭据静态加密（落库密文 / 端到端解密 / 判据自检 / 全库无明文）", "instance,db,mock"),
+    ("bodylimit", "run_bodylimit_test.py",
+     "入站请求体上限（64MiB 旧上限被抬高 / 65MiB 端到端转发 / 可调与 0=不限制 / 超限 413 点名设置项）", "instance,mock,db"),
+    ("speed", "run_speed_test.py",
+     "速度观测与应对（首帧/吞吐量测 / 慢成员削权不剔除 / 自适应首帧看门狗 / 关掉即回到旧行为）", "instance,mock,db"),
     ("panel", "run_panel_asset_test.py", "面板静态资源（页面随二进制发布 / 三语文案齐全）", "instance"),
     ("apikey", "run_apikey_audit.py", "Key 级审计（限流/过期/禁用/额度/越权/登录/流/中止）", "instance,mock"),
     ("costmode", "run_costmode_test.py", "最低成本选路", "instance,real"),
@@ -87,6 +91,9 @@ SUITES = [
     ("reallog", "check_real_logs.js", "日志卡片真实数据等价性", "node,db"),
     ("grants", "check_grants.js",
      "渠道授权按凭据实际支持的模型收敛（上游 #387：全选跳过/不可勾选/保存不落无效授权）", "node,esbuild"),
+    ("allocate", "run_allocate_test.py",
+     "额度分压（按剩余请求数分配 / 余量用尽剔除 / 429 冷却按 Retry-After 让开 / 自限流让开 / 分压监控接口）",
+     "instance,mock,db"),
 ]
 
 
@@ -379,7 +386,12 @@ def main():
         else:
             state = "PASS(exit0)" if code == 0 else "FAIL(exit%d)" % code
             results.append((key, desc, None, None, None, "%s, %ss" % (state, elapsed)))
-            log("%-10s %s  未识别汇总行，末行：%s" % (key, state, tail.split("\n")[-1][:120] if tail else ""))
+            # 末行也要过一遍编码兜底: 子进程输出里的替换字符/中文在 GBK 控制台直接 print 会
+            # 抛 UnicodeEncodeError 把整个矩阵打断（与下面失败分支同款处理）。
+            raw_tail = tail.split("\n")[-1][:120] if tail else ""
+            safe_tail = raw_tail.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(
+                sys.stdout.encoding or "utf-8", errors="replace")
+            log("%-10s %s  未识别汇总行，末行：%s" % (key, state, safe_tail))
             if code != 0:
                 # 打印失败套件的尾部输出: 套件输出里可能带替换字符（U+FFFD）,
                 # 在 GBK 控制台直接 print 会抛 UnicodeEncodeError 把整个矩阵打断（本轮踩过）。

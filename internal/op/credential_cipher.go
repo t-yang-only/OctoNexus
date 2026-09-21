@@ -40,6 +40,23 @@ func DecryptChannelKeyRows(rows []model.ChannelKey) error {
 	return secret.DecryptRows(rows)
 }
 
+// countUndecryptableChannelKeys 统计"已经是密文、但用本实例密钥解不开"的凭据条数。
+//
+// 导出的是库内密文，所以跨实例恢复（或 credential.key 被换过）时这些值无法还原；
+// 导入侧据此如实回报条数，避免表现出来只是"导入成功、随后每个渠道都报错"。
+func countUndecryptableChannelKeys(rows []model.ChannelKey) int {
+	bad := 0
+	for i := range rows {
+		if !secret.IsSealed(rows[i].Key) {
+			continue
+		}
+		if _, err := secret.Open(rows[i].Key); err != nil {
+			bad++
+		}
+	}
+	return bad
+}
+
 // CredentialEncryptionEnabled 报告凭据加密是否可用（启动日志用）。
 func CredentialEncryptionEnabled() bool {
 	return secret.EncryptionEnabled()

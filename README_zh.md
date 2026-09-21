@@ -11,7 +11,10 @@
 </div>
 
 > **OctoNexus** = **Octo**（取自 [Octopus](https://github.com/bestruirui/octopus)）+ **Nexus**（枢纽）。
-> 多触手（渠道）汇聚为统一流量枢纽 —— 基于 [bestruirui/octopus](https://github.com/bestruirui/octopus) 二次开发（GPL-3.0），改动范围见 [docs/worklog](docs/worklog/README.md)。
+> 多触手（渠道）汇聚为统一流量枢纽。
+> 本项目是**独立项目**（GitHub 上不是分叉网络成员），基于 [bestruirui/octopus](https://github.com/bestruirui/octopus)
+> 升级而来，许可为 **AGPL-3.0**；上游基线、本项目升级内容、发布与更新口径见 [docs/项目定位.md](docs/项目定位.md)，
+> 逐条改动见 [docs/worklog](docs/worklog/README.md)。
 
 ## ✨ 特性
 

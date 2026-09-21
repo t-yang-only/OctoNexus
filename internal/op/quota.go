@@ -242,13 +242,23 @@ func quotaRefreshChannelKeys(ctx context.Context, channelID int) error {
 var channelBalance = struct {
 	mu     sync.RWMutex
 	values map[int]float64
-}{values: make(map[int]float64)}
+	// currency 标记这条读数是**已折算的货币值**（/user/balance、/usage、OpenAI Billing）还是
+	// new-api 口径的"点"。聚合层据此决定要不要按 balance_points_per_unit 再折一次 ——
+	// 少了它，32.53 美元会被当成点再除 500000，显示成 $0.000065（本轮实测踩到）。
+	currency map[int]bool
+}{values: make(map[int]float64), currency: make(map[int]bool)}
 
-// RecordChannelBalance 由配额扫描在取到余额后调用。
+// RecordChannelBalance 由配额扫描在取到余额后调用（点口径，向后兼容）。
 func RecordChannelBalance(channelID int, remaining float64) {
+	RecordChannelBalanceWithUnit(channelID, remaining, false)
+}
+
+// RecordChannelBalanceWithUnit 记录余额读数并声明它的单位口径。
+func RecordChannelBalanceWithUnit(channelID int, remaining float64, inCurrency bool) {
 	channelBalance.mu.Lock()
 	defer channelBalance.mu.Unlock()
 	channelBalance.values[channelID] = remaining
+	channelBalance.currency[channelID] = inCurrency
 }
 
 // ChannelBalance 返回该渠道最近一次已知剩余额度; 未知时 ok=false。
@@ -257,4 +267,11 @@ func ChannelBalance(channelID int) (float64, bool) {
 	defer channelBalance.mu.RUnlock()
 	value, ok := channelBalance.values[channelID]
 	return value, ok
+}
+
+// ChannelBalanceInCurrency 报告这条读数是否已经是货币值（true 时聚合层不得再按点折算）。
+func ChannelBalanceInCurrency(channelID int) bool {
+	channelBalance.mu.RLock()
+	defer channelBalance.mu.RUnlock()
+	return channelBalance.currency[channelID]
 }

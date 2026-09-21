@@ -1,12 +1,17 @@
 package cmd
 
 import (
+	"context"
+	"time"
+
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/notify"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/plugin"
 	"github.com/bestruirui/octopus/internal/poolstore"
+	"github.com/bestruirui/octopus/internal/proxycore"
 	"github.com/bestruirui/octopus/internal/relay"
 	"github.com/bestruirui/octopus/internal/secret"
 	"github.com/bestruirui/octopus/internal/server"
@@ -97,6 +102,61 @@ var startCmd = &cobra.Command{
 
 		task.Init()
 		go task.RUN()
+
+		// R-proxy-001 代理内核自启：有启用节点且开关打开时把 mihomo 拉起来（后台做，失败只告警不阻断启动）。
+		// 缺二进制、端口冲突这类问题不该让整个服务起不来，但必须在日志里说清楚。
+		go func() {
+			status := proxycore.Default().Status()
+			if !status.BinaryOK {
+				log.Warnf("proxy core: 未启动（%s）", status.LastError)
+				return
+			}
+			if !proxycore.AutostartEnabled() {
+				log.Infof("proxy core: 自动启动已关闭（proxy_core_autostart=false）")
+				return
+			}
+			if status.Listeners == 0 {
+				log.Infof("proxy core: 没有启用中的出口节点，未启动")
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := proxycore.Default().Start(ctx); err != nil {
+				log.Warnf("proxy core: 启动失败：%v", err)
+				return
+			}
+			after := proxycore.Default().Status()
+			log.Infof("proxy core: 已启动 pid=%d 出口入站=%d 端口池=%v", after.PID, after.Listeners, after.Ports)
+		}()
+
+		shutdown.Register(func() error {
+			proxycore.Default().Stop()
+			return nil
+		})
+
+		// R-plugin-001 社区反代插件自启：标记了 auto_start 的插件随实例一起拉起。
+		// 与内核同一取向：缺出口、清单坏掉只告警（插件没起来不影响 octopus 本身提供服务）。
+		// 注意顺序——插件的出网要向内核要出口，所以放在内核自启之后（同步等待内核起来再拉插件，
+		// 否则"启动瞬间内核还没分配端口"会被判成出口未就绪，插件白白启动失败一次）。
+		go func() {
+			time.Sleep(3 * time.Second)
+			plugin.Autostart(context.Background())
+		}()
+
+		shutdown.Register(func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			rows, err := plugin.List(ctx)
+			if err != nil {
+				return nil
+			}
+			for _, row := range rows {
+				if running, _ := plugin.IsRunning(row.Slug); running {
+					_ = plugin.Stop(ctx, row.Slug)
+				}
+			}
+			return nil
+		})
 		shutdown.Listen()
 	},
 }

@@ -27,6 +27,9 @@ const Log = lazy(() => pageImports.log().then((module) => ({ default: module.Log
 const Setting = lazy(() => pageImports.setting().then((module) => ({ default: module.Setting })));
 const Account = lazy(() => pageImports.account().then((module) => ({ default: module.Account })));
 const Pool = lazy(() => pageImports.pool().then((module) => ({ default: module.Pool })));
+const Proxy = lazy(() => pageImports.proxy().then((module) => ({ default: module.Proxy })));
+const Price = lazy(() => pageImports.price().then((module) => ({ default: module.Price })));
+const Extensions = lazy(() => pageImports.extensions().then((module) => ({ default: module.Extensions })));
 const HomeActions = lazy(() => pageImports.home().then((module) => ({ default: module.HomeActions })));
 const ChannelActions = lazy(() => pageImports.channel().then((module) => ({ default: module.ChannelActions })));
 const GroupActions = lazy(() => pageImports.group().then((module) => ({ default: module.GroupActions })));
@@ -152,6 +155,9 @@ export function AppContainer() {
                             {visibleItem === 'model' && <Model />}
                             {visibleItem === 'account' && <Account />}
                             {visibleItem === 'pool' && <Pool />}
+                            {visibleItem === 'proxy' && <Proxy />}
+                    {visibleItem === 'price' && <Price />}
+                            {visibleItem === 'extensions' && <Extensions />}
                             {visibleItem === 'log' && <Log />}
                             {visibleItem === 'setting' && <Setting />}
                         </motion.div>

@@ -74,6 +74,14 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.UsageHourly{},
 		// 手动订阅（R-acct-004）：纯新增表，没有存量数据要迁移，因此不需要单独的迁移文件。
 		&model.ManualSubscription{},
+		// 代理节点池（R-proxy-001）：同样是纯新增表；为渠道/账号各配独立出口用。
+		&model.ProxyNode{},
+		&model.ProxySubscription{},
+		&model.PriceSnapshot{},
+		&model.UsageSnapshot{},
+		// 社区反代扩展插件（R-plugin-001）：同样是纯新增表。
+		&model.Plugin{},
+		&model.CredentialSource{},
 		&migrate.MigrationRecord{},
 	); err != nil {
 		return err

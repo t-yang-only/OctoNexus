@@ -18,3 +18,17 @@ octopus.exe
 
 # 外部参考仓库, 不入库
 reference/
+
+# ── 运行时数据与凭据（绝不入库）─────────────────────────────
+# data/ 里含：数据库（渠道凭据密文）、credential.key（解密密钥）、
+# 会话、代理节点配置、日志。一旦提交等于把使用者的凭据与节点全公开。
+data/
+*.key
+credential.key
+*.db
+*.db-wal
+*.db-shm
+logs/
+sites.json
+.env
+.env.*

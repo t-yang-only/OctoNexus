@@ -14,7 +14,8 @@ import (
 // op 的数据），所以 op 不能再反向依赖 pool（会成环）。凭据加解密属于"凭据怎么落库"这一层，
 // 与官方账号同一套密钥与实现，因此放在 op 里由上层调用。
 //
-// 与官方账号口径一致：密钥取 OCTOPUS_OFFICIAL_KEY（SHA-256 派生 32B），未配置时直接报错；
+// 与官方账号同一套密钥与同一个解析口径（internal/secret：环境变量 OCTOPUS_OFFICIAL_KEY →
+// 数据目录 credential.key，首次使用自动生成）；密钥完全不可得时才报错；
 // 区别只在 AAD —— 固定 "pool:declarative"，换用途的密文解不开。
 const poolDeclarativeAAD = "pool:declarative"
 

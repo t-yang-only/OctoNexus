@@ -11,8 +11,12 @@
 </div>
 
 > **OctoNexus** = **Octo** (from [Octopus](https://github.com/bestruirui/octopus)) + **Nexus** (hub).
-> Many tentacles (channels), one traffic hub — an extended fork of `bestruirui/octopus`.
-> 本仓库基于 [bestruirui/octopus](https://github.com/bestruirui/octopus) 二次开发（GPL-3.0），改动范围见 [docs/worklog](docs/worklog/README.md)。
+> Many tentacles (channels), one traffic hub.
+> This is an **independent project** (not a member of GitHub's fork network), built on top of
+> [bestruirui/octopus](https://github.com/bestruirui/octopus) and licensed under **AGPL-3.0**.
+> Upstream baseline, what we upgraded, and the release/update channel: [docs/项目定位.md](docs/项目定位.md).
+> 本仓库是**独立项目**，基于 [bestruirui/octopus](https://github.com/bestruirui/octopus)（AGPL-3.0）升级而来，
+> 不是 GitHub 分叉网络成员；上游基线、升级内容与发布口径见 [docs/项目定位.md](docs/项目定位.md)。
 
 ## ✨ Features
 
@@ -372,3 +376,16 @@ Edit `~/.codex/auth.json`
 - 📊 [sst/models.dev](https://github.com/sst/models.dev) - AI model database providing model pricing data
 - 🇨🇳 [AtomGit](https://atomgit.com/bestruirui/octopus) - China-based code hosting
 - 💬 [Linux.do](https://linux.do/)
+
+## 来源与独立说明
+
+本项目最初派生自开源项目 [bestruirui/octopus](https://github.com/bestruirui/octopus)（AGPL-3.0）。
+派生之后已作为**独立项目**演进：上游 git 远端已从本仓库移除，避免误推/误拉；
+
+- 本仓库的 `origin` 指向本项目自身的仓库（`t-yang-only/OctoNexus`）；
+- 代码更新与发布件均在本仓库进行，不再跟随上游；
+- 上游仅作为历史来源记录保留在此处，不作为代码来源或同步目标；
+- 需要对照上游时，请自行临时添加远端（`git remote add upstream <url>`），不要把它设成默认推送目标。
+
+许可仍为 **AGPL-3.0**（见 `LICENSE`）。本仓库**不包含任何使用者数据**：`data/`（数据库、凭据密文、
+解密密钥 `credential.key`、登录会话、代理节点配置、日志）已在 `.gitignore` 中排除。

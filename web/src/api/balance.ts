@@ -24,6 +24,14 @@ export interface ChannelBalanceRow {
     monthly_remaining: number;
     /** balance_source: api = 从上游读到的；manual = 人在面板里录的（无接口站点，见手动订阅）。 */
     balance_source?: 'api' | 'manual';
+    /** 人工录入的时间（RFC3339）。 */
+    manual_at?: string;
+    /** 备注：人工录入时的说明，或未读到时的原因说明。 */
+    note?: string;
+    /** 未读到余额时的原因码（unreachable/no_endpoint/unauthorized/unparsable/proxy_node）。 */
+    reason_code?: string;
+    /** 未读到余额时给人看的解释——只报"未读到"用户无从下手。 */
+    reason_text?: string;
     key_count: number;
     key_enabled: number;
 }
@@ -47,6 +55,8 @@ export interface BalanceSummary {
     points_per_unit: number;
     known_channels: number;
     unknown_channels: number;
+    /** 未读到的渠道按原因归类，面板据此给一句总览而不是一个干数字。 */
+    reason_counts?: Record<string, number>;
     channels: ChannelBalanceRow[];
     keys: APIKeyBalanceRow[];
     /** 手动订阅贡献的余额（已含在 total 里）。 */
@@ -55,6 +65,22 @@ export interface BalanceSummary {
     /** 已过期的手动订阅条数（不计入总额，面板据此提醒续费）。 */
     manual_expired: number;
     generated_at: number;
+}
+
+/**
+ * 人工录入某渠道的剩余额度（点数口径，与自动读数同口径）；points<=0 表示清除录入。
+ * 接口读不到的站点（实测 16 个里 14 个）靠它进入总余额，来源标 manual 与自动读数区分。
+ */
+export function setChannelManualBalance(channelID: number, points: number, note: string) {
+    return apiRequest<BalanceSummary>(`/api/v1/balance/channel/${channelID}`, {
+        method: 'POST',
+        body: { points, note },
+    });
+}
+
+/** 立刻跑一轮余额扫描（默认 5 分钟一轮），返回扫描后的快照。 */
+export function rescanBalances() {
+    return apiRequest<BalanceSummary>('/api/v1/balance/scan', { method: 'POST' });
 }
 
 // balanceSummaryQueryOptions 首页与设置页预取共用的余额查询定义。

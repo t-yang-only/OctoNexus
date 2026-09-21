@@ -2,12 +2,16 @@ package op
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/secret"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -19,6 +23,10 @@ func withOfficialKey(t *testing.T, value string) {
 	orig := officialHTTPClient
 	t.Cleanup(func() { officialHTTPClient = orig })
 	t.Setenv("OCTOPUS_OFFICIAL_KEY", value)
+	// 密钥走 internal/secret 的统一口径（进程内缓存一次，与渠道凭据一致）：
+	// 换环境变量后必须重置缓存，否则本轮换的密钥不生效（生产上等价于"改环境变量要重启"）。
+	secret.ResetKey()
+	t.Cleanup(secret.ResetKey)
 	// 并行车道 (NM-CUR-231) 给 authorize/exchange 加了 client id 必填校验；
 	// 流程测试走桩换码器，补齐环境变量让校验放行。
 	for _, p := range []string{"OPENAI", "GEMINI", "CLAUDE"} {
@@ -76,14 +84,40 @@ func (s stubReader) Read(provider model.OfficialAccountProvider, accessToken str
 	return s.snap, nil
 }
 
-// TestOfficialAccountAuthorizeRejectsWithoutKey 未配置加密密钥时发起接入必须拒绝，不落 pending 行。
+// TestOfficialAccountAuthorizeRejectsWithoutKey 加密密钥真的不可得时发起接入必须拒绝，不落 pending 行。
+//
+// 「不可得」的定义必须是**通道级**不可得：环境变量没设 **且** 数据目录写不出 credential.key。
+// 旧版本把「没设环境变量」直接当成不可得，于是正常安装上号池/官方账号整条功能一用就报
+// official credential cipher key not configured —— 那是缺陷（同一实例的渠道凭据加密明明是好的），
+// 所以这里改成用「数据目录被占住」制造真正的不可得，判据仍然是"拒绝且不落 pending"。
 func TestOfficialAccountAuthorizeRejectsWithoutKey(t *testing.T) {
-	t.Setenv("OCTOPUS_OFFICIAL_KEY", "")
+	blockCipherKeySource(t)
 	if _, _, _, err := OfficialAccountAuthorize(nil, model.OfficialAccountProviderOpenAI); err == nil {
 		t.Fatalf("authorize without key: want error")
 	} else if !strings.Contains(err.Error(), "cipher key") {
 		t.Fatalf("authorize without key: err = %v, want cipher key error", err)
 	}
+}
+
+// blockCipherKeySource 制造"密钥真的拿不到"的环境：不设环境变量，且数据库所在目录的父路径是个文件，
+// 于是 credential.key 既读不到也建不出来。测试结束自动还原。
+func blockCipherKeySource(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocked")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	previous := conf.AppConfig.Database.Path
+	conf.AppConfig.Database.Path = filepath.Join(blocker, "data.db")
+	if err := os.Unsetenv("OCTOPUS_OFFICIAL_KEY"); err != nil {
+		t.Fatalf("unset env: %v", err)
+	}
+	secret.ResetKey()
+	t.Cleanup(func() {
+		conf.AppConfig.Database.Path = previous
+		secret.ResetKey()
+	})
 }
 
 // TestOfficialAccountStateExpiry 过期 state 条件消费必须回 Expired 且被删除。

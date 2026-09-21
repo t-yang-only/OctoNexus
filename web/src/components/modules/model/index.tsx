@@ -50,6 +50,7 @@ export function ModelActions() {
 
 // Model 渲染模型列表正文。
 export function Model() {
+    const t = useTranslations('model');
     const { data: models } = useModelList();
     const searchTerm = usePageActionsStore((state) => state.searchTerms.model || '');
     const layout = usePageActionsStore((state) => state.layouts.model || 'grid');
@@ -78,6 +79,21 @@ export function Model() {
 
         return byName;
     }, [sortedModels, searchTerm, filter]);
+
+    // 空态：VirtualizedGrid 在 items 为空时什么都不渲染 —— 与渠道页/分组页同一类问题。
+    if (visibleModels.length === 0) {
+        const noModelAtAll = (models ?? []).length === 0;
+        return (
+            <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 p-8 text-center">
+                <p className="text-sm font-medium">
+                    {t(noModelAtAll ? 'empty.title' : 'empty.filteredTitle')}
+                </p>
+                <p className="max-w-sm text-xs text-muted-foreground">
+                    {t(noModelAtAll ? 'empty.hint' : 'empty.filteredHint')}
+                </p>
+            </div>
+        );
+    }
 
     return (
         <VirtualizedGrid

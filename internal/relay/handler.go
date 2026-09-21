@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/charmbracelet/log"
 	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 	"github.com/looplj/axonhub/llm"
@@ -44,8 +46,16 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 
 	return func(c *gin.Context) {
 		// 完整读取客户端请求, 正文先登记到请求状态, 后续每轮直接改写为当前目标请求。
-		raw, err := httpclient.ReadHTTPRequest(c.Request)
+		// 上限由设置项 relay_max_request_body_bytes 决定（默认 256 MiB）—— 不再用依赖库里写死的 64 MiB,
+		// 否则 Codex 的 remote compact 这类大正文会先被自家网关挡掉（T-bodylimit-001）。
+		raw, err := readInboundRequest(c.Request)
 		if err != nil {
+			// 超限是"参数可调"的一类失败, 必须给出可执行的信息（哪个设置项、当前上限是多少）,
+			// 而不是丢一句 request body too large 让人去猜是上游还是网关（用户线上就是这么被绕住的）。
+			if errors.Is(err, httpclient.ErrRequestBodyTooLarge) {
+				rejectRequestTooLarge(c, inbound, inboundBodyLimit())
+				return
+			}
 			rejectRequest(c, inbound, err)
 			return
 		}
@@ -201,18 +211,24 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				// 未开启竞速或候选不足: 与既有行为完全一致（单路, 超时即切下一个成员）。
 				timeoutSeconds := group.RelayConfig.MemberNonStreamResponseTimeoutSeconds
 				timeoutErr := errors.New("upstream non-stream response timeout")
+				timeoutBudget := time.Duration(timeoutSeconds) * time.Second
 				if metadata.Streaming {
 					timeoutSeconds = group.RelayConfig.MemberStreamFirstEventTimeoutSeconds
 					timeoutErr = errors.New("upstream stream first event timeout")
+					timeoutBudget = time.Duration(timeoutSeconds) * time.Second
+					// 速度应对（T-speed-001）: 等首帧的预算按该成员**自己最近量出来的首帧**收紧
+					// （min(分组配置, 实测首帧 × 倍数), 下限 5s）。样本不足时原样返回配置,
+					// 因此第一次用某个成员、或刚清过速度账时, 行为与改造前逐字一致。
+					timeoutBudget = firstEventBudgetDuration(timeoutBudget, item.ID, speedSettingsOf())
 				}
 				// 超时只取消本轮的上游调用, 不会在等待 HTTP 响应或首个流事件的调用间超时重叠。
-				timeoutTimer := time.AfterFunc(time.Duration(timeoutSeconds)*time.Second, func() {
+				timeoutTimer := time.AfterFunc(timeoutBudget, func() {
 					cancelRoundCause(timeoutErr)
 				})
 				if passthrough {
-					result, err = sendPassthrough(roundCtx, format, roundRaw, channel, outbound, metadata.Streaming, channelModel.Name)
+					result, err = sendPassthrough(roundCtx, format, roundRaw, channel, channelKey, outbound, metadata.Streaming, channelModel.Name)
 				} else {
-					result, err = sendConverted(roundCtx, format, roundRaw, channel, outbound, metadata.Streaming)
+					result, err = sendConverted(roundCtx, format, roundRaw, channel, channelKey, outbound, metadata.Streaming)
 				}
 				if !timeoutTimer.Stop() {
 					cancelRoundCause(timeoutErr)
@@ -302,8 +318,16 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				if disposition == dispositionMemberFault && failures < group.RelayConfig.MemberMaxAttempts {
 					failures = group.RelayConfig.MemberMaxAttempts
 				}
+				// 上游限流（429 且带 Retry-After 一类提示）: 继续打同一个成员只会更慢
+				// （上游已经把"多久之后再来"写在响应头里了, 见 throttle.go）。因此与"成员自身问题"
+				// 同一处置: 立刻让出该成员换下一个, 冷却时长取上游提示与分组配置的较长者。
+				// 拿不到提示的 429 保持既有可恢复语义（消耗尝试次数、按配置冷却）。
+				rateHint := rateLimitHint(err, time.Now())
+				if rateHint > 0 && failures < group.RelayConfig.MemberMaxAttempts {
+					failures = group.RelayConfig.MemberMaxAttempts
+				}
 				// 达到总尝试次数时成员进入冷却并立即重新选路, 否则按退避等待后重试。
-				if recordRouteFailure(group, item.ID, failures, time.Since(roundStartedAt).Milliseconds()) {
+				if recordRouteFailureHint(group, item.ID, failures, time.Since(roundStartedAt).Milliseconds(), rateHint) {
 					continue
 				}
 				// 退避: 同一成员连续失败时把重试间隔逐次翻倍（封顶 30 秒）, 避免每秒一次地打上游。
@@ -335,6 +359,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				_ = op.ChannelStatsUpdate(channel.ID, metrics)
 				_ = op.ChannelModelStatsUpdate(channelModel.ID, metrics)
 				_ = op.ChannelKeyStatsUpdate(channelKey.ID, metrics)
+				// 速度观测（T-speed-001）: 非流式只有整轮耗时, 不能当首帧用（里面混着生成时间）,
+				// 因此只进吞吐；吞吐与耗时的分子分母必须同口径, 都取这一轮。
+				recordMemberSpeed(item.ID, 0, completionTokens(result.usage), roundWaitTime)
 				request.markCommitted()
 				n, err := c.Writer.Write(result.body)
 				if err == nil && n != len(result.body) {
@@ -435,6 +462,11 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			// 就是这样把 11 个健康成员误判成假死并降级的（见日志包 README 与 T-retry-001）。
 			if err == nil {
 				metrics.RequestSuccess = 1
+				// 速度观测（T-speed-001，流式口径）: 首帧 = 等首帧的耗时（roundWaitTime）,
+				// 吞吐 = 输出 token ÷ 整轮耗时（含首帧，与客户端体感的"说完整段要多久"一致）。
+				// 只在成功轮次记账: 客户端中途取消、上游失败都不代表这个成员的正常速度。
+				recordMemberSpeed(item.ID, roundWaitTime, completionTokens(result.usage),
+					time.Since(roundStartedAt).Milliseconds())
 			} else if ctx.Err() == nil {
 				metrics.RequestFailed = 1
 			}
@@ -532,6 +564,31 @@ func rejectRequest(c *gin.Context, inbound transformer.Inbound, err error) {
 	response := inbound.TransformError(c.Request.Context(), &llm.ResponseError{
 		StatusCode: http.StatusBadRequest,
 		Detail:     llm.ErrorDetail{Message: err.Error(), Type: "invalid_request_error"},
+	})
+	c.Data(response.StatusCode, "application/json", response.Body)
+	c.Abort()
+}
+
+// rejectRequestTooLarge 是超限入站正文的拒绝路径（T-bodylimit-001）。
+//
+// 与其它请求级失败的差别只有两点, 但两点都是为了让客户端能自救:
+//  1. 状态码用 413 而不是笼统的 400 —— "这次太大"与"这次请求写错了"是两类问题,
+//     混在一个 400 里会让客户端重试同一个必然失败的请求;
+//  2. 错误文案里点名设置项与当前上限 —— 用户线上遇到的就是一句 "request body too large",
+//     既不知道是网关还是上游、也不知道该改什么（本次实测: 上游 mock 完全无关, 就是自家上限）。
+//
+// 文案保留 "request body too large" 原话, 让既有的抓取/告警关键词继续命中。
+func rejectRequestTooLarge(c *gin.Context, inbound transformer.Inbound, limit int64) {
+	message := "request body too large: the request body exceeds the inbound limit"
+	if limit > 0 {
+		message = fmt.Sprintf("request body too large: the request body exceeds %d bytes "+
+			"(setting %s; raise it to accept larger requests)", limit, model.SettingKeyRelayMaxRequestBody)
+	}
+	// 本地日志同时留痕: 这类拒绝发生在鉴权之后、选路之前, 请求状态还没登记, 只能靠日志回溯是谁被挡了。
+	log.Warnf("inbound request rejected: limit=%d path=%s client=%s", limit, c.Request.URL.Path, c.ClientIP())
+	response := inbound.TransformError(c.Request.Context(), &llm.ResponseError{
+		StatusCode: http.StatusRequestEntityTooLarge,
+		Detail:     llm.ErrorDetail{Message: message, Type: "invalid_request_error"},
 	})
 	c.Data(response.StatusCode, "application/json", response.Body)
 	c.Abort()

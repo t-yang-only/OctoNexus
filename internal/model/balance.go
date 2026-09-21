@@ -14,6 +14,10 @@ import "strings"
 // 未知余额的渠道不计入 Total、只计入 UnknownChannels: 把"没读到"当 0 会显示成"没钱了",
 // 当作有值又会虚高, 两者都会让用户做出错误判断。
 const (
+	// BalanceUserSelfPathDefault 是默认的余额接口相对路径（new-api 系约定）。
+	// 放在 model 是为了让 op 与 health 共用同一个字面量：op 一旦 import health 就会
+	// 形成 op→health→rhttp→op 的导入环（本轮实测撞到过）。
+	BalanceUserSelfPathDefault = "/api/user/self"
 	// BalanceDefaultPointsPerUnit 是缺省换算口径: new-api 系 1 个货币单位 = 500000 额度点。
 	BalanceDefaultPointsPerUnit = 500000.0
 	// BalanceDefaultCurrency 是缺省货币名, 仅用于显示。
@@ -58,6 +62,13 @@ type ChannelBalanceRow struct {
 	MonthlyRemaining float64 `json:"monthly_remaining"` // 剩余次数（包月额度 - 已用）
 	// BalanceSource 说明这条余额是哪来的：api = 从上游读到的，manual = 人在面板里录的（无接口站点）。
 	BalanceSource string `json:"balance_source,omitempty"`
+	// ManualAt/Note 是人工录入的时间与备注；未读到余额时 Note 也承载人类可读的说明。
+	ManualAt string `json:"manual_at,omitempty"`
+	Note     string `json:"note,omitempty"`
+	// ReasonCode/ReasonText 只在未读到时出现：为什么读不到（原因码 + 一句人话）。
+	// 缺了这两个字段，用户看到"未读到余额"完全无从下手——本轮实测的真问题。
+	ReasonCode string `json:"reason_code,omitempty"`
+	ReasonText string `json:"reason_text,omitempty"`
 	KeyCount         int     `json:"key_count"`         // 该渠道的凭据总数
 	KeyEnabled       int     `json:"key_enabled"`       // 其中启用中的凭据数
 }
@@ -83,6 +94,9 @@ type BalanceSummary struct {
 	PointsPerUnit         float64             `json:"points_per_unit"`
 	KnownChannels         int                 `json:"known_channels"`
 	UnknownChannels       int                 `json:"unknown_channels"`
+	// ReasonCounts 把"未读到"按原因归类（unreachable/no_endpoint/unauthorized/unparsable/proxy_node），
+	// 面板据此给出一句总览（例如"11 个站点不提供余额接口"），而不是只报一个数字。
+	ReasonCounts map[string]int `json:"reason_counts,omitempty"`
 	Channels              []ChannelBalanceRow `json:"channels"`
 	// ManualTotal 是手动订阅贡献的余额（已计入 Total）；ManualSubscriptions 是全部手动记录的明细。
 	ManualTotal         float64                 `json:"manual_total"`
