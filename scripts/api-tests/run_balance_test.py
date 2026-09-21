@@ -106,7 +106,7 @@ def ensure_station_channel():
         "enabled": True,
         "models": ["mock-good"],
         "keys": [{"name": "k1", "key": STATION_KEY, "enabled": True}],
-        "grants": [{"model_name": "mock-good", "key_name": "k1", "protocols": 1}],
+        "grants": [{"model_name": "mock-good", "key_name": "k1", "protocols": 2}],
     })
     if status == 200:
         detail = body.get("data") or {}

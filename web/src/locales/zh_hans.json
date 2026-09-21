@@ -491,7 +491,9 @@
                 "wecom": "企业微信",
                 "serverchan": "Server酱推送",
                 "smtp": "邮件"
-            }
+            },
+            "webhookGroup": "Webhook 渠道",
+            "smtpGroup": "SMTP 邮件"
         },
         "alerts": {
             "webhook": "告警 Webhook（可选）"
@@ -635,6 +637,13 @@
             },
             "clearSuccess": "日志已清空",
             "clearFailed": "清空失败"
+        },
+        "tabs": {
+            "general": "常规",
+            "api": "API 配置",
+            "routing": "路由策略",
+            "notify": "通知",
+            "data": "数据与备份"
         }
     },
     "group": {

@@ -491,7 +491,9 @@
                 "wecom": "WeCom",
                 "serverchan": "ServerChan push",
                 "smtp": "Email"
-            }
+            },
+            "webhookGroup": "Webhook channels",
+            "smtpGroup": "SMTP email"
         },
         "alerts": {
             "webhook": "Alert Webhook (optional)"
@@ -635,6 +637,13 @@
             },
             "clearSuccess": "Logs cleared",
             "clearFailed": "Failed to clear logs"
+        },
+        "tabs": {
+            "general": "General",
+            "api": "API Keys",
+            "routing": "Routing",
+            "notify": "Notifications",
+            "data": "Data & Backup"
         }
     },
     "group": {

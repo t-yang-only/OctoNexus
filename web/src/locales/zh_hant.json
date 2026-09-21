@@ -491,7 +491,9 @@
                 "wecom": "企業微信",
                 "serverchan": "Server醬推送",
                 "smtp": "郵件"
-            }
+            },
+            "webhookGroup": "Webhook 渠道",
+            "smtpGroup": "SMTP 郵件"
         },
         "alerts": {
             "webhook": "告警 Webhook（可選）"
@@ -635,6 +637,13 @@
             },
             "clearSuccess": "日誌已清空",
             "clearFailed": "清空失敗"
+        },
+        "tabs": {
+            "general": "常規",
+            "api": "API 設定",
+            "routing": "路由策略",
+            "notify": "通知",
+            "data": "資料與備份"
         }
     },
     "group": {
