@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/auth"
 	"github.com/bestruirui/octopus/internal/server/resp"
@@ -60,6 +61,26 @@ func APIKeyAuth() gin.HandlerFunc {
 			resp.Error(c, http.StatusUnauthorized, "API key has expired")
 			c.Abort()
 			return
+		}
+		// 来源 IP 白名单：空列表 = 不限制（老 Key 行为逐字不变）。
+		//
+		// c.ClientIP() 的结果取决于 gin 的受信代理配置（见 server.go）：
+		// 默认不信任任何代理，只按 TCP 对端判定；只有配置了 trusted_proxies
+		// 之后才会采信 X-Forwarded-For。两者必须一起才有意义。
+		if len(apiKeyObj.AllowedCIDRs) > 0 {
+			networks, err := model.ParseCIDRList(apiKeyObj.AllowedCIDRs)
+			if err != nil {
+				// 存进库的网段理论上都过了保存时校验；仍兜一层，
+				// 免得脏数据把白名单变成"谁都过"。
+				resp.Error(c, http.StatusForbidden, "API key has an invalid IP allowlist")
+				c.Abort()
+				return
+			}
+			if !model.IPAllowedByCIDRs(c.ClientIP(), networks) {
+				resp.Error(c, http.StatusForbidden, "API key is not allowed from this IP")
+				c.Abort()
+				return
+			}
 		}
 		statsAPIKey := op.StatsAPIKeyGet(apiKeyObj.ID)
 		if apiKeyObj.MaxCost > 0 && apiKeyObj.MaxCost < statsAPIKey.StatsMetrics.OutputCost+statsAPIKey.StatsMetrics.InputCost {

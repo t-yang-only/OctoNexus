@@ -45,6 +45,7 @@ export const SettingKey = {
     RouteWeightMonthly: 'route_weight_monthly',
     RouteMonthlyAction: 'route_monthly_exhausted_action',
     RequestFaultAction: 'relay_request_fault_action',
+    TrustedProxies: 'trusted_proxies',
 } as const;
 
 /**

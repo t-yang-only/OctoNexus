@@ -58,7 +58,7 @@ const (
 	SettingKeyQuotaAlertThreshold SettingKey = "quota_alert_threshold"        // 余额告警阈值(额度点), 剩余额度低于该值记告警事件; 留空或<=0 表示不告警 (归零停用不受其影响, 恒按 remaining<=0 判定)
 	// 总余额聚合 (T-balance-001): 把各渠道读到的剩余额度折成同一个货币口径, 供 /v1/dashboard/billing/* 与 /v1/balance 查询。
 	SettingKeyBalancePointsPerUnit SettingKey = "balance_points_per_unit"      // 换算口径: 多少额度点 = 1 个货币单位; 默认 500000 (new-api 惯例)
-	SettingKeyBalanceUserSelfPath  SettingKey = "balance_user_self_path"        // 余额接口路径; 各家站点不同, 默认 new-api 系 /api/user/self
+	SettingKeyBalanceUserSelfPath  SettingKey = "balance_user_self_path"       // 余额接口路径; 各家站点不同, 默认 new-api 系 /api/user/self
 	SettingKeyBalanceCurrency      SettingKey = "balance_currency"             // 折算后的货币名, 仅用于显示; 默认 USD
 	SettingKeyRouteBalanceEnabled  SettingKey = "route_balance_enabled"        // 故障转移分组是否用加权轮询定序候选 (T-route-002); 默认关闭, 走原有优先级选路
 	SettingKeyRequestFaultAction   SettingKey = "relay_request_fault_action"   // 上游判定"请求本身非法"(400/413/422 一类)时的取向: failover(换成员再试, 默认) 或 failfast(立刻回上游原文)
@@ -76,17 +76,17 @@ const (
 	// SMTP 密码不进设置表, 只从环境变量 OCTOPUS_SMTP_PASSWORD 读——避免把邮箱密码写进库与备份转储。
 	SettingKeyAlertChannels SettingKey = "alert_channels" // 启用的通知渠道, 逗号分隔: webhook,feishu,dingtalk,wecom,smtp; 默认 webhook
 	// R-proxy-001 代理内核（自托管 mihomo）：把 Clash 节点变成 http://127.0.0.1:<port> 出口。
-	SettingKeyProxyCorePath          SettingKey = "proxy_core_path"          // mihomo 内核二进制路径; 留空用 <数据目录>/core/mihomo[.exe]
-	SettingKeyProxyCoreAutostart     SettingKey = "proxy_core_autostart"     // 启动时自动拉起内核; 默认 true（有启用节点时）
-	SettingKeyProxyCorePortStart     SettingKey = "proxy_core_port_start"    // 出口端口池起始（冷门高位段）; 默认 41000
-	SettingKeyProxyCorePortEnd       SettingKey = "proxy_core_port_end"      // 出口端口池结束; 默认 41999
-	SettingKeyProxyExitProbeURL      SettingKey = "proxy_exit_probe_url"     // 出口 IP 探测地址; 默认 https://api.ipify.org
+	SettingKeyProxyCorePath      SettingKey = "proxy_core_path"       // mihomo 内核二进制路径; 留空用 <数据目录>/core/mihomo[.exe]
+	SettingKeyProxyCoreAutostart SettingKey = "proxy_core_autostart"  // 启动时自动拉起内核; 默认 true（有启用节点时）
+	SettingKeyProxyCorePortStart SettingKey = "proxy_core_port_start" // 出口端口池起始（冷门高位段）; 默认 41000
+	SettingKeyProxyCorePortEnd   SettingKey = "proxy_core_port_end"   // 出口端口池结束; 默认 41999
+	SettingKeyProxyExitProbeURL  SettingKey = "proxy_exit_probe_url"  // 出口 IP 探测地址; 默认 https://api.ipify.org
 	// R-plugin-001 社区反代扩展插件：社区玩家自制的"反代工具"由 octopus 托管运行，
 	// 出网一律经节点池出口（全局隐秘代理），本组设置管它的端口池与默认出口。
-	SettingKeyPluginPortStart       SettingKey = "plugin_port_start"        // 插件入站端口池起始; 默认 42000（与内核端口池分开，便于两侧各自排障）
-	SettingKeyPluginPortEnd         SettingKey = "plugin_port_end"          // 插件入站端口池结束; 默认 42999
-	SettingKeyPluginDefaultEgressID SettingKey = "plugin_default_egress_id" // 未单独指定出口的插件用哪个节点; 0 = 没有默认出口（此时拒绝启动，绝不直连真实 IP）
-	SettingKeyPluginHTTPHosts       SettingKey = "plugin_http_hosts"        // runtime=http 允许连的远端主机白名单（逗号分隔）; 默认空 = 只允许本机回环
+	SettingKeyPluginPortStart        SettingKey = "plugin_port_start"        // 插件入站端口池起始; 默认 42000（与内核端口池分开，便于两侧各自排障）
+	SettingKeyPluginPortEnd          SettingKey = "plugin_port_end"          // 插件入站端口池结束; 默认 42999
+	SettingKeyPluginDefaultEgressID  SettingKey = "plugin_default_egress_id" // 未单独指定出口的插件用哪个节点; 0 = 没有默认出口（此时拒绝启动，绝不直连真实 IP）
+	SettingKeyPluginHTTPHosts        SettingKey = "plugin_http_hosts"        // runtime=http 允许连的远端主机白名单（逗号分隔）; 默认空 = 只允许本机回环
 	SettingKeyAlertFeishuWebhook     SettingKey = "alert_feishu_webhook"     // 飞书群机器人 webhook 地址
 	SettingKeyAlertDingTalkWebhook   SettingKey = "alert_dingtalk_webhook"   // 钉钉群机器人 webhook 地址
 	SettingKeyAlertWeComWebhook      SettingKey = "alert_wecom_webhook"      // 企业微信群机器人 webhook 地址
@@ -96,6 +96,13 @@ const (
 	SettingKeyAlertSMTPUser          SettingKey = "alert_smtp_user"          // SMTP 登录用户; 留空表示不做认证
 	SettingKeyAlertSMTPFrom          SettingKey = "alert_smtp_from"          // 发件人地址
 	SettingKeyAlertSMTPTo            SettingKey = "alert_smtp_to"            // 收件人地址, 多个用逗号分隔
+	// 受信反向代理地址（IP 或 CIDR，逗号分隔）。只影响「怎么判断请求来源 IP」这一件事。
+	//
+	// 默认空 = 不信任任何代理：c.ClientIP() 只取 TCP 对端，X-Forwarded-For / X-Real-IP
+	// 一律忽略。这样即使有人伪造转发头也改不了网关看到的来源，API Key 的 IP 白名单
+	// 才拦得住东西。只有网关确实挂在可信反代（如 Caddy/nginx）后面时，才把该反代的
+	// 地址填进来，此时转发头才会被采信。
+	SettingKeyTrustedProxies SettingKey = "trusted_proxies"
 )
 
 type Setting struct {
@@ -106,19 +113,19 @@ type Setting struct {
 func DefaultSettings() []Setting {
 	return []Setting{
 		{Key: SettingKeyProxyURL, Value: ""},
-		{Key: SettingKeyStatsSaveInterval, Value: "10"},        // 默认10分钟保存一次统计信息
-		{Key: SettingKeyCORSAllowOrigins, Value: ""},           // CORS 默认不允许跨域，设置为 "*" 才允许所有来源
-		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"},  // 默认24小时更新一次模型信息
-		{Key: SettingKeyModelFilter, Value: ""},                // 默认不过滤模型
-		{Key: SettingKeyQuotaScanInterval, Value: "5"},         // 余额扫描默认 5 分钟一轮 (P5 低频口径)
+		{Key: SettingKeyStatsSaveInterval, Value: "10"},       // 默认10分钟保存一次统计信息
+		{Key: SettingKeyCORSAllowOrigins, Value: ""},          // CORS 默认不允许跨域，设置为 "*" 才允许所有来源
+		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"}, // 默认24小时更新一次模型信息
+		{Key: SettingKeyModelFilter, Value: ""},               // 默认不过滤模型
+		{Key: SettingKeyQuotaScanInterval, Value: "5"},        // 余额扫描默认 5 分钟一轮 (P5 低频口径)
 		// 用量报告默认关闭 + 每天 9 点: 用户主动开启后才发, 时刻选在上班时段便于当天看到昨天的情况。
 		{Key: SettingKeyUsageReportEnabled, Value: "false"},
 		{Key: SettingKeyUsageReportPeriod, Value: "daily"},
 		{Key: SettingKeyUsageReportHour, Value: "9"},
-		{Key: SettingKeyQuotaAlertThreshold, Value: ""},        // 默认不设告警阈值; 归零停用恒生效, 不经该阈值
-		{Key: SettingKeyBalancePointsPerUnit, Value: "500000"}, // 总余额换算默认 new-api 惯例: 500000 点 = 1 个货币单位
+		{Key: SettingKeyQuotaAlertThreshold, Value: ""},               // 默认不设告警阈值; 归零停用恒生效, 不经该阈值
+		{Key: SettingKeyBalancePointsPerUnit, Value: "500000"},        // 总余额换算默认 new-api 惯例: 500000 点 = 1 个货币单位
 		{Key: SettingKeyBalanceUserSelfPath, Value: "/api/user/self"}, // 默认 new-api 系; 自建额度接口的站点改这一项
-	{Key: SettingKeyBalanceCurrency, Value: "USD"},         // 只是显示名: 换 CNY 不改变任何折算, 改口径请调上面的点数
+		{Key: SettingKeyBalanceCurrency, Value: "USD"},                // 只是显示名: 换 CNY 不改变任何折算, 改口径请调上面的点数
 		// R-proxy-001 代理内核: 默认路径留空 → 用 <数据目录>/core/mihomo[.exe]; 端口池默认取高位冷门段。
 		{Key: SettingKeyProxyCorePath, Value: ""},
 		{Key: SettingKeyProxyCoreAutostart, Value: "true"},
@@ -144,6 +151,9 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyAlertSMTPUser, Value: ""},
 		{Key: SettingKeyAlertSMTPFrom, Value: ""},
 		{Key: SettingKeyAlertSMTPTo, Value: ""},
+		// 默认不信任任何反向代理：来源 IP 只认 TCP 对端。
+		// 这是安全默认值 —— 默认采信 X-Forwarded-For 会让任何客户端都能伪造来源 IP。
+		{Key: SettingKeyTrustedProxies, Value: ""},
 		// 加权综合选路（weighted 模式）的维度权重: 保守默认 —— 成本与质量最重, 延迟/在途次之, 近期消耗最轻。
 		// 这三行把「哪一维更重要」留给用户: 想要"贵但稳"就把质量调高, 想要"能用最便宜的"就把成本拉满。
 		{Key: SettingKeyRouteWeightCost, Value: "30"},
@@ -247,6 +257,13 @@ func (s *Setting) Validate() error {
 			return nil
 		}
 		if err := validateHTTPURL(s.Value, "proxy exit probe url"); err != nil {
+			return err
+		}
+		return nil
+	case SettingKeyTrustedProxies:
+		// 写错一个网段就该当场拒绝：静默忽略会让"明明填了却不生效"变成查不出来的问题，
+		// 而这条设置直接决定来源 IP 可不可信，留个坏值比拒绝保存危险得多。
+		if _, err := ParseCIDRList(splitNotifyChannels(s.Value)); err != nil {
 			return err
 		}
 		return nil

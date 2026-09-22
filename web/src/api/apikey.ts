@@ -18,6 +18,13 @@ export interface APIKey {
     rpm?: number; // 每分钟请求数, 0 表示不限
     tpm?: number; // 每分钟词元数, 0 表示不限
     supported_models: string[]; // 允许访问的分组名称，空数组表示不限制
+    /**
+     * 来源 IP 白名单（单个 IP 或 CIDR 网段），空数组表示不限制。
+     *
+     * 只在网关配置了「受信反向代理」之后才会采信 X-Forwarded-For；
+     * 默认不信任任何代理，此时判定的是 TCP 对端地址。
+     */
+    allowed_cidrs: string[];
 }
 
 /**

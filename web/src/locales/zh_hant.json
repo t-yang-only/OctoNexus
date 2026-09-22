@@ -540,7 +540,10 @@
                 "cancel": "取消",
                 "create": "建立",
                 "save": "儲存",
-                "confirm": "確認"
+                "confirm": "確認",
+                "allowedCIDRs": "來源 IP 白名單",
+                "allowedCIDRsPlaceholder": "留空則不限制，如 10.0.0.0/8, 192.168.1.5",
+                "allowedCIDRsHint": "填單個 IP 或 CIDR 網段，逗號分隔；留空表示不限制"
             },
             "stats": {
                 "noData": "暫無統計數據",
@@ -756,6 +759,11 @@
                 "cherry_studio": "Cherry Studio",
                 "openai_compatible": "OpenAI 相容客戶端"
             }
+        },
+        "trustedProxies": {
+            "label": "受信任反向代理",
+            "placeholder": "留空表示不信任任何代理",
+            "hint": "填你的反向代理位址（如 127.0.0.1 或 172.16.0.0/12），逗號分隔。留空時閘道只按 TCP 對端判定來源 IP，X-Forwarded-For 一律忽略 —— 這是安全預設值，因為採信轉送標頭會讓任何用戶端都能偽造來源，API Key 的 IP 白名單隨之失效。只有閘道確實掛在可信反向代理後面時才填。"
         }
     },
     "group": {

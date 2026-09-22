@@ -79,7 +79,11 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
         rpm: apiKey?.rpm ?? 0,
         tpm: apiKey?.tpm ?? 0,
         supported_models: apiKey?.supported_models ?? [],
+        allowed_cidrs: apiKey?.allowed_cidrs ?? [],
     }));
+    // IP 白名单用文本输入而不是标签选择：网段是用户按自己的网络手写的，
+    // 没有可枚举的候选列表；逗号分隔与设置页其他白名单项保持同一种写法。
+    const [cidrInput, setCidrInput] = useState(() => (apiKey?.allowed_cidrs ?? []).join(', '));
     const [maxCostInput, setMaxCostInput] = useState(() =>
         apiKey?.max_cost != null ? String(apiKey.max_cost) : ''
     );
@@ -319,6 +323,27 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
                     )}
                 </div>
                 <div className="text-[11px] text-muted-foreground/80">{t('apiKey.form.modelsHint')}</div>
+            </div>
+
+            <div className="grid gap-1">
+                <div className="text-xs text-muted-foreground">{t('apiKey.form.allowedCIDRs')}</div>
+                <input
+                    type="text"
+                    value={cidrInput}
+                    disabled={isPending}
+                    onChange={(e) => {
+                        setCidrInput(e.target.value);
+                        updateForm({
+                            allowed_cidrs: e.target.value
+                                .split(',')
+                                .map((s) => s.trim())
+                                .filter(Boolean),
+                        });
+                    }}
+                    placeholder={t('apiKey.form.allowedCIDRsPlaceholder')}
+                    className="h-9 w-full rounded-xl border border-border bg-muted/20 px-3 text-sm outline-none focus:border-primary/40 disabled:opacity-50"
+                />
+                <div className="text-[11px] text-muted-foreground/80">{t('apiKey.form.allowedCIDRsHint')}</div>
             </div>
 
             <div className="flex items-center justify-between pt-1">

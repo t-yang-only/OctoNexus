@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
@@ -29,6 +30,34 @@ func SettingGetString(key model.SettingKey) (string, error) {
 		return "", fmt.Errorf("setting not found")
 	}
 	return setting, nil
+}
+
+// TrustedProxies 返回配置的受信反向代理地址列表（IP 或 CIDR）。
+//
+// 返回空切片表示「不信任任何代理」，调用方应据此显式关闭代理信任 ——
+// 不要用 gin 的默认行为（默认信任所有代理），那会让 X-Forwarded-For 可被伪造。
+// 解析失败按"不信任任何代理"处理而不是放行：配置脏值时宁可退回更保守的一侧。
+func TrustedProxies() []string {
+	raw, err := SettingGetString(model.SettingKeyTrustedProxies)
+	if err != nil {
+		return nil
+	}
+	return parseTrustedProxies(raw)
+}
+
+// parseTrustedProxies 把逗号分隔的设置值切成地址列表，顺带丢弃空白项。
+func parseTrustedProxies(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func SettingSetString(key model.SettingKey, value string) error {

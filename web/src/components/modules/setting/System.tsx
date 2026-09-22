@@ -71,7 +71,7 @@ function WeightSettingField({ settingKey, label, kind, options, max, hint }: {
 }
 
 import { useTranslations } from 'use-intl';
-import { Monitor, Globe, Clock, Shield, Filter, HelpCircle, X, Gauge } from 'lucide-react';
+import { Monitor, Globe, Clock, Shield, ShieldCheck, Filter, HelpCircle, X, Gauge } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -92,12 +92,14 @@ export function SettingSystem() {
     const [modelFilter, setModelFilter] = useState('');
     const [quotaScanInterval, setQuotaScanInterval] = useState('');
     const [quotaAlertThreshold, setQuotaAlertThreshold] = useState('');
+    const [trustedProxies, setTrustedProxies] = useState('');
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
     const initialModelFilter = useRef('');
     const initialQuotaScanInterval = useRef('');
     const initialQuotaAlertThreshold = useRef('');
+    const initialTrustedProxies = useRef('');
     useEffect(() => {
         if (settings) {
             const proxy = settings.find(s => s.key === SettingKey.ProxyURL);
@@ -106,6 +108,7 @@ export function SettingSystem() {
             const modelFilterSetting = settings.find(s => s.key === SettingKey.ModelFilter);
             const quotaInterval = settings.find(s => s.key === SettingKey.QuotaScanInterval);
             const quotaThreshold = settings.find(s => s.key === SettingKey.QuotaAlertThreshold);
+            const trusted = settings.find(s => s.key === SettingKey.TrustedProxies);
             if (proxy) {
                 queueMicrotask(() => setProxyUrl(proxy.value));
                 initialProxyUrl.current = proxy.value;
@@ -124,6 +127,7 @@ export function SettingSystem() {
             }
             if (quotaInterval) { queueMicrotask(() => setQuotaScanInterval(quotaInterval.value)); initialQuotaScanInterval.current = quotaInterval.value; }
             if (quotaThreshold) { queueMicrotask(() => setQuotaAlertThreshold(quotaThreshold.value)); initialQuotaAlertThreshold.current = quotaThreshold.value; }
+            if (trusted) { queueMicrotask(() => setTrustedProxies(trusted.value)); initialTrustedProxies.current = trusted.value; }
         }
     }, [settings]);
 
@@ -145,6 +149,8 @@ export function SettingSystem() {
                     initialQuotaScanInterval.current = value;
                 } else if (key === SettingKey.QuotaAlertThreshold) {
                     initialQuotaAlertThreshold.current = value;
+                } else if (key === SettingKey.TrustedProxies) {
+                    initialTrustedProxies.current = value;
                 }
             }
         });
@@ -222,6 +228,29 @@ export function SettingSystem() {
                     onChange={(e) => setProxyUrl(e.target.value)}
                     onBlur={() => handleSave('proxy_url', proxyUrl, initialProxyUrl.current)}
                     placeholder={t('proxyUrl.placeholder')}
+                    className="w-48 rounded-xl"
+                />
+            </div>
+
+            {/* 受信反向代理 */}
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t('trustedProxies.label')}</span>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={10} align="center" className="max-w-xs">
+                            {t('trustedProxies.hint')}
+                        </TooltipContent>
+                    </Tooltip>
+                </div>
+                <Input
+                    value={trustedProxies}
+                    onChange={(e) => setTrustedProxies(e.target.value)}
+                    onBlur={() => handleSave('trusted_proxies', trustedProxies, initialTrustedProxies.current)}
+                    placeholder={t('trustedProxies.placeholder')}
                     className="w-48 rounded-xl"
                 />
             </div>

@@ -540,7 +540,10 @@
                 "cancel": "Cancel",
                 "create": "Create",
                 "save": "Save",
-                "confirm": "Confirm"
+                "confirm": "Confirm",
+                "allowedCIDRs": "Source IP allowlist",
+                "allowedCIDRsPlaceholder": "Empty means unrestricted, e.g. 10.0.0.0/8, 192.168.1.5",
+                "allowedCIDRsHint": "One IP or CIDR per entry, comma separated; empty means unrestricted"
             },
             "stats": {
                 "noData": "No statistics available",
@@ -756,6 +759,11 @@
                 "cherry_studio": "Cherry Studio",
                 "openai_compatible": "OpenAI-compatible client"
             }
+        },
+        "trustedProxies": {
+            "label": "Trusted reverse proxies",
+            "placeholder": "Empty means trust no proxy",
+            "hint": "Your reverse proxy addresses (e.g. 127.0.0.1 or 172.16.0.0/12), comma separated. When empty the gateway derives the source IP from the TCP peer only and ignores X-Forwarded-For entirely - that is the safe default, because honouring forwarded headers lets any client forge its source and silently defeats an API key's IP allowlist. Set this only when the gateway really sits behind a trusted proxy."
         }
     },
     "group": {

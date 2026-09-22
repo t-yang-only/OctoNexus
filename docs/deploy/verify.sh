@@ -43,14 +43,18 @@ fi
 
 echo "== 2. 版本 =="
 if [ -n "$BIN" ]; then
-  ver=$("$BIN" version 2>/dev/null | tr -d '\r')
-  wantver=$(awk -F': ' '/^version:/{print $2; exit}' "$DIR/build-record.txt" 2>/dev/null || true)
+  # 取版本号用 grep+cut+tr，不要用 awk -F 取字段：
+  #   ① 二进制/记录文件的行尾可能带空格或 CR，awk sub 的 trim 不一定吃得干净；
+  #   ② build-record.txt 在 Windows 构建机上极可能是 CRLF。
+  # 两者都会让「版本明明对却报 FAIL」，实测都踩到过。
+  wantver=$(grep "^version:" "$DIR/build-record.txt" 2>/dev/null | head -1 | cut -d: -f2 | tr -d " \t\r\n" || true)
+  gotver=$("$BIN" version 2>/dev/null | grep "^Version:" | head -1 | cut -d: -f2 | tr -d " \t\r\n" || true)
   if [ -z "$wantver" ]; then
-    say INFO "没有 build-record.txt，跳过版本比对（当前：$(printf '%s' "$ver" | tr '\n' ' '))"
-  elif printf '%s\n' "$ver" | grep -qx "Version: $wantver"; then
+    say INFO "没有 build-record.txt，跳过版本比对（当前：${gotver:-未知}）"
+  elif [ "$gotver" = "$wantver" ]; then
     say PASS "二进制版本 $wantver"
   else
-    say FAIL "二进制版本不是 $wantver（当前：$(printf '%s' "$ver" | tr '\n' ' ')）"; fail=1
+    say FAIL "二进制版本不是 $wantver（当前：${gotver:-未知}）"; fail=1
   fi
 fi
 
