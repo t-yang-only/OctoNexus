@@ -1,8 +1,16 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"time"
 
+	"github.com/bestruirui/octopus/internal/conf"
+	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
@@ -22,6 +30,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/webdav/list", http.MethodGet).
 				Handle(listWebDAVBackup),
+		).
+		AddRoute(
+			router.NewRoute("/webdav/restore", http.MethodPost).
+				Handle(restoreWebDAVBackup),
 		)
 }
 
@@ -69,4 +81,71 @@ func errorText(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// restoreWebDAVBackup 从远端某份备份恢复。
+//
+// 这是本模块里唯一会改动线上数据的操作，因此比其它动作多两道保护：
+//
+//  1. **恢复前先落一份本地兜底快照**（写到数据目录，路径随响应返回）。
+//     恢复路径的唯一可靠回退手段就是"恢复前那份数据"，而用户往往在恢复之后
+//     才发现恢复错了 —— 那时临时目录早被清空、内存状态也丢了。
+//     刻意写进数据目录（与 credential.key 同级）而不是系统临时目录。
+//
+//  2. **如实回报增量语义**。导入是增量合并（插入新行 + 自然键 upsert），
+//     不会删除"备份之后新增的行"，所以结果不是"回到备份那一刻"。
+//     不把这条说清楚，用户会以为恢复等于回滚，进而做出错误的判断。
+func restoreWebDAVBackup(c *gin.Context) {
+	var body struct {
+		File string `json:"file" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		return
+	}
+
+	cfg, err := task.WebDAVConfigFromSettings()
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// 兜底快照：先写盘，再动数据。写失败则中止恢复 ——
+	// "没有回退手段就动手"是恢复路径最不该有的姿态。
+	safetyPath, snapshotErr := writeSafetySnapshot(c.Request.Context())
+	if snapshotErr != nil {
+		resp.Error(c, http.StatusInternalServerError,
+			"恢复前无法写出本地兜底快照，已中止恢复："+snapshotErr.Error())
+		return
+	}
+
+	result, err := task.WebDAVRestore(c.Request.Context(), cfg, body.File)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, gin.H{
+		"result":        result,
+		"safety_backup": safetyPath,
+		"note": "导入为增量合并：新行插入、自然键 upsert，不会删除备份之后新增的行。" +
+			"如需回退，用上面这份恢复前快照走「备份恢复」导入。",
+	})
+}
+
+// writeSafetySnapshot 把当前数据导出一份到数据目录，返回落盘路径。
+func writeSafetySnapshot(ctx context.Context) (string, error) {
+	dump, err := op.DBExportAll(ctx)
+	if err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(dump)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(filepath.Dir(conf.AppConfig.Database.Path),
+		fmt.Sprintf("restore-safety-%s.json", time.Now().Format("20060102-150405")))
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
 }

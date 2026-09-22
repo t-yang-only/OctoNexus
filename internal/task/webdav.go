@@ -258,6 +258,70 @@ func marshalDBDump(dump *model.DBDump) ([]byte, error) {
 	return json.Marshal(dump)
 }
 
+// WebDAVDownload 按文件名从远端取回备份内容。
+//
+// 文件名只允许本程序自己产生的那种形态（固定前缀 + 时间戳 + .json）：
+// 这个函数被"恢复"这条危险路径调用，放开任意文件名等于让一个拼错的参数
+// 去下载目录里的其它东西。
+func WebDAVDownload(ctx context.Context, cfg WebDAVConfig, name string) ([]byte, error) {
+	if !isOwnBackupName(name) {
+		return nil, fmt.Errorf("不是本程序产生的备份文件名: %s", name)
+	}
+	base := strings.TrimRight(cfg.URL, "/")
+	req, err := buildWebDAVRequest(ctx, http.MethodGet, base+"/"+url.PathEscape(name), nil, cfg)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := webDAVClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("下载备份失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("下载备份失败: HTTP %d", resp.StatusCode)
+	}
+	// 上限 512MiB：备份件随用户规模增长，给足余量但不当成无上限的读。
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("读备份内容失败: %w", err)
+	}
+	return body, nil
+}
+
+// isOwnBackupName 判断文件名是否为本程序产生的备份。
+func isOwnBackupName(name string) bool {
+	return strings.HasPrefix(name, "octopus-backup-") &&
+		strings.HasSuffix(name, ".json") &&
+		// 防止用 "../" 之类逃出目录：只允许前缀与后缀之间是时间戳字符。
+		!strings.ContainsAny(name, "/\\")
+}
+
+// WebDAVRestore 从远端某份备份恢复。
+//
+// 三条必须说清楚的语义（都会如实回报给调用方，不替用户猜）：
+//   - 导入是**增量**的：插入新行、对自然键 upsert。它不会删除"备份之后新增的行"，
+//     所以结果不是"回到备份那一刻的快照"，而是"把备份里的内容合并进来"。
+//   - 恢复**不碰本机现有配置**，所以它不能用来"清空重来"。
+//   - 备份里的渠道凭据若用本实例密钥解不开（跨实例恢复），会如实回报条数，
+//     否则表现为"恢复成功但渠道全报错"。
+//
+// 调用方负责在调用前做一次本地导出兜底 —— 那是恢复路径唯一可靠的回退手段。
+func WebDAVRestore(ctx context.Context, cfg WebDAVConfig, name string) (*model.DBImportResult, error) {
+	raw, err := WebDAVDownload(ctx, cfg, name)
+	if err != nil {
+		return nil, err
+	}
+	var dump model.DBDump
+	if err := json.Unmarshal(raw, &dump); err != nil {
+		return nil, fmt.Errorf("备份内容不是合法转储 JSON: %w", err)
+	}
+	if dump.Version == 0 {
+		return nil, fmt.Errorf("备份缺少版本号，无法确认格式")
+	}
+	return op.DBImportIncremental(ctx, &dump)
+}
+
 // parseIntSetting 读一个整数字段，缺失或非法时返回错误（调用方决定回落值）。
 func parseIntSetting(raw string) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(raw))

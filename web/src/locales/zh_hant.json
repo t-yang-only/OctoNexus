@@ -779,7 +779,13 @@
             "runSuccess": "已上傳 {file}",
             "runFailed": "備份失敗",
             "pruneWarning": "備份已成功，但清理舊檔案失敗：{reason}",
-            "listFailed": "讀取遠端清單失敗"
+            "listFailed": "讀取遠端清單失敗",
+            "restore": "還原",
+            "restoreClickAgain": "再點一次確認",
+            "restoreConfirm": "確認從 {file} 還原？這會改動目前資料。",
+            "restoreSuccess": "已還原。還原前快照：{path}",
+            "restoreFailed": "還原失敗",
+            "restoreHint": "還原是增量合併（新行插入、既有設定更新），不會刪除備份之後新增的行；誤還原時用回應裡給出的「還原前快照」走上面的匯入回退。"
         }
     },
     "group": {

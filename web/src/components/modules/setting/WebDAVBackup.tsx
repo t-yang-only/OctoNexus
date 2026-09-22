@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { useSettingList, useSetSetting, SettingKey } from '@/api/setting';
-import { useRunWebDAVBackup, useWebDAVBackupList } from '@/api/webdav-backup';
+import { useRunWebDAVBackup, useRestoreWebDAVBackup, useWebDAVBackupList } from '@/api/webdav-backup';
 
 // 云备份面板（T-backup-001）。
 //
@@ -20,6 +20,7 @@ export function SettingWebDAVBackup() {
     const { data: settings } = useSettingList();
     const setSetting = useSetSetting();
     const runBackup = useRunWebDAVBackup();
+    const restore = useRestoreWebDAVBackup();
 
     const [url, setUrl] = useState('');
     const [username, setUsername] = useState('');
@@ -62,6 +63,31 @@ export function SettingWebDAVBackup() {
     };
 
     const listQuery = useWebDAVBackupList(enabled && url.trim() !== '');
+
+    // 恢复是危险操作：用"二次点击"确认而不是浏览器弹窗 ——
+    // 弹窗容易被无意识地点掉，而这一步会改动线上数据。
+    const [pendingRestore, setPendingRestore] = useState<string | null>(null);
+
+    const onRestore = async (file: string) => {
+        if (pendingRestore !== file) {
+            setPendingRestore(file);
+            toast.warning(t('webdavBackup.restoreConfirm', { file }));
+            return;
+        }
+        setPendingRestore(null);
+        try {
+            const result = await restore.mutateAsync(file);
+            const warnings = result.result?.warnings ?? [];
+            if (warnings.length > 0) {
+                // 有告警时如实展示（例如凭据解不开），不能只报"成功"。
+                toast.warning(warnings.join('；'));
+            } else {
+                toast.success(t('webdavBackup.restoreSuccess', { path: result.safety_backup }));
+            }
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : t('webdavBackup.restoreFailed'));
+        }
+    };
 
     const onRun = async () => {
         try {
@@ -181,10 +207,23 @@ export function SettingWebDAVBackup() {
                     {listQuery.data.files.length > 0 && (
                         <div className="max-h-32 overflow-auto rounded-xl bg-muted/20 p-2 text-xs font-mono">
                             {listQuery.data.files.map((f) => (
-                                <div key={f}>{f}</div>
+                                <div key={f} className="flex items-center justify-between gap-2 py-0.5">
+                                    <span className="truncate">{f}</span>
+                                    <button
+                                        type="button"
+                                        disabled={restore.isPending}
+                                        onClick={() => onRestore(f)}
+                                        className="shrink-0 rounded-lg border border-border px-2 py-0.5 text-[11px] transition-colors hover:bg-muted disabled:opacity-50"
+                                    >
+                                        {pendingRestore === f
+                                            ? t('webdavBackup.restoreClickAgain')
+                                            : t('webdavBackup.restore')}
+                                    </button>
+                                </div>
                             ))}
                         </div>
                     )}
+                    <div className="text-[11px] text-muted-foreground/80">{t('webdavBackup.restoreHint')}</div>
                 </div>
             )}
         </div>

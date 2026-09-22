@@ -779,7 +779,13 @@
             "runSuccess": "已上传 {file}",
             "runFailed": "备份失败",
             "pruneWarning": "备份已成功，但清理旧文件失败：{reason}",
-            "listFailed": "读取远端列表失败"
+            "listFailed": "读取远端列表失败",
+            "restore": "恢复",
+            "restoreClickAgain": "再点一次确认",
+            "restoreConfirm": "确认从 {file} 恢复？这会改动当前数据。",
+            "restoreSuccess": "已恢复。恢复前快照：{path}",
+            "restoreFailed": "恢复失败",
+            "restoreHint": "恢复是增量合并（新行插入、已有配置更新），不会删除备份之后新增的行；误恢复时用响应里给出的「恢复前快照」走上面的导入回退。"
         }
     },
     "group": {

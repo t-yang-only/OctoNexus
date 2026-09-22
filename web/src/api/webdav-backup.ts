@@ -21,11 +21,30 @@ export interface WebDAVBackupList {
     count: number;
 }
 
+export interface WebDAVRestoreResult {
+    result: { rows_affected?: Record<string, number>; warnings?: string[] };
+    /** 恢复前自动落下的本地兜底快照路径；误恢复时用它回退。 */
+    safety_backup: string;
+    /** 说明本次恢复的语义（增量合并，不是回滚）。 */
+    note: string;
+}
+
 /** 立即跑一轮云备份。 */
 export function useRunWebDAVBackup() {
     return useMutation({
         mutationFn: () =>
             apiRequest<WebDAVBackupResult>('/api/v1/backup/webdav/run', { method: 'POST', body: {} }),
+    });
+}
+
+/** 从远端某份备份恢复（增量合并）。 */
+export function useRestoreWebDAVBackup() {
+    return useMutation({
+        mutationFn: (file: string) =>
+            apiRequest<WebDAVRestoreResult>('/api/v1/backup/webdav/restore', {
+                method: 'POST',
+                body: { file },
+            }),
     });
 }
 

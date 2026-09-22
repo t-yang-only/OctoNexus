@@ -87,6 +87,19 @@ func (s *webdavStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.files[name] = body
 		w.WriteHeader(http.StatusCreated)
+	case http.MethodGet:
+		// 恢复路径要下载备份，桩必须支持 GET；否则"下载"这条链路的用例
+		// 全部会因为桩不支持而失败（看起来像产品坏了）。
+		s.mu.Lock()
+		body, ok := s.files[name]
+		s.mu.Unlock()
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
 	case "PROPFIND":
 		s.mu.Lock()
 		defer s.mu.Unlock()

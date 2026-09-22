@@ -779,7 +779,13 @@
             "runSuccess": "Uploaded {file}",
             "runFailed": "Backup failed",
             "pruneWarning": "Backup succeeded, but pruning old files failed: {reason}",
-            "listFailed": "Failed to read the remote list"
+            "listFailed": "Failed to read the remote list",
+            "restore": "Restore",
+            "restoreClickAgain": "Click again to confirm",
+            "restoreConfirm": "Restore from {file}? This will modify your current data.",
+            "restoreSuccess": "Restored. Pre-restore snapshot: {path}",
+            "restoreFailed": "Restore failed",
+            "restoreHint": "Restore is an incremental merge (insert new rows, update existing config). It does not delete rows added after the backup. If you restore by mistake, use the pre-restore snapshot path from the response with the import above."
         }
     },
     "group": {
