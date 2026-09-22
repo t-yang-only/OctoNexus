@@ -38,6 +38,11 @@ func init() {
 			router.NewRoute("/stats", http.MethodGet).
 				Handle(listChannelStats),
 		).
+		// 可用性诊断（T-usability-001）：把「配了但用不上」的模型与原因列出来。
+		AddRoute(
+			router.NewRoute("/diagnose", http.MethodGet).
+				Handle(diagnoseChannels),
+		).
 		AddRoute(
 			router.NewRoute("/grants", http.MethodGet).
 				Handle(listChannelGrant),
@@ -84,6 +89,34 @@ func getChannelDetail(c *gin.Context) {
 // 不带整份配置: 统计每次转发都在变, 界面按更短的间隔刷新它, 而路径, 代理与凭据明文只在编辑时用得上。
 func listChannelStats(c *gin.Context) {
 	resp.Success(c, op.ChannelStatsList())
+}
+
+// diagnoseChannels 返回各渠道的可用性诊断（T-usability-001）。
+//
+// 回答的是「我配好的模型为什么用不上」：一个模型要能被客户端调用，
+// 必须三层齐全（模型 → 凭据授权 → 分组），任何一层断掉的表现都是
+// 客户端报 model not found，而界面上完全看不出是哪一层。
+// 这里把断点与可执行的原因一并列出来。
+func diagnoseChannels(c *gin.Context) {
+	channelID := 0
+	if raw := strings.TrimSpace(c.Query("channel_id")); raw != "" {
+		id, err := strconv.Atoi(raw)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+			return
+		}
+		channelID = id
+	}
+	items, err := op.ChannelDiagnoseAll(c.Request.Context(), channelID)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, gin.H{
+		"summary":  op.SummarizeChannelDiagnose(items),
+		"reasons":  op.DiagnoseReasonCounts(items),
+		"channels": items,
+	})
 }
 
 // listChannelGrant 返回全部渠道授权候选, 供分组页选取成员。
