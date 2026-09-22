@@ -140,3 +140,31 @@ func TestCLIExportCherryStudioGivesFields(t *testing.T) {
 		}
 	}
 }
+
+// 只要导出内容里含明文密钥，就必须带一条安全提醒。
+//
+// 判据按"内容里到底有没有真密钥"来分支，而不是按目标白名单写死：
+// 将来新增目标时忘了加提醒，只要它把 key 拼进 content，这条就会红。
+// Codex 是唯一把 key 放在环境变量步骤、不写进 content 的目标，因此豁免。
+//
+// 提醒的具体措辞按形态区分（脚本说"别提交进版本库"，界面字段说"别外传截图"），
+// 所以这里只要求出现安全提示，不强求同一句话——硬套措辞会把合理措辞判成缺陷。
+func TestCLIExportWarnsWhenKeyIsInline(t *testing.T) {
+	const secret = "sk-octopus-abc123456789"
+	targets := []CLITarget{
+		CLITargetClaudeCode, CLITargetCodex, CLITargetGeminiCLI,
+		CLITargetCherryStudio, CLITargetOpenAICompatible,
+	}
+	for _, target := range targets {
+		export := buildFor(t, target, "https://gw.example.com", secret, "m1")
+		if !strings.Contains(export.Content, secret) {
+			continue
+		}
+		notes := strings.Join(export.Notes, "\n")
+		safe := strings.Contains(notes, "版本库") || strings.Contains(notes, "外传") ||
+			strings.Contains(notes, "截图") || strings.Contains(notes, "聊天记录")
+		if !safe {
+			t.Fatalf("%s 的内容里含明文密钥，Notes 却没给任何安全提醒: %v", target, export.Notes)
+		}
+	}
+}

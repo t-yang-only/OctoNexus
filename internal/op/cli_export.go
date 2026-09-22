@@ -104,6 +104,7 @@ export ANTHROPIC_SMALL_FAST_MODEL=%s`, base, key, model, model)
 		Notes: []string{
 			"用 ANTHROPIC_AUTH_TOKEN（不是 ANTHROPIC_API_KEY）：Claude Code 对前者才会发 Authorization 头。",
 			"ANTHROPIC_MODEL 填的是网关的分组名，不是上游真实模型名。",
+			"这段脚本里有明文密钥：别提交进版本库，也别贴进工单/聊天记录。",
 		},
 	}
 }
@@ -149,6 +150,7 @@ export GEMINI_MODEL=%s`, key, base, model)
 		Notes: []string{
 			"GEMINI_API_KEY 填的是网关签发的 Key，不是 Google 的密钥。",
 			"不同版本对 base URL 变量名可能不同（GOOGLE_GEMINI_BASE_URL / GEMINI_BASE_URL），配不上时两个都设一遍。",
+			"这段脚本里有明文密钥：别提交进版本库，也别贴进工单/聊天记录。",
 		},
 	}
 }
@@ -170,6 +172,7 @@ API 密钥：%s
 		Notes: []string{
 			"地址要带 /v1：Cherry Studio 不会自动补。",
 			"模型名必须与网关的分组名逐字一致；不确定时用面板的「模型映射」配一条通配规则。",
+			"这里的密钥是明文展示的：填完就别把截图发出去。",
 		},
 	}
 }
@@ -189,6 +192,7 @@ export OPENAI_API_KEY=%s
 		Notes: []string{
 			"本网关同时提供 /v1/responses 与 /v1/messages，按客户端支持的协议选。",
 			"base URL 带 /v1，路径不要再重复写 /v1。",
+			"这段脚本里有明文密钥：别提交进版本库，也别贴进工单/聊天记录。",
 		},
 	}
 }

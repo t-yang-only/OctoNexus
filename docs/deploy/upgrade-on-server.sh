@@ -77,7 +77,16 @@ need_root() {
 # ---------- 服务管理抽象：systemd 优先，没有就退化成进程管理 ----------
 SERVICE_MODE=""
 detect_service_mode() {
-    if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q "^${SERVICE}\.service"; then
+    # 先取全量再判定，不要写成 `systemctl list-unit-files | grep -q`：
+    # grep -q 命中即退出会让 systemctl 收到 SIGPIPE（退出码 141），
+    # 而 set -o pipefail 会把整条管道判为失败 —— 结果是明明跑在 systemd 上
+    # 却被判成 process 模式，于是绕过 systemctl 手工杀进程，
+    # 被 Restart=on-failure 拉起的新旧实例抢端口（实测踩到）。
+    local units=""
+    if command -v systemctl >/dev/null 2>&1; then
+        units=$(systemctl list-unit-files 2>/dev/null | awk '{print $1}')
+    fi
+    if printf '%s\n' "$units" | grep -qx "${SERVICE}.service"; then
         SERVICE_MODE=systemd
     elif pgrep -f "$DIR/octopus start" >/dev/null 2>&1; then
         SERVICE_MODE=process
@@ -310,9 +319,9 @@ do_upgrade() {
     if [ -f "$PACKAGE/verify.sh" ]; then
         if [ -n "$CLIENT_KEY" ] && [ -n "$GROUP" ]; then
             log "  用客户端 Key $(mask_key "$CLIENT_KEY") 与分组 $GROUP 跑真实转发自检"
-            ( cd "$PACKAGE" && bash verify.sh "$CLIENT_KEY" "$GROUP" "$ADMIN_PORT" "$RELAY_PORT" "$DIR" ) || warn "自检未全绿（见上面 FAIL 行）"
+            ( cd "$PACKAGE" && bash verify.sh "$CLIENT_KEY" "$GROUP" "$ADMIN_PORT" "$RELAY_PORT" "$DIR" "$SERVICE" ) || warn "自检未全绿（见上面 FAIL 行）"
         else
-            log "  没给 --client-key/--group，跳过真实转发检查；手工执行：bash $PACKAGE/verify.sh <客户端Key> <分组名> $ADMIN_PORT $RELAY_PORT $DIR"
+            log "  没给 --client-key/--group，跳过真实转发检查；手工执行：bash $PACKAGE/verify.sh <客户端Key> <分组名> $ADMIN_PORT $RELAY_PORT $DIR $SERVICE"
         fi
     fi
 
