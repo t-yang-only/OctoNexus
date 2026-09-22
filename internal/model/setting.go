@@ -18,6 +18,11 @@ const (
 	SettingKeyCORSAllowOrigins        SettingKey = "cors_allow_origins"         // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
 	SettingKeyModelFilter             SettingKey = "model_filter"               // 渠道获取模型时的全局过滤表达式; 留空表示不过滤
 	SettingKeyQuotaScanInterval       SettingKey = "quota_scan_interval"        // 余额采集扫描周期(分钟), T-quota-001; 0 表示停用扫描任务
+	// 用量报告（吸收上游 lingyuins/octopus 的 Usage Reports）：按周期把用量与成本摘要
+	// 推到已配置的通知渠道。默认关闭——通知是打扰，只有用户主动开了才发。
+	SettingKeyUsageReportEnabled SettingKey = "usage_report_enabled" // 是否启用周期用量报告
+	SettingKeyUsageReportPeriod  SettingKey = "usage_report_period"  // daily / weekly / monthly
+	SettingKeyUsageReportHour    SettingKey = "usage_report_hour"    // 发送时刻(0..23, 本地时区整点)
 	// 加权综合选路（weighted 模式）的维度权重, 取值 0..100, 全部缺省时用下面这组保守默认值。
 	// 留成设置项是为了让「哪一维更重要」由用户决定, 不写死在代码里。
 	SettingKeyRouteWeightCost    SettingKey = "route_weight_cost"    // 成本（价表 input+output）
@@ -106,6 +111,10 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"},  // 默认24小时更新一次模型信息
 		{Key: SettingKeyModelFilter, Value: ""},                // 默认不过滤模型
 		{Key: SettingKeyQuotaScanInterval, Value: "5"},         // 余额扫描默认 5 分钟一轮 (P5 低频口径)
+		// 用量报告默认关闭 + 每天 9 点: 用户主动开启后才发, 时刻选在上班时段便于当天看到昨天的情况。
+		{Key: SettingKeyUsageReportEnabled, Value: "false"},
+		{Key: SettingKeyUsageReportPeriod, Value: "daily"},
+		{Key: SettingKeyUsageReportHour, Value: "9"},
 		{Key: SettingKeyQuotaAlertThreshold, Value: ""},        // 默认不设告警阈值; 归零停用恒生效, 不经该阈值
 		{Key: SettingKeyBalancePointsPerUnit, Value: "500000"}, // 总余额换算默认 new-api 惯例: 500000 点 = 1 个货币单位
 		{Key: SettingKeyBalanceUserSelfPath, Value: "/api/user/self"}, // 默认 new-api 系; 自建额度接口的站点改这一项
@@ -198,6 +207,27 @@ func (s *Setting) Validate() error {
 	case SettingKeyProxyCoreAutostart:
 		if _, err := strconv.ParseBool(s.Value); err != nil {
 			return fmt.Errorf("proxy core autostart must be a boolean")
+		}
+		return nil
+	case SettingKeyUsageReportEnabled:
+		if _, err := strconv.ParseBool(s.Value); err != nil {
+			return fmt.Errorf("usage report enabled must be a boolean")
+		}
+		return nil
+	case SettingKeyUsageReportPeriod:
+		if !IsValidUsageReportPeriod(s.Value) {
+			return fmt.Errorf("usage report period must be one of daily, weekly, monthly")
+		}
+		return nil
+	case SettingKeyUsageReportHour:
+		hour, err := strconv.Atoi(s.Value)
+		if err != nil {
+			return fmt.Errorf("usage report hour must be an integer")
+		}
+		// 越界直接拒绝而不是夹回：用户写 25 时显然是想表达别的意思，
+		// 静默改成 23 会让"报告怎么不发"变成一个查不出来的问题。
+		if hour < 0 || hour > 23 {
+			return fmt.Errorf("usage report hour must be between 0 and 23")
 		}
 		return nil
 	case SettingKeyProxyCorePortStart, SettingKeyProxyCorePortEnd:

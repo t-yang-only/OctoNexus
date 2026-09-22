@@ -84,6 +84,8 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.CredentialSource{},
 		// 模型名智能重写映射（吸收上游与 New-API 优点）。
 		&model.ModelMapping{},
+		// 用量报告的发送状态（吸收上游 Usage Reports）：记"哪个周期已发过"，保证同周期不补发。
+		&model.UsageReportState{},
 		&migrate.MigrationRecord{},
 	); err != nil {
 		return err

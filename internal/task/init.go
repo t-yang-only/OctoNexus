@@ -18,6 +18,7 @@ const (
 	TaskQuotaScan     = "quota_scan"
 	TaskRouteProbe    = "route_probe"
 	TaskNodeProbe     = "node_probe"
+	TaskUsageReport   = "usage_report"
 )
 
 func Init() {
@@ -60,6 +61,10 @@ func Init() {
 	Register(TaskNodeProbe, 5*time.Minute, false, func() {
 		op.ProxyNodeProbeAll(context.Background())
 	})
+
+	// 注册用量报告任务：按小时轮询，只有"当前整点 == 配置时刻 且 本周期没发过"才真的发。
+	// 任务恒注册（开关与时刻每轮现读），用户改配置无需重启。
+	Register(TaskUsageReport, time.Hour, false, usageReportOnce)
 	// 首跑必须延迟：服务刚起来时出口内核还没把节点端口准备好，立刻探活会把**整池**判成不通
 	// （实测 115 个节点全红），反而让健康筛选变成摆设。给内核 90 秒再探第一轮。
 	go func() {

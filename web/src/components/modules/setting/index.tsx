@@ -7,6 +7,7 @@ import { SettingSystem } from './System';
 import { SettingRouting } from './Routing';
 import { SettingModelMapping } from './ModelMapping';
 import { SettingNotify } from './Notify';
+import { SettingUsageReport } from './UsageReport';
 import { SettingAPIKey } from './APIKey';
 import { SettingLLMPrice } from './LLMPrice';
 import { SettingAccount } from './Account';
@@ -53,8 +54,9 @@ export function Setting() {
                     <SettingModelMapping />
                     <SettingRouting />
                 </TabsContent>
-                <TabsContent value="notify" className="px-4">
+                <TabsContent value="notify" className="space-y-4 px-4">
                     <SettingNotify />
+                    <SettingUsageReport />
                 </TabsContent>
                 <TabsContent value="data" className="space-y-4 px-4">
                     <SettingAccount />

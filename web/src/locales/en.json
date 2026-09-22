@@ -672,6 +672,24 @@
                 "wildcard": "Wildcard",
                 "regex": "Regex"
             }
+        },
+        "usageReport": {
+            "title": "Usage Reports",
+            "description": "Push a usage and cost summary to your configured notification channels (ServerChan / Feishu / DingTalk / WeCom / email / webhook) on a schedule. Each report covers the previous complete period (daily = yesterday, weekly = last calendar week, monthly = last calendar month) so the numbers never change after delivery; each period is sent at most once.",
+            "enabled": "Enable scheduled reports",
+            "period": "Period",
+            "hour": "Send hour",
+            "hint": "Send hour is a local-time hour (0-23). Reports only cover data already persisted to the database (see the stats save interval under Data & Backup), so the body states its data cutoff. Use Preview first to see exactly what you would receive.",
+            "preview": "Preview",
+            "sendNow": "Send now",
+            "sent": "Sent",
+            "history": "Send history",
+            "delivered": "Delivered",
+            "periods": {
+                "daily": "Daily",
+                "weekly": "Weekly",
+                "monthly": "Monthly"
+            }
         }
     },
     "group": {
