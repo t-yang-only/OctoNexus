@@ -974,7 +974,9 @@
             "prompt": "Input",
             "cached": "Cached",
             "completion": "Output"
-        }
+        },
+        "modelMismatch": "model mismatch",
+        "modelMismatchTip": "The upstream reported it used {reported}, which differs from the model you requested. This may be an alias or upstream routing (normal), or the model was actually swapped (needs attention)."
     },
     "channel": {
         "card": {

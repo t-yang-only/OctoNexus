@@ -44,7 +44,19 @@ export interface LogDisplayFields {
     model: string;
     targetChannel: string;
     targetModel: string;
+    // actualModel 是**实际跑这次请求的模型**（T-verify-001）。
+    //
+    // 注意它此前被赋成了 targetModel —— 那是「我们请求了什么」，不是「上游用了什么」。
+    // 两者在上游偷换模型时不同，把请求名当实际名显示等于让面板说假话：
+    // 用户以为看到的是真实模型，其实只是自己填的名字。
+    // 现在的取值顺序：上游回报的 → 请求的 → 客户端原始 model。
     actualModel: string;
+    // reportedModel 是上游响应体里回报的模型名原值；空串表示上游没回报（常见现象）。
+    // 单独保留原值是为了让界面能区分「上游说它用了 X」与「上游没说话」——
+    // 前者可用于比对，后者只能显示占位。
+    reportedModel: string;
+    // modelMismatch 标记上游回报的模型与请求的不一致，即「上游可能偷换了模型」的唯一可见证据。
+    modelMismatch: boolean;
     clientProtocol: number;
     targetProtocol: number;
     apiKeyName: string;
@@ -100,6 +112,18 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
     const totalTokens = reportedTotal > 0 ? reportedTotal : promptTokens + completionTokens;
 
     const targetModel = source.target_model || '';
+    // 上游回报的模型名：实时快照与历史行同名字段，故两条路径共用一次读取。
+    // 空串是常见情况（不少站点响应里不带 model），此时不判定是否一致。
+    const reportedModel = source.reported_model || '';
+    // 判定以前端为准还是以后端为准：后端已经在落库时算好（model_mismatch），
+    // 前端直接用它，避免两处各写一套比较规则（大小写、空白处理稍有出入就会前后矛盾）。
+    // 后端未给（老数据或实时快照早期版本）时按同一口径现算一次兜底。
+    const modelMismatch =
+        typeof source.model_mismatch === 'boolean'
+            ? source.model_mismatch
+            : reportedModel !== '' &&
+              targetModel !== '' &&
+              reportedModel.trim().toLowerCase() !== targetModel.trim().toLowerCase();
 
     return {
         requestId: live ? source.id : source.request_id,
@@ -123,7 +147,11 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
         model: source.model || '',
         targetChannel: source.target_channel || '',
         targetModel,
-        actualModel: targetModel || source.model || '',
+        // 上游回报的模型优先：它才是「实际在跑的那个」。上游没回报时退回请求名，
+        // 至少显示用户填的东西，但 reportedModel 保持空串以便界面区分这两种情况。
+        reportedModel,
+        modelMismatch,
+        actualModel: reportedModel || targetModel || source.model || '',
         clientProtocol: live ? source.protocol : source.target_protocol,
         targetProtocol: source.target_protocol,
         apiKeyName: source.api_key_name || '',

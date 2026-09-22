@@ -27,6 +27,14 @@ export interface RelayHistoryItem {
     target_channel: string;
     target_model: string;
     target_protocol: number;
+    // reported_model 是上游响应体里回报的模型名（T-verify-001）。
+    // 与 target_model 的区别是关键：后者是「我们请求了什么」，前者是「上游自称用了什么」。
+    // 空串表示上游没回报该字段（常见现象），此时不判定。
+    reported_model: string;
+    // model_mismatch 标记上游回报的模型与请求的不一致。
+    // 这是「上游偷换模型」的唯一可见证据——按高价模型收费却用低价模型出货，
+    // 只看我们自己的记录永远发现不了。
+    model_mismatch: boolean;
     started_at: string;
     first_byte_ms: number;
     duration_ms: number;
@@ -120,6 +128,10 @@ export interface RelayLogOverview {
     target_channel: string;
     target_model: string;
     target_protocol: number;
+    // reported_model / model_mismatch 与 RelayHistoryItem 同义（T-verify-001）：
+    // 前者是上游自称用了什么，后者标记它与请求的模型不一致。实时快照同样带这两个字段。
+    reported_model?: string;
+    model_mismatch?: boolean;
     sending: boolean;
     error?: string;
 }

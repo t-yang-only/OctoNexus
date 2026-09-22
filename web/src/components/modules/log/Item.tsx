@@ -182,7 +182,12 @@ function LogDetail({ log, now }: { log: RelayLogOverview; now: number }) {
     const { data: activeGroup } = useGroup(log.group_id, detailReady, detailReady);
     const updateActiveItem = useUpdateGroup();
     const stopRound = useStopRound();
-    const actualModel = resolveLogDisplay(log).actualModel;
+    const logDisplay = resolveLogDisplay(log);
+    const actualModel = logDisplay.actualModel;
+    // 上游回报的模型与请求的不一致 —— 这是「上游可能偷换模型」的唯一可见证据（T-verify-001）。
+    // 必须在卡片上显式标出来：不标的话，用户看到 actualModel 只会以为那就是他要的模型。
+    const modelMismatch = logDisplay.modelMismatch;
+    const reportedModel = logDisplay.reportedModel;
     const { Icon, className: iconClassName, color: brandColor } = getModelIcon(actualModel);
     const errorText = log.error ?? '';
     const requestFailed = log.status === 'failed' || log.status === 'canceled';
@@ -237,6 +242,17 @@ function LogDetail({ log, now }: { log: RelayLogOverview; now: number }) {
                     {log.target_channel || '-'}
                 </Badge>
                 <span className="text-muted-foreground">{actualModel}</span>
+                {modelMismatch && (
+                    // 上游说它用的是另一个模型。用告警色标出来并给出上游原话，
+                    // 让用户自己判断是别名/路由层改名（可接受）还是真的偷换（要处理）。
+                    <Badge
+                        variant="secondary"
+                        className="text-xs px-1.5 py-0 border border-destructive/40 text-destructive"
+                        title={t('log.modelMismatchTip', { reported: reportedModel })}
+                    >
+                        {t('log.modelMismatch')}
+                    </Badge>
+                )}
             </MorphingDialogTitle>
 
             <MorphingDialogDescription className="flex-1 min-h-0">

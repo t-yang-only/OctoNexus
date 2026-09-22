@@ -974,7 +974,9 @@
             "prompt": "輸入",
             "cached": "快取",
             "completion": "輸出"
-        }
+        },
+        "modelMismatch": "模型不一致",
+        "modelMismatchTip": "上游回報它用的是 {reported}，與你請求的模型不同。可能是別名或上游路由改名（正常），也可能是真的換了模型（需要處理）。"
     },
     "channel": {
         "card": {
