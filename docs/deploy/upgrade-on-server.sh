@@ -277,7 +277,26 @@ do_upgrade() {
     ts=$(date +%Y%m%d-%H%M%S)
     artifact="$DIR/backups/$ts"
     mkdir -p "$artifact"
-    [ -d "$DIR/data" ] && tar -czf "$artifact/data-$ts.tar.gz" -C "$DIR" data
+    # 排除运行时日志：它们是"文件在变"的根源，会让 tar 报
+    # "file changed as we read it" 并返回非零，而 set -e 会因此中止整个升级
+    # （实测卡在备份这步两次）。日志也不需要备份 —— 恢复时要的是数据不是历史日志。
+    #
+    # 仍额外容许 tar 的退出码 1：它的语义是"有文件在读取期间发生变化"，
+    # 备份本身依旧可用（这是 tar 的固有行为，不是备份失败）。
+    # 其余非零才是真失败，必须中止。
+    if [ -d "$DIR/data" ]; then
+        set +e
+        tar -czf "$artifact/data-$ts.tar.gz" -C "$DIR" \
+            --exclude='data/core/*.log' --exclude='data/logs' --exclude='data/*.log' data
+        local tar_code=$?
+        set -e
+        if [ "$tar_code" -ne 0 ] && [ "$tar_code" -ne 1 ]; then
+            die "备份数据目录失败（tar 退出码 $tar_code），已中止，线上未改动"
+        fi
+        if [ "$tar_code" -eq 1 ]; then
+            warn "备份时有文件正在变化（tar 退出码 1）：备份仍可用，继续升级"
+        fi
+    fi
     [ -x "$DIR/octopus" ] && cp -a "$DIR/octopus" "$artifact/octopus.old-$ts"
     ok "备份到 $artifact（数据 ${ts}.tar.gz + 二进制 octopus.old-$ts）"
 
