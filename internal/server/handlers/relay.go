@@ -24,5 +24,12 @@ func init() {
 		AddRoute(
 			router.NewRoute("/messages", http.MethodPost).
 				Handle(relay.Forward(llm.APIFormatAnthropicMessage)),
+		).
+		// TypeSafe AI「System One」评估接口的兼容转发（T-verify-002）。
+		// 它是自定义形态（state + typed questions → 结构化答案），过不了协议转换层，
+		// 因此单独一条路由：复用选路与日志，body 原样透传。
+		AddRoute(
+			router.NewRoute("/systemone", http.MethodPost).
+				Handle(relay.ForwardSystemOne()),
 		)
 }
