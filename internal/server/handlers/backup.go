@@ -133,6 +133,9 @@ func restoreWebDAVBackup(c *gin.Context) {
 }
 
 // writeSafetySnapshot 把当前数据导出一份到数据目录，返回落盘路径。
+//
+// 返回**绝对路径**：配置里的 database.path 可能是相对路径（如 data/data.db），
+// 直接拼出来的相对路径在响应里对用户没有意义 —— 他按那个路径找不到文件。
 func writeSafetySnapshot(ctx context.Context) (string, error) {
 	dump, err := op.DBExportAll(ctx)
 	if err != nil {
@@ -142,8 +145,11 @@ func writeSafetySnapshot(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(filepath.Dir(conf.AppConfig.Database.Path),
-		fmt.Sprintf("restore-safety-%s.json", time.Now().Format("20060102-150405")))
+	dir := filepath.Dir(conf.AppConfig.Database.Path)
+	if abs, absErr := filepath.Abs(dir); absErr == nil {
+		dir = abs
+	}
+	path := filepath.Join(dir, fmt.Sprintf("restore-safety-%s.json", time.Now().Format("20060102-150405")))
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		return "", err
 	}

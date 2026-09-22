@@ -306,6 +306,11 @@ func isOwnBackupName(name string) bool {
 //   - 备份里的渠道凭据若用本实例密钥解不开（跨实例恢复），会如实回报条数，
 //     否则表现为"恢复成功但渠道全报错"。
 //
+// **恢复后必须刷新缓存**：导入直接写库，而列表/详情类接口读的是内存缓存
+// （api_keys、channels、groups 等都走缓存）。不刷的话数据在库里但对面板不可见，
+// 用户看到"恢复成功但什么都没变"，会以为失败并反复重试 —— 实测踩到
+// （面板的导入路径有这一步，本函数最初漏了）。
+//
 // 调用方负责在调用前做一次本地导出兜底 —— 那是恢复路径唯一可靠的回退手段。
 func WebDAVRestore(ctx context.Context, cfg WebDAVConfig, name string) (*model.DBImportResult, error) {
 	raw, err := WebDAVDownload(ctx, cfg, name)
@@ -319,7 +324,15 @@ func WebDAVRestore(ctx context.Context, cfg WebDAVConfig, name string) (*model.D
 	if dump.Version == 0 {
 		return nil, fmt.Errorf("备份缺少版本号，无法确认格式")
 	}
-	return op.DBImportIncremental(ctx, &dump)
+	result, err := op.DBImportIncremental(ctx, &dump)
+	if err != nil {
+		return nil, err
+	}
+	if err := op.InitCache(); err != nil {
+		// 数据已经进库，只是缓存没刷新；如实回报而不是假装成功。
+		return result, fmt.Errorf("数据已导入，但刷新缓存失败（重启后可见）：%w", err)
+	}
+	return result, nil
 }
 
 // parseIntSetting 读一个整数字段，缺失或非法时返回错误（调用方决定回落值）。
