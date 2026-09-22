@@ -501,6 +501,55 @@ func ProxyNodeProbeAll(ctx context.Context) {
 	log.Infof("节点探活完成：共 %d 个", len(nodes))
 }
 
+// ProxyChannelBlocker 是一个「渠道被不通的出口节点挡住」的实例。
+type ProxyChannelBlocker struct {
+	ChannelID   int    `json:"channel_id"`
+	ChannelName string `json:"channel_name"`
+	NodeID      int    `json:"node_id"`
+	NodeName    string `json:"node_name"`
+	NodeError   string `json:"node_error"`
+}
+
+// ProxyNodeBlockedChannels 找出「启用中、绑定了出口节点、而该节点最近一次探活不通」的渠道。
+//
+// 为什么需要它：告警规则引擎的两个指标（错误率/延迟）都基于**已发生的转发流量**，
+// 而"出口节点坏了"是流量还没发生的状态 —— 渠道被坏节点挡住之后根本没有请求进来，
+// 于是错误率为零、永远不触发告警。实测这台机器上 115 个节点里 99 个不通、
+// 15 个渠道里 10 个绑着坏节点，而面板与通知渠道全程静默，
+// 只有主动去查库才发现（本会话就是这样发现的）。
+//
+// 只报「绑定关系 + 节点探活结论」，不替用户改绑定：换哪个节点是人的决定。
+func ProxyNodeBlockedChannels() ([]ProxyChannelBlocker, error) {
+	conn := proxyNodeDB(nil)
+	var rows []struct {
+		ChannelID   int
+		ChannelName string
+		NodeID      int
+		NodeName    string
+		NodeError   string
+	}
+	if err := conn.Table("channels AS c").
+		Select("c.id AS channel_id, c.name AS channel_name, p.id AS node_id, p.name AS node_name, p.last_error AS node_error").
+		Joins("JOIN proxy_nodes AS p ON p.id = c.proxy_node_id").
+		Where("c.enabled = ? AND c.proxy_node_id <> 0 AND p.enabled = ? AND p.last_probe_ok = ?", true, true, false).
+		Order("c.id asc").
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("查询被节点挡住的渠道: %w", err)
+	}
+
+	out := make([]ProxyChannelBlocker, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ProxyChannelBlocker{
+			ChannelID:   r.ChannelID,
+			ChannelName: r.ChannelName,
+			NodeID:      r.NodeID,
+			NodeName:    r.NodeName,
+			NodeError:   r.NodeError,
+		})
+	}
+	return out, nil
+}
+
 // probeOneNode 用某节点的本地出口探一个稳定目标，返回是否可达、出口 IP 与失败原因。
 func probeOneNode(localPort int) (bool, string, string) {
 	if localPort <= 0 {

@@ -60,8 +60,12 @@ func Init() {
 
 	// 注册出口节点定时探活：把不通的节点标记出来（选路与备用出口据此跳过），
 	// 恢复后再自动可用。默认 5 分钟一轮。
+	//
+	// 探活之后紧接着检查"有没有渠道被坏节点挡住"（T-proxy-002）：这一步必须放在探活**之后**，
+	// 否则拿到的是上一轮的结论，会在节点刚恢复时仍然报坏、刚坏时报好。
 	Register(TaskNodeProbe, 5*time.Minute, false, func() {
 		op.ProxyNodeProbeAll(context.Background())
+		proxyBlockedChannelNotify()
 	})
 
 	// 注册用量报告任务：按小时轮询，只有"当前整点 == 配置时刻 且 本周期没发过"才真的发。
@@ -82,5 +86,8 @@ func Init() {
 	go func() {
 		time.Sleep(90 * time.Second)
 		op.ProxyNodeProbeAll(context.Background())
+		// 与定时路径保持一致：首跑也要检查一次，否则"刚启动就有渠道被坏节点挡住"
+		// 这件事要等到下一个 5 分钟周期才被告知。
+		proxyBlockedChannelNotify()
 	}()
 }
