@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -153,16 +154,7 @@ func (req *AlertRuleCreateRequest) Validate() error {
 	return nil
 }
 
-func trimSpace(value string) string {
-	start, end := 0, len(value)
-	for start < end && (value[start] == ' ' || value[start] == '\t' || value[start] == '\n' || value[start] == '\r') {
-		start++
-	}
-	for end > start && (value[end-1] == ' ' || value[end-1] == '\t' || value[end-1] == '\n' || value[end-1] == '\r') {
-		end--
-	}
-	return value[start:end]
-}
+func trimSpace(value string) string { return strings.TrimSpace(value) }
 
 // clampInt 把值夹回 [min, max]；value<=0 时取 fallback（"没填"的语义）。
 func clampInt(value, min, max, fallback int) int {
