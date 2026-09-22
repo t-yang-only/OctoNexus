@@ -725,7 +725,9 @@
                 "within_threshold": "未越閾值",
                 "insufficient_samples": "樣本不足，不判定",
                 "cooldown": "冷卻中，不重複報"
-            }
+            },
+            "preview": "預演",
+            "previewed": "會觸發"
         },
         "cliExport": {
             "title": "客戶端設定匯出",

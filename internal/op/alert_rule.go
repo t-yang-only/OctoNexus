@@ -323,6 +323,31 @@ func AlertRuleMarkFired(ctx context.Context, eval AlertEvaluation, now time.Time
 	return nil
 }
 
+// AlertRulePreviewAll 预演一轮全部启用规则的评估：算、但不发送、不记账。
+//
+// 为什么需要它：定时评估与「立即检查」都会**真的投递**。用户调阈值时最想知道的是
+// "按现在这套规则，此刻会报几条、报的是哪些渠道"——如果看这个答案的代价是先把手机刷一遍，
+// 那就没人敢调阈值了。预演与真发的判定口径完全一致（同样走 AlertRuleDue，含冷却），
+// 差别只在最后一步不投递。
+func AlertRulePreviewAll(ctx context.Context, now time.Time) []AlertEvaluation {
+	out := make([]AlertEvaluation, 0)
+	for _, rule := range AlertRuleList(ctx) {
+		if !rule.Enabled {
+			continue
+		}
+		evals, err := AlertRuleDue(ctx, rule, now)
+		if err != nil {
+			continue
+		}
+		for _, eval := range evals {
+			if eval.Fired {
+				out = append(out, eval)
+			}
+		}
+	}
+	return out
+}
+
 // AlertMessage 生成人类可读的告警正文。
 func AlertMessage(eval AlertEvaluation) string {
 	switch eval.Metric {

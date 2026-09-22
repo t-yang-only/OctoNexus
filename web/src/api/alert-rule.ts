@@ -123,6 +123,13 @@ export function useEvaluateAlertRule() {
     });
 }
 
+/** 预演一轮（算但不发）：回答"按现在这套规则会报几条"，调阈值时不必先把自己刷一遍。 */
+export function usePreviewAlertRules() {
+    return useMutation({
+        mutationFn: () => apiRequest<AlertEvaluation[]>('/api/v1/alert-rule/preview', { method: 'POST', body: {} }),
+    });
+}
+
 /** 立刻跑一轮评估（会真的发送告警）。 */
 export function useRunAlertRules() {
     return useMutation({

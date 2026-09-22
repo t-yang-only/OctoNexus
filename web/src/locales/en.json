@@ -725,7 +725,9 @@
                 "within_threshold": "within threshold",
                 "insufficient_samples": "insufficient samples, not evaluated",
                 "cooldown": "in cooldown, not repeated"
-            }
+            },
+            "preview": "Dry run",
+            "previewed": "Would fire"
         },
         "cliExport": {
             "title": "Client Config Export",

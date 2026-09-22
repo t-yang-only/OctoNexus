@@ -43,6 +43,10 @@ func init() {
 				Handle(evaluateAlertRule),
 		).
 		AddRoute(
+			router.NewRoute("/preview", http.MethodPost).
+				Handle(previewAlertRules),
+		).
+		AddRoute(
 			router.NewRoute("/run", http.MethodPost).
 				Handle(runAlertRules),
 		).
@@ -126,6 +130,12 @@ func evaluateAlertRule(c *gin.Context) {
 		return
 	}
 	resp.Success(c, evals)
+}
+
+// previewAlertRules 预演一轮（算但不发）：回答"按现在这套规则，此刻会报几条、报哪些渠道"，
+// 而不必先把手机刷一遍。判定口径与真发完全一致（同走 AlertRuleDue，含冷却）。
+func previewAlertRules(c *gin.Context) {
+	resp.Success(c, op.AlertRulePreviewAll(c.Request.Context(), timeNow()))
 }
 
 // runAlertRules 立刻跑一轮评估（面板上的"立即检查"），会真的发送。

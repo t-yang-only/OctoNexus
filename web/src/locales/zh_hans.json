@@ -725,7 +725,9 @@
                 "within_threshold": "未越阈值",
                 "insufficient_samples": "样本不足，不判定",
                 "cooldown": "冷却中，不重复报"
-            }
+            },
+            "preview": "预演",
+            "previewed": "会触发"
         },
         "cliExport": {
             "title": "客户端配置导出",

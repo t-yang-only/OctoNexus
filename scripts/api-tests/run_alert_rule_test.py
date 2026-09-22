@@ -277,6 +277,15 @@ def main():
             codes.append("%s=%s" % (label, code))
         record("A6 非法配置被拒", all("=400" in c for c in codes), ", ".join(codes))
 
+        # --- A6b 预演不投递 --------------------------------------------------
+        # 「立即检查」会真的发；预演必须只算不发，否则用户调阈值时点一下就被自己刷屏。
+        before = hook_count()
+        status, body = call("POST", "/api/v1/alert-rule/preview", {})
+        rows = (body or {}).get("data")
+        after = hook_count()
+        record("A6b 预演只算不发",
+               status == 200 and isinstance(rows, list) and after == before,
+               "preview=%s 会触发=%s webhook %d→%d" % (status, len(rows) if isinstance(rows, list) else "?", before, after))
         # --- A7 更新在最终形态上校验 -----------------------------------------
         status, allrule = create_rule("全渠道规则", 50, 5, scope="all", scope_value="")
         if status != 200:

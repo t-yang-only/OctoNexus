@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslations } from 'use-intl';
-import { Activity, Play, Plus, ShieldAlert, Trash2 } from 'lucide-react';
+import { Activity, Eye, Play, Plus, ShieldAlert, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -14,6 +14,7 @@ import {
     useDeleteAlertRule,
     useEvaluateAlertRule,
     useRunAlertRules,
+    usePreviewAlertRules,
     type AlertMetric,
     type AlertScope,
 } from '@/api/alert-rule';
@@ -51,6 +52,7 @@ export function SettingAlertRule() {
     const deleteRule = useDeleteAlertRule();
     const evaluate = useEvaluateAlertRule();
     const runAll = useRunAlertRules();
+    const previewAll = usePreviewAlertRules();
 
     const [draft, setDraft] = useState({ ...EMPTY });
     const [probe, setProbe] = useState<{ ruleId: number; rows: { channel: string; text: string }[] } | null>(null);
@@ -246,6 +248,20 @@ export function SettingAlertRule() {
 
             {/* 立即检查 + 触发历史 */}
             <div className="flex flex-wrap items-center gap-2">
+                <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() =>
+                        previewAll.mutate(undefined, {
+                            onSuccess: (rows) => toast.info(`${t('alertRule.previewed')}: ${rows.length}`),
+                            onError: (error) => toast.error(String(error)),
+                        })
+                    }
+                    disabled={previewAll.isPending}
+                >
+                    <Eye className="size-3.5" />
+                    {t('alertRule.preview')}
+                </Button>
                 <Button
                     type="button"
                     variant="secondary"
