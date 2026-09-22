@@ -726,6 +726,34 @@
                 "insufficient_samples": "樣本不足，不判定",
                 "cooldown": "冷卻中，不重複報"
             }
+        },
+        "cliExport": {
+            "title": "客戶端設定匯出",
+            "description": "把「轉發口位址 + 閘道 Key + 分組名」組裝成各客戶端能直接貼上的設定。閘道無法可靠推斷自己的公網位址（反向代理、埠映射都會改變它），所以位址請自己確認後再產生。",
+            "target": "客戶端",
+            "key": "閘道 Key",
+            "keyPlaceholder": "選擇一把 Key",
+            "baseUrl": "轉發口位址",
+            "model": "分組名（模型名）",
+            "modelPlaceholder": "客戶端請求時填的模型名，也就是閘道的分組名",
+            "knownGroups": "現有分組",
+            "hint": "匯出內容含 Key 明文（那正是它有用的原因），請勿貼到公開場合。",
+            "generate": "產生設定",
+            "copy": "複製",
+            "copied": "已複製",
+            "copyFailed": "複製失敗，請手動選取複製",
+            "baseUrlRequired": "轉發口位址不能為空",
+            "modelRequired": "分組名不能為空",
+            "keyRequired": "請選擇一把閘道 Key",
+            "steps": "落地步驟",
+            "notes": "口徑提醒",
+            "targets": {
+                "claude_code": "Claude Code",
+                "codex": "Codex CLI",
+                "gemini_cli": "Gemini CLI",
+                "cherry_studio": "Cherry Studio",
+                "openai_compatible": "OpenAI 相容客戶端"
+            }
         }
     },
     "group": {

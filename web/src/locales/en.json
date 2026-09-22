@@ -726,6 +726,34 @@
                 "insufficient_samples": "insufficient samples, not evaluated",
                 "cooldown": "in cooldown, not repeated"
             }
+        },
+        "cliExport": {
+            "title": "Client Config Export",
+            "description": "Compose the relay URL, gateway key and group name into a snippet each client can paste directly. The gateway cannot reliably infer its own public address (reverse proxies and port mappings change it), so confirm the URL yourself before generating.",
+            "target": "Client",
+            "key": "Gateway key",
+            "keyPlaceholder": "Pick a key",
+            "baseUrl": "Relay base URL",
+            "model": "Group name (model name)",
+            "modelPlaceholder": "The model name clients send — i.e. the gateway group name",
+            "knownGroups": "Existing groups",
+            "hint": "The output contains the key in plain text (that is what makes it useful) — do not paste it anywhere public.",
+            "generate": "Generate",
+            "copy": "Copy",
+            "copied": "Copied",
+            "copyFailed": "Copy failed — select and copy manually",
+            "baseUrlRequired": "Relay base URL is required",
+            "modelRequired": "Group name is required",
+            "keyRequired": "Pick a gateway key",
+            "steps": "Steps",
+            "notes": "Notes",
+            "targets": {
+                "claude_code": "Claude Code",
+                "codex": "Codex CLI",
+                "gemini_cli": "Gemini CLI",
+                "cherry_studio": "Cherry Studio",
+                "openai_compatible": "OpenAI-compatible client"
+            }
         }
     },
     "group": {

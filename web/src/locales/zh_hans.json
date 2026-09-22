@@ -726,6 +726,34 @@
                 "insufficient_samples": "样本不足，不判定",
                 "cooldown": "冷却中，不重复报"
             }
+        },
+        "cliExport": {
+            "title": "客户端配置导出",
+            "description": "把「转发口地址 + 网关 Key + 分组名」组装成各客户端能直接粘贴的配置。网关无法可靠推断自己的公网地址（反代、端口映射都会改变它），所以地址请自己确认后再生成。",
+            "target": "客户端",
+            "key": "网关 Key",
+            "keyPlaceholder": "选择一把 Key",
+            "baseUrl": "转发口地址",
+            "model": "分组名（模型名）",
+            "modelPlaceholder": "客户端请求时填的模型名，也就是网关的分组名",
+            "knownGroups": "现有分组",
+            "hint": "导出内容含 Key 明文（那正是它有用的原因），请勿贴到公开场合。",
+            "generate": "生成配置",
+            "copy": "复制",
+            "copied": "已复制",
+            "copyFailed": "复制失败，请手动选中复制",
+            "baseUrlRequired": "转发口地址不能为空",
+            "modelRequired": "分组名不能为空",
+            "keyRequired": "请选择一把网关 Key",
+            "steps": "落地步骤",
+            "notes": "口径提醒",
+            "targets": {
+                "claude_code": "Claude Code",
+                "codex": "Codex CLI",
+                "gemini_cli": "Gemini CLI",
+                "cherry_studio": "Cherry Studio",
+                "openai_compatible": "OpenAI 兼容客户端"
+            }
         }
     },
     "group": {

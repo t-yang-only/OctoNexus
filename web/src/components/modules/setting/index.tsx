@@ -10,6 +10,7 @@ import { SettingNotify } from './Notify';
 import { SettingUsageReport } from './UsageReport';
 import { SettingAlertRule } from './AlertRule';
 import { SettingAPIKey } from './APIKey';
+import { SettingCLIExport } from './CLIExport';
 import { SettingLLMPrice } from './LLMPrice';
 import { SettingAccount } from './Account';
 import { SettingInfo } from './Info';
@@ -50,6 +51,7 @@ export function Setting() {
                 </TabsContent>
                 <TabsContent value="api" className="px-4">
                     <SettingAPIKey />
+                    <SettingCLIExport />
                 </TabsContent>
                 <TabsContent value="routing" className="space-y-4 px-4">
                     <SettingModelMapping />

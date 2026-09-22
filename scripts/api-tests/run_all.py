@@ -66,6 +66,8 @@ SUITES = [
      "用量报告（窗口口径 / 周期键唯一 / 预览不投递 / 立即发送不占名额 / 正文自证）", "instance,db"),
     ("alertrule", "run_alert_rule_test.py",
      "告警规则（样本下限防噪音 / 真实触发 / 冷却按渠道独立 / 试算含冷却 / 最终形态校验）", "instance,mock,db"),
+    ("cliexport", "run_cli_export_test.py",
+     "CLI 配置导出（鉴权 / 五目标带模型名 / 按 id 取明文 / 校验可执行 / 形态正确）", "instance,db"),
     ("cipher", "run_credential_encryption_test.py",
      "渠道凭据静态加密（落库密文 / 端到端解密 / 判据自检 / 全库无明文）", "instance,db,mock"),
     ("bodylimit", "run_bodylimit_test.py",
