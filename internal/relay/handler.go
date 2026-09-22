@@ -47,6 +47,27 @@ func modelNotFoundError(requested string) error {
 		requested)
 }
 
+// memberUnavailableWaitCapSeconds 是「分组连续没有可用成员」的等待上限（秒）。
+//
+// 取值理由：既要覆盖真实的恢复窗口，又不能让人等太久。
+//
+//	· 太小（如 5 秒）→ 成员正在冷却时本可等到恢复，却被提前判死；
+//	· 太大（如 300 秒）→ 永久无成员的分组会让客户端挂五分钟，体感就是"卡死"。
+//
+// 60 秒是两者之间：默认冷却 600 秒的场景本就等不到，而凭据被改回、
+// 成员被重新启用这类"几秒到几十秒内恢复"的情况都能覆盖。
+// 用变量而非常量：单测需要把它压到 1 秒才能快速验证「超限就报错」这条判据，
+// 否则每个用例都要真等 60 秒。
+var memberUnavailableWaitCapSeconds = 60
+
+// memberUnavailableWaitedEnough 判断「连续无可用成员」是否已经等够了。
+//
+// 单独抽出来是为了让它可被直接断言：这段逻辑的失败模式（永远返回 false）
+// 在端到端测试里表现为「请求挂住」，很难定位，值得一条独立判据。
+func memberUnavailableWaitedEnough(since time.Time) bool {
+	return time.Since(since).Seconds() >= float64(memberUnavailableWaitCapSeconds)
+}
+
 // Forward 是转发口的入口，按客户端协议准备入站转换器与请求协议位。
 func Forward(format llm.APIFormat) gin.HandlerFunc {
 	// 客户端协议同时定出入站转换器和请求协议位: 后者随请求状态推给界面, 也是每轮选择上游协议的首选。
@@ -138,6 +159,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 		// 智能路由（GroupModeSmart）的请求特征：只看客户端原始正文，与目标协议无关，
 		// 因此整轮循环里算一次即可（同一份请求无论换到哪个成员，复杂度判定都不该变）。
 		smartFeatures := SmartScoreBody(raw.Body)
+		// unavailableWaitSince 记录"连续没有可用成员"这段等待是从什么时候开始的。
+		// 选出成员后重置：它证明这个分组是能用的，之后的等待应重新获得完整预算。
+		unavailableWaitSince := time.Now()
 
 		for {
 			if ctx.Err() != nil {
@@ -173,11 +197,33 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			}
 			item := pickGroupItemHotWithFeatures(group.WithItems(items), smart)
 			if item.ID == 0 {
+				// 没有可用成员时等待是合理的：成员可能正在冷却、凭据可能刚被改回，
+				// 隔一会儿重试往往就能成功（这正是下面 wait + continue 的设计意图）。
+				//
+				// 但**必须设上限**（T-usability-004）。没有上限时，一个永久没有成员的分组
+				// （成员被删、或渠道授权撤销后残留的自动分组）会让请求一直挂在这里，
+				// 直到客户端自己的超时 —— 用户看到的是"卡住不返回"，
+				// 既不知道是分组的问题，也不知道该去改什么。
+				//
+				// 实测踩到：撤销 senseaudio 的授权后留下 23 个成员数为 0 的分组，
+				// 调用它们全部挂到超时。上限取 60 秒：足够覆盖冷却/临时故障的重试窗口，
+				// 又不会让客户端等太久。
+				if memberUnavailableWaitedEnough(unavailableWaitSince) {
+					rejectRequest(c, inbound, fmt.Errorf(
+						"group %q has no available member after waiting %ds "+
+							"(members may be cooling, disabled, or their grants removed); "+
+							"check the group's members and the channel grants",
+						group.Name, memberUnavailableWaitCapSeconds))
+					return
+				}
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
 					return
 				}
 				continue
 			}
+			// 一旦选出成员就重置等待计时：这是"这个分组能用"的证据，
+			// 之后再遇到无成员（例如成员被冷却）应重新获得完整的等待预算。
+			unavailableWaitSince = time.Now()
 
 			// 成员指向的授权缺失、凭据被停用或已被删除时等待: 该成员可能很快被改回或恢复可用。
 			// 解析与出站准备统一走 prepareRoundTarget: 首字竞速要并发多路, 每路必须有独立的请求副本,
