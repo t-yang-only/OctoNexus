@@ -103,6 +103,15 @@ const (
 	// 才拦得住东西。只有网关确实挂在可信反代（如 Caddy/nginx）后面时，才把该反代的
 	// 地址填进来，此时转发头才会被采信。
 	SettingKeyTrustedProxies SettingKey = "trusted_proxies"
+	// WebDAV 云备份（T-backup-001）：把导出转储按周期推到远端，本机坏了还有一份。
+	//
+	// 口令**不进设置表**，只从环境变量 OCTOPUS_WEBDAV_PASSWORD 读——与 SMTP 密码同一纪律：
+	// 设置表会随导出转储与备份一起流转，把口令写进去等于把它复制到每一个备份里。
+	SettingKeyWebDAVURL      SettingKey = "webdav_url"            // 目录地址，如 https://dav.example.com/remote.php/dav/files/me/octopus
+	SettingKeyWebDAVUsername SettingKey = "webdav_username"       // 登录用户名
+	SettingKeyWebDAVEnabled  SettingKey = "webdav_enabled"        // 是否启用定时上传
+	SettingKeyWebDAVInterval SettingKey = "webdav_interval_hours" // 上传间隔（小时），默认 24
+	SettingKeyWebDAVKeep     SettingKey = "webdav_keep"           // 远端保留份数，0 = 不清理
 )
 
 type Setting struct {
@@ -154,6 +163,12 @@ func DefaultSettings() []Setting {
 		// 默认不信任任何反向代理：来源 IP 只认 TCP 对端。
 		// 这是安全默认值 —— 默认采信 X-Forwarded-For 会让任何客户端都能伪造来源 IP。
 		{Key: SettingKeyTrustedProxies, Value: ""},
+		// WebDAV 云备份：默认关闭。地址为空时即使 enabled=true 也不会跑（避免无意义的重试噪音）。
+		{Key: SettingKeyWebDAVURL, Value: ""},
+		{Key: SettingKeyWebDAVUsername, Value: ""},
+		{Key: SettingKeyWebDAVEnabled, Value: "false"},
+		{Key: SettingKeyWebDAVInterval, Value: "24"}, // 每天一份：备份是防"本机整个坏掉"，不需要更密
+		{Key: SettingKeyWebDAVKeep, Value: "7"},      // 默认留 7 份 ≈ 一周，够回溯又不会把远端塞满
 		// 加权综合选路（weighted 模式）的维度权重: 保守默认 —— 成本与质量最重, 延迟/在途次之, 近期消耗最轻。
 		// 这三行把「哪一维更重要」留给用户: 想要"贵但稳"就把质量调高, 想要"能用最便宜的"就把成本拉满。
 		{Key: SettingKeyRouteWeightCost, Value: "30"},
@@ -265,6 +280,42 @@ func (s *Setting) Validate() error {
 		// 而这条设置直接决定来源 IP 可不可信，留个坏值比拒绝保存危险得多。
 		if _, err := ParseCIDRList(splitNotifyChannels(s.Value)); err != nil {
 			return err
+		}
+		return nil
+	case SettingKeyWebDAVURL:
+		if s.Value == "" {
+			return nil // 允许为空 = 不启用云备份
+		}
+		// 必须 http(s)：WebDAV 走网络，写个裸域名会让上传在运行时才失败，
+		// 而定时任务失败只在日志里、面板上看不到，用户会以为备份一直在跑。
+		if !strings.HasPrefix(s.Value, "http://") && !strings.HasPrefix(s.Value, "https://") {
+			return fmt.Errorf("webdav url must start with http:// or https://")
+		}
+		return nil
+	case SettingKeyWebDAVUsername:
+		return nil // 允许为空：部分 WebDAV 服务用匿名或令牌写在 URL 里
+	case SettingKeyWebDAVEnabled:
+		if _, err := strconv.ParseBool(s.Value); err != nil {
+			return fmt.Errorf("webdav enabled must be a boolean")
+		}
+		return nil
+	case SettingKeyWebDAVInterval:
+		hours, err := strconv.Atoi(s.Value)
+		if err != nil {
+			return fmt.Errorf("webdav interval must be an integer")
+		}
+		// 越界直接拒绝而不是夹回：写 0 的人多半想表达"关闭"，静默改成 1 会变成每小时传一次。
+		if hours < 1 || hours > 720 {
+			return fmt.Errorf("webdav interval must be between 1 and 720 hours")
+		}
+		return nil
+	case SettingKeyWebDAVKeep:
+		keep, err := strconv.Atoi(s.Value)
+		if err != nil {
+			return fmt.Errorf("webdav keep must be an integer")
+		}
+		if keep < 0 || keep > 365 {
+			return fmt.Errorf("webdav keep must be between 0 and 365")
 		}
 		return nil
 	case SettingKeyPluginPortStart, SettingKeyPluginPortEnd:

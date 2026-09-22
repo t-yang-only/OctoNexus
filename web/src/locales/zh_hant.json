@@ -764,6 +764,22 @@
             "label": "受信任反向代理",
             "placeholder": "留空表示不信任任何代理",
             "hint": "填你的反向代理位址（如 127.0.0.1 或 172.16.0.0/12），逗號分隔。留空時閘道只按 TCP 對端判定來源 IP，X-Forwarded-For 一律忽略 —— 這是安全預設值，因為採信轉送標頭會讓任何用戶端都能偽造來源，API Key 的 IP 白名單隨之失效。只有閘道確實掛在可信反向代理後面時才填。"
+        },
+        "webdavBackup": {
+            "title": "WebDAV 雲端備份",
+            "subtitle": "定時把整庫傾印傳到你的網盤；本機壞了還有一份",
+            "url": "WebDAV 目錄位址",
+            "username": "使用者名稱",
+            "interval": "上傳間隔（小時）",
+            "keep": "遠端保留份數（0 = 不清理）",
+            "passwordHint": "密碼只從伺服器環境變數 OCTOPUS_WEBDAV_PASSWORD 讀取，不寫進設定表 —— 設定表會隨匯出傾印與備份一起流轉，把密碼寫進去等於把它複製到每一份備份裡。",
+            "runNow": "立即備份",
+            "refresh": "重新整理清單",
+            "count": "遠端共 {count} 份備份",
+            "runSuccess": "已上傳 {file}",
+            "runFailed": "備份失敗",
+            "pruneWarning": "備份已成功，但清理舊檔案失敗：{reason}",
+            "listFailed": "讀取遠端清單失敗"
         }
     },
     "group": {

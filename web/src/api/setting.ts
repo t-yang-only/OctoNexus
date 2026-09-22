@@ -46,6 +46,11 @@ export const SettingKey = {
     RouteMonthlyAction: 'route_monthly_exhausted_action',
     RequestFaultAction: 'relay_request_fault_action',
     TrustedProxies: 'trusted_proxies',
+    WebDAVURL: 'webdav_url',
+    WebDAVUsername: 'webdav_username',
+    WebDAVEnabled: 'webdav_enabled',
+    WebDAVInterval: 'webdav_interval_hours',
+    WebDAVKeep: 'webdav_keep',
 } as const;
 
 /**

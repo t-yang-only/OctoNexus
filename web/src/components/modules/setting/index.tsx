@@ -16,6 +16,7 @@ import { SettingAccount } from './Account';
 import { SettingInfo } from './Info';
 import { SettingLog } from './Log';
 import { SettingBackup } from './Backup';
+import { SettingWebDAVBackup } from './WebDAVBackup';
 
 // 设置页的功能分区：图标 + i18n 键。分区顺序按「日常改动频率」排，越靠前越常改。
 const TABS = [
@@ -67,6 +68,7 @@ export function Setting() {
                     <SettingLog />
                     <SettingLLMPrice />
                     <SettingBackup />
+                    <SettingWebDAVBackup />
                 </TabsContent>
             </Tabs>
         </div>

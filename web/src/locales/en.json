@@ -764,6 +764,22 @@
             "label": "Trusted reverse proxies",
             "placeholder": "Empty means trust no proxy",
             "hint": "Your reverse proxy addresses (e.g. 127.0.0.1 or 172.16.0.0/12), comma separated. When empty the gateway derives the source IP from the TCP peer only and ignores X-Forwarded-For entirely - that is the safe default, because honouring forwarded headers lets any client forge its source and silently defeats an API key's IP allowlist. Set this only when the gateway really sits behind a trusted proxy."
+        },
+        "webdavBackup": {
+            "title": "WebDAV cloud backup",
+            "subtitle": "Periodically push a full dump to your own cloud drive; a local failure no longer means losing everything",
+            "url": "WebDAV directory URL",
+            "username": "Username",
+            "interval": "Upload interval (hours)",
+            "keep": "Remote copies to keep (0 = never prune)",
+            "passwordHint": "The password is read only from the server environment variable OCTOPUS_WEBDAV_PASSWORD and is never stored in settings - settings travel inside every export and backup, so putting the password there would copy it into each one of them.",
+            "runNow": "Back up now",
+            "refresh": "Refresh list",
+            "count": "{count} backup(s) on the remote",
+            "runSuccess": "Uploaded {file}",
+            "runFailed": "Backup failed",
+            "pruneWarning": "Backup succeeded, but pruning old files failed: {reason}",
+            "listFailed": "Failed to read the remote list"
         }
     },
     "group": {

@@ -20,6 +20,7 @@ const (
 	TaskNodeProbe     = "node_probe"
 	TaskUsageReport   = "usage_report"
 	TaskAlertRule     = "alert_rule"
+	TaskWebDAVBackup  = "webdav_backup"
 )
 
 func Init() {
@@ -71,6 +72,11 @@ func Init() {
 	// 评估太稀会让"渠道已经坏了十分钟"这种事实迟迟报不出来。
 	// 任务恒注册，规则是否启用每轮现读。
 	Register(TaskAlertRule, time.Minute, false, alertRuleOnce)
+
+	// 注册 WebDAV 云备份（T-backup-001）：轮询间隔取设置里的最小粒度（1 小时），
+	// 真正的"到点没到点"由 webDAVBackupDue 按 webdav_interval_hours 判断。
+	// 任务恒注册，开关与地址每轮现读，用户改配置无需重启。
+	Register(TaskWebDAVBackup, time.Hour, false, webDAVBackupOnce)
 	// 首跑必须延迟：服务刚起来时出口内核还没把节点端口准备好，立刻探活会把**整池**判成不通
 	// （实测 115 个节点全红），反而让健康筛选变成摆设。给内核 90 秒再探第一轮。
 	go func() {

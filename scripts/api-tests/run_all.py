@@ -72,6 +72,8 @@ SUITES = [
      "渠道凭据静态加密（落库密文 / 端到端解密 / 判据自检 / 全库无明文）", "instance,db,mock"),
     ("cidr", "run_apikey_cidr_test.py",
      "Key 来源 IP 白名单（空白名单放行 / 拦与放 / 裸 IP 语义 / 伪造 XFF 无效 / 受信代理生效 / 非法网段被拒）", "instance,db,mock"),
+    ("webdav", "run_webdav_backup_test.py",
+     "WebDAV 云备份（非法 URL 被拒 / 上传为合法转储 / 保留份数清理 / 不误删他人文件 / 列表接口）", "instance,db"),
     ("bodylimit", "run_bodylimit_test.py",
      "入站请求体上限（64MiB 旧上限被抬高 / 65MiB 端到端转发 / 可调与 0=不限制 / 超限 413 点名设置项）", "instance,mock,db"),
     ("speed", "run_speed_test.py",

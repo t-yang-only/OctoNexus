@@ -764,6 +764,22 @@
             "label": "受信反向代理",
             "placeholder": "留空表示不信任任何代理",
             "hint": "填你的反向代理地址（如 127.0.0.1 或 172.16.0.0/12），逗号分隔。留空时网关只按 TCP 对端判定来源 IP，X-Forwarded-For 一律忽略 —— 这是安全默认值，因为采信转发头会让任何客户端都能伪造来源，API Key 的 IP 白名单随之失效。只有网关确实挂在可信反代后面时才填。"
+        },
+        "webdavBackup": {
+            "title": "WebDAV 云备份",
+            "subtitle": "定时把整库转储传到你的网盘；本机坏了还有一份",
+            "url": "WebDAV 目录地址",
+            "username": "用户名",
+            "interval": "上传间隔（小时）",
+            "keep": "远端保留份数（0 = 不清理）",
+            "passwordHint": "口令只从服务端环境变量 OCTOPUS_WEBDAV_PASSWORD 读取，不写进设置表 —— 设置表会随导出转储与备份一起流转，把口令写进去等于把它复制到每一份备份里。",
+            "runNow": "立即备份",
+            "refresh": "刷新列表",
+            "count": "远端共 {count} 份备份",
+            "runSuccess": "已上传 {file}",
+            "runFailed": "备份失败",
+            "pruneWarning": "备份已成功，但清理旧文件失败：{reason}",
+            "listFailed": "读取远端列表失败"
         }
     },
     "group": {
