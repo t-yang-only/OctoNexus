@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -29,6 +30,24 @@ import (
 var errStreamIdleTimeout = errors.New("upstream stream idle timeout")
 
 // Forward 按客户端协议承载一个请求的完整转发过程: 解析请求, 定位分组, 循环选目标请求上游, 直至提交响应或请求结束。
+// modelNotFoundError 构造「分组不存在」的错误，并把最像的候选名一并给出来（T-usability-002）。
+//
+// 裸的 "model not found" 对用户没有任何帮助：分组名是手输的虚拟模型名，
+// 拼错一个字符（少个横杠、大小写错）的代价是整条请求失败且原因不明，
+// 用户只能自己翻面板逐个比对。把候选给出来，他一眼就知道该改成什么。
+//
+// 候选只是锦上添花：查不到候选时仍然给出**可执行**的指引（去哪核对），
+// 而不是退回一句没有信息量的话。
+func modelNotFoundError(requested string) error {
+	if candidates := op.GroupSuggestSimilar(requested, 3); len(candidates) > 0 {
+		return fmt.Errorf("model not found: %q；相近的分组名：%s（分组名即客户端请求的模型名）",
+			requested, strings.Join(candidates, ", "))
+	}
+	return fmt.Errorf("model not found: %q；本实例没有这个分组，请在面板的分组页核对名称（分组名即客户端请求的模型名）",
+		requested)
+}
+
+// Forward 是转发口的入口，按客户端协议准备入站转换器与请求协议位。
 func Forward(format llm.APIFormat) gin.HandlerFunc {
 	// 客户端协议同时定出入站转换器和请求协议位: 后者随请求状态推给界面, 也是每轮选择上游协议的首选。
 	var inbound transformer.Inbound
@@ -95,7 +114,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			}
 		}
 		if err != nil {
-			rejectRequest(c, inbound, errors.New("model not found"))
+			rejectRequest(c, inbound, modelNotFoundError(metadata.Model))
 			return
 		}
 

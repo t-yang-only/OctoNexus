@@ -63,12 +63,12 @@ func ForwardSystemOne() gin.HandlerFunc {
 			// 与其它协议同款：先按原名找，找不到再过一层重写规则。
 			rewritten, matched := op.ModelMappingResolveByName(requested)
 			if !matched {
-				rejectJSON(c, http.StatusBadRequest, "model not found")
+				rejectJSON(c, http.StatusBadRequest, modelNotFoundError(requested).Error())
 				return
 			}
 			group, err = op.GroupGetByName(rewritten)
 			if err != nil {
-				rejectJSON(c, http.StatusBadRequest, "model not found")
+				rejectJSON(c, http.StatusBadRequest, modelNotFoundError(requested).Error())
 				return
 			}
 		}
