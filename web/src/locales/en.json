@@ -1080,6 +1080,16 @@
             "collapse": "Hide",
             "channelGap": "{usable}/{total} usable",
             "more": "{count} more…"
+        },
+        "upstream": {
+            "run": "Check upstream",
+            "running": "Checking {done}/{total}",
+            "finished": "Checked {total} channels, {problem} need attention",
+            "probeFailed": "Probe failed: {reason}",
+            "diff": "Upstream lists {upstream}, configured {configured}, {listed} of them are listed",
+            "notListed": "not listed upstream",
+            "more": "{count} more…",
+            "allConsistent": "Config matches upstream list"
         }
     },
     "unifiedPool": {

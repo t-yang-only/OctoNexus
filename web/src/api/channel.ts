@@ -376,3 +376,45 @@ export function useChannelDiagnose(enabled = true) {
         enabled,
     });
 }
+// T-usability-006 渠道「配置 vs 上游」对比。
+//
+// 回答的是「客户端列表里那些模型，上游到底有没有」——
+// 渠道诊断（看配置层）答不了这个：配置齐全不代表上游提供。
+export interface UpstreamCheckResult {
+    channel_id: number;
+    channel_name: string;
+    probe_ok: boolean;
+    /** 探测失败的原因（凭据/网络问题）。此时下面的差异字段无意义。 */
+    probe_error?: string;
+    configured_count: number;
+    upstream_count: number;
+    /**
+     * 配置里**同时出现在上游清单中**的数量。
+     *
+     * 刻意不叫 effective_count（有效数）：上游 /v1/models 并不完整，
+     * 未列出的模型仍可能正常响应，所以这个数只能读作「上游主动声明的下界」。
+     */
+    listed_count?: number;
+    upstream_models?: string[];
+    /** 配置里写了、但上游清单里没列出的模型。**不等于调不通**，见 warning。 */
+    missing_upstream?: string[];
+    /** 上游有、配置里没写的模型。 */
+    not_configured?: string[];
+    /** 语义警告：提醒「清单未列出」不等于「调不通」。 */
+    warning?: string;
+    /** 无需对比时的说明（如渠道没有启用的凭据）。 */
+    note?: string;
+}
+
+// useUpstreamCheck 对单个渠道做上游对比。
+// 按渠道 id 缓存并手动触发：它会真的打向上游，不该在列表渲染时逐个发请求。
+export function useUpstreamCheck(channelId?: number, enabled = false) {
+    return useQuery({
+        queryKey: ['channels', 'upstream-check', channelId],
+        queryFn: () => apiRequest<UpstreamCheckResult>(`/api/v1/channel/${channelId}/upstream-check`),
+        enabled: enabled && channelId !== undefined,
+        // 探测结果有时效性（上游随时可能变），但不该在窗口聚焦时重炸一遍上游。
+        refetchOnWindowFocus: false,
+        staleTime: 5 * 60 * 1000,
+    });
+}

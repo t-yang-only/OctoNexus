@@ -1080,6 +1080,16 @@
             "collapse": "收起",
             "channelGap": "可用 {usable}/{total}",
             "more": "还有 {count} 个…"
+        },
+        "upstream": {
+            "run": "核查上游",
+            "running": "核查中 {done}/{total}",
+            "finished": "已核查 {total} 个渠道，其中 {problem} 个需留意",
+            "probeFailed": "探测失败：{reason}",
+            "diff": "上游列出 {upstream} 个，配置 {configured} 个，其中 {listed} 个在清单内",
+            "notListed": "清单未列出",
+            "more": "还有 {count} 个…",
+            "allConsistent": "配置与上游清单一致"
         }
     },
     "unifiedPool": {
