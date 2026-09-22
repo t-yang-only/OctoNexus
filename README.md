@@ -31,6 +31,10 @@
 - 🎨 **Elegant UI** - Clean and beautiful web management panel
 - 📦 **Lightweight Single-Binary Deployment** - Run as a single binary with no external runtime dependencies
 - 🗄️ **Multi-Database Support** - Support for SQLite, MySQL, PostgreSQL
+- 🔁 **Model Mapping** - Rewrite client model names to local group names (exact / wildcard / regex, priority ordered)
+- 📅 **Usage Reports** - Scheduled daily / weekly / monthly usage and cost summaries delivered through your notification channels
+- 🚨 **Alert Rules** - Metric-based alerts (error rate / latency) per channel, with a minimum-sample guard and per-channel cooldown to keep them quiet
+- 📤 **Client Config Export** - Generate ready-to-paste config for Claude Code, Codex CLI, Gemini CLI, Cherry Studio, and any OpenAI-compatible client
 
 
 ## 🚀 Quick Start
