@@ -38,13 +38,31 @@ type RelayLog struct {
 	// 回答"为什么走了这个成员"——模式、命中的档位、决定这次选择的机制（亲和保持/冷却恢复探测/
 	// 成员顺序/综合排序/人工指定）、成员在分组里的顶层序号与轮次。不含渠道名与凭据。
 	// 未发起上游请求就结束的请求为空串。
-	Decision       string    `json:"decision"`
-	PromptTokens   int64     `json:"prompt_tokens"`
-	CachedTokens   int64     `json:"cached_tokens"`
-	CompletionToks int64     `json:"completion_tokens"`
-	Cost           float64   `json:"cost"`
-	Error          string    `json:"error"`
-	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime;index"`
+	Decision       string  `json:"decision"`
+	PromptTokens   int64   `json:"prompt_tokens"`
+	CachedTokens   int64   `json:"cached_tokens"`
+	CompletionToks int64   `json:"completion_tokens"`
+	Cost           float64 `json:"cost"`
+	Error          string  `json:"error"`
+	// FaultKind 是这次失败的**归因分类**（T-usability-007），空串表示非失败或未分类。
+	//
+	// 取值与 relay 的失败处置口径一一对应（internal/relay/retry.go 的 classifyUpstreamFailure）：
+	//   "request"   —— 请求本身非法（400/405/406/413/414/415/422/501）。
+	//                  任何成员都会同样拒绝，**不该算进渠道的通过率** ——
+	//                  它不是渠道故障，是请求或配置的问题。
+	//   "member"    —— 成员自身问题（401/402/403/404/407）：凭据无效、无权限、模型不存在。
+	//                  算渠道故障，换一个成员可能就好了。
+	//   "transient" —— 可恢复（408/409/429/5xx/网络/超时）：算渠道故障。
+	//
+	// 为什么必须落库而不是查询时从 Error 文本反推：Error 存的是**上游原文**，
+	// 措辞千变万化（同一个 400 在不同站点长得完全不同），从文本反推必然误判。
+	// 分类只在产生错误的那一刻能准确拿到（那里有状态码），所以在那时记下来。
+	//
+	// 实测动机：senseaudio 的通过率一度显示 31.6%，看起来像渠道坏了，
+	// 实际上那 25 次失败全是「用 chat 接口调 TTS/图像等专用模型」造成的请求非法 ——
+	// 把它算进渠道通过率，会让用户去修一个根本没坏的东西。
+	FaultKind string    `json:"fault_kind" gorm:"index"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime;index"`
 }
 
 // RelayLogFilter 是历史查询的筛选条件, 空值表示不过滤。

@@ -53,6 +53,10 @@ type RequestState struct {
 	TargetItemID  int    `json:"-"`                  // 最新一轮选中的成员行 ID（GroupItem.ID）; 仅供 least_busy 统计在途, 不进状态流与日志对外结构。
 	Decision      string `json:"decision,omitempty"` // 本轮选路判定（T-decision-001）: "mode=smart;tier=decision;reason=affinity;slot=1;attempt=2", 每轮刷新。
 	Error         string `json:"error,omitempty"`    // 最新一轮的失败原因, 请求结束后即为最终错误。
+	// FaultKind 是这次失败的归因分类（T-usability-007），只在失败终态时有值。
+	// 取值见 model.RelayLog.FaultKind 的注释；分类必须在**产生错误的那一刻**做，
+	// 因为那时才有状态码可用（落库时只剩错误文本，从文本反推会误判）。
+	FaultKind string `json:"fault_kind,omitempty"`
 
 	body          string                                     // 客户端原始请求体, 体积大故不进状态流, 由独立接口按需拉取。
 	responseBody  string                                     // 聚合后的完整最终响应体, 同样按需拉取。
@@ -286,10 +290,35 @@ func (r *RequestState) markFailed(err error, responseBody string, usage *llm.Usa
 
 	r.Status = StatusFailed
 	r.Error = err.Error()
+	// 归因分类只在这里做：markFailed 拿得到 error 对象，也就拿得到上游状态码；
+	// 等到落库时只剩这段文本，再想分类就只能靠猜（上游措辞千变万化）。
+	r.FaultKind = faultKindOf(err)
 	if responseBody != "" {
 		r.responseBody = responseBody
 	}
 	r.finishLocked(usage)
+}
+
+// faultKindOf 把一次上游失败归到三类之一，供通过率统计排除「不是渠道的锅」的那种。
+//
+// 三类的语义见 model.RelayLog.FaultKind：
+//
+//	request   请求本身非法 —— 任何成员都会同样拒绝，不该算进渠道通过率
+//	member    成员自身问题 —— 算渠道故障
+//	transient 可恢复       —— 算渠道故障
+//
+// 取不到状态码（超时/网络/取消）按 transient 处理，与既有的失败处置口径一致
+// （retry.go 的 classifyUpstreamFailure 也是这么判的）——**复用同一套判断**，
+// 不另写一份：两处口径一旦分叉，统计与重试行为就会互相矛盾。
+func faultKindOf(err error) string {
+	switch classifyUpstreamFailure(err) {
+	case dispositionRequestFault:
+		return "request"
+	case dispositionMemberFault:
+		return "member"
+	default:
+		return "transient"
+	}
 }
 
 // markCanceled 以取消终态定稿请求, 用于客户端提前断开或主动取消。
@@ -367,6 +396,7 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 		CompletionToks: r.Usage.CompletionTokens,
 		Cost:           r.Cost,
 		Error:          r.Error,
+		FaultKind:      r.FaultKind,
 	})
 	publishRequestLocked(r)
 
