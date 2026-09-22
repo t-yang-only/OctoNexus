@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -35,6 +36,10 @@ type upstreamResponse struct {
 	first  *httpclient.StreamEvent                 // 已预读并验证的首个事件。
 	last   bool                                    // 首个事件已经终止整个响应流。
 	usage  *llm.Usage                              // 上游本次可确认的用量。
+	// reportedModel 是上游响应里回报的模型名（T-verify-001）。
+	// 用于校验"上游实际用的模型"是否等于"我们请求的模型"——这是发现上游偷换模型的唯一途径。
+	// 空串表示上游没回报（属常见现象，此时不做判定）。
+	reportedModel string
 	// closeIdle 非 nil 时为渠道专用代理独占客户端的空闲连接归还入口, 消费方读完事件流后必须调用。
 	// 仅流式响应会带上它: 非流式响应返回时连接已经用完, 由发起方就地归还。
 	closeIdle func()
@@ -129,7 +134,12 @@ func sendPassthrough(ctx context.Context, format llm.APIFormat, raw *httpclient.
 	if err := validateResponse(format, parsed); err != nil {
 		return nil, fmt.Errorf("%w: %s", err, response.Body)
 	}
-	return &upstreamResponse{body: slices.Clone(response.Body), header: response.Headers.Clone(), usage: parsed.Usage}, nil
+	return &upstreamResponse{
+		body:          slices.Clone(response.Body),
+		header:        response.Headers.Clone(),
+		usage:         parsed.Usage,
+		reportedModel: strings.TrimSpace(parsed.Model),
+	}, nil
 }
 
 // sendPassthroughStream 发起同协议流式请求并预读首个有效事件, 首个事件通过验证才算本轮取得可提交响应。
@@ -172,7 +182,13 @@ func sendPassthroughStream(ctx context.Context, format llm.APIFormat, request *h
 			events.Close()
 			return nil, fmt.Errorf("%w: %s", err, event.Data)
 		}
-		return &upstreamResponse{header: response.Header.Clone(), events: events, first: event, last: last}, nil
+		return &upstreamResponse{
+			header:        response.Header.Clone(),
+			events:        events,
+			first:         event,
+			last:          last,
+			reportedModel: reportedModelFromSSE(event.Data),
+		}, nil
 	}
 
 	err = events.Err()
@@ -191,6 +207,7 @@ type conversionMiddleware struct {
 	clientBody               []byte        // 客户端原始请求正文, 用于补回转成 Responses 时被丢掉的采样参数。
 	rawBody                  []byte        // 上游非流式响应或错误的原始正文。
 	usage                    *llm.Usage    // 非流式统一响应中确认的用量。
+	reportedModel            string        // 上游响应里回报的模型名（T-verify-001）。
 }
 
 // OnOutboundRawRequest 在转换后的上游请求上应用渠道参数和自定义 Header。
@@ -325,7 +342,43 @@ func (m *conversionMiddleware) OnOutboundLlmResponse(_ context.Context, response
 		return nil, err
 	}
 	m.usage = response.Usage
+	// 记下上游回报的模型名（T-verify-001）。这里是唯一能拿到上游"自称用了什么模型"的位置：
+	// 它必须在校验通过之后、响应回转客户端之前取得，早于转换层把 model 字段改写成客户端请求的名字。
+	m.reportedModel = strings.TrimSpace(response.Model)
 	return response, nil
+}
+
+// reportedModelFromSSE 从流式事件正文里取出上游回报的模型名（T-verify-001）。
+//
+// 取首个事件即可：同一条流的每个 chunk 都带同一个 model，而首事件是**已经预读并校验过**
+// 的那一个（调用点就在校验之后），不必额外等待后续事件。
+//
+// **两种形态都要取**：OpenAI 的 chunk 把 model 放在顶层；Anthropic 的 message_start
+// 事件放在 message.model（嵌套一层）。只读顶层会让 Anthropic 流式请求永远拿不到模型名，
+// 等于这条协议下完全没有校验能力 —— 实测踩到（单测抓到）。
+//
+// 解析失败或没有该字段时返回空串 —— 空串在判定处表示"上游没回报"，不参与比对。
+func reportedModelFromSSE(data []byte) string {
+	if model := strings.TrimSpace(gjson.GetBytes(data, "model").String()); model != "" {
+		return model
+	}
+	return strings.TrimSpace(gjson.GetBytes(data, "message.model").String())
+}
+
+// modelMismatch 判断上游回报的模型与请求的模型是否不一致（T-verify-001）。
+//
+// 只在双方都有值时判定。上游不回报模型名是普遍现象（部分站点省略该字段），
+// 把"没回报"当成"不匹配"会让绝大多数正常请求被误标，这个标记就没人看了。
+//
+// 比较是**大小写不敏感**的：同一个模型名在不同站点的大小写写法不同（gpt-4o / GPT-4O），
+// 把它当不一致会产生大量噪音。
+func modelMismatch(requested, reported string) bool {
+	requested = strings.TrimSpace(requested)
+	reported = strings.TrimSpace(reported)
+	if requested == "" || reported == "" {
+		return false
+	}
+	return !strings.EqualFold(requested, reported)
 }
 
 // sendConverted 经 axonhub pipeline 把客户端请求转换成渠道协议后请求上游, 响应再转换回客户端协议。
@@ -367,7 +420,11 @@ func sendConverted(ctx context.Context, format llm.APIFormat, raw *httpclient.Re
 		return nil, err
 	}
 	if !streaming {
-		return &upstreamResponse{body: slices.Clone(result.Response.Body), usage: middleware.usage}, nil
+		return &upstreamResponse{
+			body:          slices.Clone(result.Response.Body),
+			usage:         middleware.usage,
+			reportedModel: middleware.reportedModel,
+		}, nil
 	}
 
 	events := result.EventStream
@@ -382,7 +439,13 @@ func sendConverted(ctx context.Context, format llm.APIFormat, raw *httpclient.Re
 			return nil, fmt.Errorf("%w: %s", err, event.Data)
 		}
 		committed = true
-		return &upstreamResponse{events: events, first: event, last: last, closeIdle: closeIdle}, nil
+		return &upstreamResponse{
+			events:        events,
+			first:         event,
+			last:          last,
+			closeIdle:     closeIdle,
+			reportedModel: reportedModelFromSSE(event.Data),
+		}, nil
 	}
 
 	err = events.Err()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -28,7 +29,7 @@ const RelayLogExportMaxRows = 200000
 // 第一列给**日志行主键**而不是请求 ID: 一个客户端请求可能留多行(重试/多轮各一行), 请求 ID 会重复,
 // 只有行主键能唯一定位一行, 下游做去重/回查时不必再猜。
 var relayLogExportHeader = []string{
-	"日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "目标渠道", "上游协议", "首字节(ms)", "耗时(ms)", "上游轮次", "判定理由",
+	"日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "上游自称模型", "模型一致", "目标渠道", "上游协议", "首字节(ms)", "耗时(ms)", "上游轮次", "判定理由",
 	"输入tokens", "缓存命中tokens", "输出tokens", "费用", "API Key", "错误",
 }
 
@@ -97,6 +98,8 @@ func relayLogExportRow(entry model.RelayLog) []string {
 		entry.Status,
 		entry.Model,
 		entry.TargetModel,
+		entry.ReportedModel,
+		modelMatchLabel(entry.ReportedModel, entry.ModelMismatch),
 		entry.TargetChannel,
 		protocolLabel(entry.TargetProtocol),
 		firstByte,
@@ -125,4 +128,24 @@ func protocolLabel(protocol int) string {
 		return ""
 	}
 	return strconv.Itoa(protocol)
+}
+
+// modelMatchLabel 把模型一致性判定铺成导出的可读文本（T-verify-001）。
+//
+// 三种取值各有含义，不能用同一个字表示：
+//
+//	"一致"   双方都有值且相同
+//	"不一致" 双方都有值但不同 —— 这才是"上游可能偷换模型"的证据
+//	"未回报" 上游没给模型名，无从判定
+//
+// 把"未回报"单独标出来是为了避免读表的人把空单元格当成"没问题"：
+// 空格看起来总是良性的，而它其实意味着这条记录没有校验能力。
+func modelMatchLabel(reported string, mismatch bool) string {
+	if strings.TrimSpace(reported) == "" {
+		return "未回报"
+	}
+	if mismatch {
+		return "不一致"
+	}
+	return "一致"
 }

@@ -375,6 +375,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				// 速度观测（T-speed-001）: 非流式只有整轮耗时, 不能当首帧用（里面混着生成时间）,
 				// 因此只进吞吐；吞吐与耗时的分子分母必须同口径, 都取这一轮。
 				recordMemberSpeed(item.ID, 0, completionTokens(result.usage), roundWaitTime)
+				// 记下上游自称用了哪个模型（T-verify-001）：非流式在提交前就能拿到完整响应，
+				// 放在 markCommitted 之前，保证状态流里的这份判定与写出去的响应同源。
+				request.recordReportedModel(channelModel.Name, result.reportedModel)
 				request.markCommitted()
 				n, err := c.Writer.Write(result.body)
 				if err == nil && n != len(result.body) {
@@ -486,6 +489,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			_ = op.ChannelStatsUpdate(channel.ID, metrics)
 			_ = op.ChannelModelStatsUpdate(channelModel.ID, metrics)
 			_ = op.ChannelKeyStatsUpdate(channelKey.ID, metrics)
+			// 流式同样记录上游自称的模型（T-verify-001）：取自首个已校验的事件，
+			// 与响应内容同源，不必等流结束。
+			request.recordReportedModel(channelModel.Name, result.reportedModel)
 			if err != nil {
 				if ctx.Err() != nil {
 					request.markCanceled(ctx.Err(), string(responseBody), result.usage)

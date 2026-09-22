@@ -5,18 +5,30 @@ import "time"
 // RelayLog 是已结束转发请求的持久化快照, 与进程内 RequestState 同源但落库保存。
 // 内存快照重启即失且只留 50 条, 本表按保留期清理, 供日志页历史查询与筛选。
 type RelayLog struct {
-	ID             uint64    `json:"id" gorm:"primaryKey;autoIncrement"`
-	RequestID      uint64    `json:"request_id" gorm:"index"`
-	Status         string    `json:"status" gorm:"index"`
-	Model          string    `json:"model" gorm:"index"`
-	GroupID        int       `json:"group_id" gorm:"index"`
-	APIKeyName     string    `json:"api_key_name" gorm:"index"`
-	TargetChannel  string    `json:"target_channel" gorm:"index"`
-	TargetModel    string    `json:"target_model"`
-	TargetProtocol int       `json:"target_protocol"`
-	StartedAt      time.Time `json:"started_at" gorm:"index"`
-	FirstByteMs    int64     `json:"first_byte_ms"` // 请求到达至首字节写出的毫秒数, 未提交为 -1。
-	DurationMs     int64     `json:"duration_ms"`   // 请求总耗时毫秒数。
+	ID             uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
+	RequestID      uint64 `json:"request_id" gorm:"index"`
+	Status         string `json:"status" gorm:"index"`
+	Model          string `json:"model" gorm:"index"`
+	GroupID        int    `json:"group_id" gorm:"index"`
+	APIKeyName     string `json:"api_key_name" gorm:"index"`
+	TargetChannel  string `json:"target_channel" gorm:"index"`
+	TargetModel    string `json:"target_model"`
+	TargetProtocol int    `json:"target_protocol"`
+	// ReportedModel 是**上游响应体里回报的 model 字段**（T-verify-001）。
+	//
+	// 与 TargetModel 的区别是关键：TargetModel 是「我们发出去的名字」，代表不了上游实际用了什么；
+	// ReportedModel 是「上游自己说它用了什么」。两者不一致就是上游偷换模型的直接证据
+	// ——按 opus 收费却用 haiku 出货，只看我方记录永远发现不了。
+	// 空串表示上游没回报该字段（部分站点响应里就没有），此时不做判定。
+	ReportedModel string `json:"reported_model"`
+	// ModelMismatch 标记「上游回报的模型与请求的不一致」。
+	//
+	// 只在双方都有值时判定：上游不回报模型名是普遍现象，把"没回报"当"不匹配"
+	// 会让绝大多数正常请求被误标，这个标记就失去了意义。
+	ModelMismatch bool      `json:"model_mismatch" gorm:"index"`
+	StartedAt     time.Time `json:"started_at" gorm:"index"`
+	FirstByteMs   int64     `json:"first_byte_ms"` // 请求到达至首字节写出的毫秒数, 未提交为 -1。
+	DurationMs    int64     `json:"duration_ms"`   // 请求总耗时毫秒数。
 	// Attempts 是本请求打向上游的轮次数: 1 表示第一次就出结果, >1 表示中途换过成员(重试/换人),
 	// 0 表示还没发起过上游请求就结束了(分组不存在、成员解析失败等)。
 	// 首字竞速的多路并发算**一轮**(它们同时发出, 抢的是同一个逻辑轮次), 与面板上的"第几轮"同口径。

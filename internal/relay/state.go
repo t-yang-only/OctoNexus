@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,16 +37,22 @@ type RequestState struct {
 	Usage      llm.Usage      `json:"usage"`        // 请求结束时写入的展示用量。
 	Cost       float64        `json:"cost"`         // 请求结束时写入的累计费用。
 
-	Round          int            `json:"round"`              // 最新一轮循环的递增序号, 人工中止按此匹配以免误杀下一轮。
-	RoundStartedAt time.Time      `json:"round_started_at"`   // 最新一轮上游请求的开始时间。
-	FirstByteAt    time.Time      `json:"first_byte_at"`      // 首字节写出客户端的时间, 未提交时为零值; 富化卡片的首字耗时即 FirstByteAt-StartedAt。
-	TargetChannel  string         `json:"target_channel"`     // 最新一轮选中的渠道名称。
-	TargetModel    string         `json:"target_model"`       // 最新一轮实际请求上游的模型名称。
-	TargetProtocol model.Protocol `json:"target_protocol"`    // 最新一轮实际请求上游的协议, 与 Protocol 不同即本轮做了跨协议转换; 0 表示尚未选出。
-	Sending        bool           `json:"sending"`            // 最新一轮是否仍在等待上游响应。
-	TargetItemID   int            `json:"-"`                  // 最新一轮选中的成员行 ID（GroupItem.ID）; 仅供 least_busy 统计在途, 不进状态流与日志对外结构。
-	Decision       string         `json:"decision,omitempty"` // 本轮选路判定（T-decision-001）: "mode=smart;tier=decision;reason=affinity;slot=1;attempt=2", 每轮刷新。
-	Error          string         `json:"error,omitempty"`    // 最新一轮的失败原因, 请求结束后即为最终错误。
+	Round          int            `json:"round"`            // 最新一轮循环的递增序号, 人工中止按此匹配以免误杀下一轮。
+	RoundStartedAt time.Time      `json:"round_started_at"` // 最新一轮上游请求的开始时间。
+	FirstByteAt    time.Time      `json:"first_byte_at"`    // 首字节写出客户端的时间, 未提交时为零值; 富化卡片的首字耗时即 FirstByteAt-StartedAt。
+	TargetChannel  string         `json:"target_channel"`   // 最新一轮选中的渠道名称。
+	TargetModel    string         `json:"target_model"`     // 最新一轮实际请求上游的模型名称。
+	TargetProtocol model.Protocol `json:"target_protocol"`  // 最新一轮实际请求上游的协议, 与 Protocol 不同即本轮做了跨协议转换; 0 表示尚未选出。
+	// ReportedModel 是上游响应里回报的模型名（T-verify-001），空串表示上游没回报该字段。
+	// 与 TargetModel 的差别是这件事的全部意义：前者是"我们请求了什么"，后者是"上游自称用了什么"。
+	ReportedModel string `json:"reported_model,omitempty"`
+	// ModelMismatch 标记两者不一致（仅在双方都有值时判定）。
+	// 它回答"上游有没有偷换模型"——按高价模型收费却用低价模型出货，只看我方记录永远发现不了。
+	ModelMismatch bool   `json:"model_mismatch,omitempty"`
+	Sending       bool   `json:"sending"`            // 最新一轮是否仍在等待上游响应。
+	TargetItemID  int    `json:"-"`                  // 最新一轮选中的成员行 ID（GroupItem.ID）; 仅供 least_busy 统计在途, 不进状态流与日志对外结构。
+	Decision      string `json:"decision,omitempty"` // 本轮选路判定（T-decision-001）: "mode=smart;tier=decision;reason=affinity;slot=1;attempt=2", 每轮刷新。
+	Error         string `json:"error,omitempty"`    // 最新一轮的失败原因, 请求结束后即为最终错误。
 
 	body          string                                     // 客户端原始请求体, 体积大故不进状态流, 由独立接口按需拉取。
 	responseBody  string                                     // 聚合后的完整最终响应体, 同样按需拉取。
@@ -138,6 +145,30 @@ func (r *RequestState) retargetRound(itemID int, channel, modelName string, prot
 	r.TargetChannel = channel
 	r.TargetModel = modelName
 	r.TargetProtocol = protocol
+}
+
+// recordReportedModel 记录上游响应里回报的模型名并判定是否与请求的一致（T-verify-001）。
+//
+// requested 由调用方显式传入而不是从 TargetModel 读：调用点手上就有这一轮真实发出去的
+// 模型名（channelModel.Name），两者必然同源；从状态里回读反而依赖"TargetModel 已被正确设置"
+// 这条隐含前提，那个前提一旦不成立，校验就会静默失去意义。
+//
+// 只记不拦：上游回报不同的模型名可能是别名、路由层改名或真的偷换，中转无法替用户裁决是哪一种；
+// 把它如实记下来并标出不一致，由用户在日志页判断。
+func (r *RequestState) recordReportedModel(requested, reported string) {
+	reported = strings.TrimSpace(reported)
+	mismatch := modelMismatch(requested, reported)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if target, ok := requests[r.ID]; ok {
+		target.ReportedModel = reported
+		target.ModelMismatch = mismatch
+	}
+	r.ReportedModel = reported
+	r.ModelMismatch = mismatch
+	publishRequestLocked(r)
 }
 
 // setDecision 记录本轮的选路判定（T-decision-001）: 与其它状态一样先写进注册表再落到本对象,
@@ -324,6 +355,8 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 		TargetChannel:  r.TargetChannel,
 		TargetModel:    r.TargetModel,
 		TargetProtocol: int(r.TargetProtocol),
+		ReportedModel:  r.ReportedModel,
+		ModelMismatch:  r.ModelMismatch,
 		StartedAt:      r.StartedAt,
 		FirstByteMs:    firstByteMs,
 		DurationMs:     r.Duration.Milliseconds(),

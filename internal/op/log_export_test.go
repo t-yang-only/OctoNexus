@@ -49,9 +49,25 @@ func TestRelayLogExportCSVShape(t *testing.T) {
 	if len(records) != 3 {
 		t.Fatalf("records=%d, want 1 header + 2 rows", len(records))
 	}
-	if records[0][0] != "日志ID" || records[0][1] != "请求ID" || records[0][7] != "上游协议" ||
-		records[0][10] != "上游轮次" || records[0][11] != "判定理由" || records[0][17] != "错误" {
+	if records[0][0] != "日志ID" || records[0][1] != "请求ID" {
 		t.Fatalf("header=%v", records[0])
+	}
+	// 按列名定位而不是写死下标：导出加一列就会让所有硬下标记错位，
+	// 那样的失败信息（"protocol labels=..."）指向的是列号而不是真正的缺陷。
+	col := func(name string) int {
+		for i, h := range records[0] {
+			if h == name {
+				return i
+			}
+		}
+		t.Fatalf("导出表头缺少 %q：%v", name, records[0])
+		return -1
+	}
+	idxProtocol, idxFirstByte := col("上游协议"), col("首字节(ms)")
+	idxAttempts, idxCost := col("上游轮次"), col("费用")
+	idxError, idxReported := col("错误"), col("上游自称模型")
+	if records[0][idxReported] != "上游自称模型" {
+		t.Fatalf("新列未出现在表头：%v", records[0])
 	}
 	first, second := records[1], records[2]
 	// 第一列是日志行主键(唯一), 第二列才是请求 ID: 请求 ID 会因重试而重复, 不能当行标识。
@@ -64,20 +80,22 @@ func TestRelayLogExportCSVShape(t *testing.T) {
 	if first[2] != created.Format(time.RFC3339) {
 		t.Fatalf("time column=%q, want RFC3339", first[2])
 	}
-	if first[7] != "anthropic-messages" || second[7] != "openai-responses" {
-		t.Fatalf("protocol labels=%q,%q", first[7], second[7])
+	if first[idxProtocol] != "anthropic-messages" || second[idxProtocol] != "openai-responses" {
+		t.Fatalf("protocol labels=%q,%q", first[idxProtocol], second[idxProtocol])
 	}
-	if first[8] != "12" || second[8] != "" {
-		t.Fatalf("first byte column=%q,%q, want 12 and empty (never committed)", first[8], second[8])
+	if first[idxFirstByte] != "12" || second[idxFirstByte] != "" {
+		t.Fatalf("first byte column=%q,%q, want 12 and empty (never committed)",
+			first[idxFirstByte], second[idxFirstByte])
 	}
-	if first[10] != "3" || second[10] != "0" {
-		t.Fatalf("attempts column=%q,%q, want 3 and 0 (never reached upstream)", first[10], second[10])
+	if first[idxAttempts] != "3" || second[idxAttempts] != "0" {
+		t.Fatalf("attempts column=%q,%q, want 3 and 0 (never reached upstream)",
+			first[idxAttempts], second[idxAttempts])
 	}
-	if first[15] != "0.000123" {
-		t.Fatalf("cost column=%q, want the stored float (判定理由列插在上游轮次之后, 后续列右移一位)", first[15])
+	if first[idxCost] != "0.000123" {
+		t.Fatalf("cost column=%q, want the stored float", first[idxCost])
 	}
-	if second[17] != "context canceled" {
-		t.Fatalf("error column=%q", second[17])
+	if second[idxError] != "context canceled" {
+		t.Fatalf("error column=%q", second[idxError])
 	}
 }
 
@@ -102,8 +120,19 @@ func TestRelayLogExportCSVEscapesAndFilters(t *testing.T) {
 	if records[1][1] != "21" {
 		t.Fatalf("filtered row request id=%s, want 21", records[1][1])
 	}
-	if records[1][17] != errorText {
-		t.Fatalf("error text round trip = %q, want the original with comma/quote/newline", records[1][17])
+	// 同样按列名定位（见上一个用例的说明）。
+	errIdx := -1
+	for i, h := range records[0] {
+		if h == "错误" {
+			errIdx = i
+			break
+		}
+	}
+	if errIdx < 0 {
+		t.Fatalf("导出表头缺少「错误」列：%v", records[0])
+	}
+	if records[1][errIdx] != errorText {
+		t.Fatalf("error text round trip = %q, want the original with comma/quote/newline", records[1][errIdx])
 	}
 }
 
