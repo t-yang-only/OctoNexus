@@ -31,6 +31,10 @@ ASSUME_YES=0
 ACTION=upgrade
 ROLLBACK_ARTIFACT=""
 HEALTH_TIMEOUT=45
+# 保留多少个历史回滚点（含本次新建的）。每个回滚点 = 数据快照(约 23M) + 旧二进制(约 51M)，
+# 不限量会让 backups/ 随升级次数线性增长（实测 7 次升级累积 460M）。
+# 缺省 3 个：足够覆盖「最近几次升级出问题」的场景，更早的版本本地发布件目录里还有，需要时能重建。
+KEEP_ARTIFACTS="${KEEP_ARTIFACTS:-3}"
 # 转发口缺省与管理口相同（单端口部属时的常见形态）；两个端口分开时显式传 --relay-port。
 RELAY_PORT="${RELAY_PORT:-$ADMIN_PORT}"
 
@@ -48,6 +52,7 @@ while [ $# -gt 0 ]; do
         --yes) ASSUME_YES=1; shift ;;
         --rollback) ACTION=rollback; shift ;;
         --rollback-artifact) ACTION=rollback; ROLLBACK_ARTIFACT="$2"; shift 2 ;;
+        --keep-artifacts) KEEP_ARTIFACTS="$2"; shift 2 ;;
         -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         *) echo "未知参数: $1（用 --help 看用法）" >&2; exit 2 ;;
     esac
@@ -57,6 +62,42 @@ log()  { printf '%s\n' "$*"; }
 ok()   { printf 'PASS  %s\n' "$*"; }
 warn() { printf 'WARN  %s\n' "$*"; }
 die()  { printf 'FAIL  %s\n' "$*" >&2; exit 1; }
+
+# prune_old_artifacts 按 KEEP_ARTIFACTS 保留最近若干个回滚点，删除更早的。
+#
+# 为什么需要它：每个回滚点约 73M（数据 23M + 旧二进制 51M），不限量会随升级次数线性增长。
+# 但回滚点是**唯一的安全网**，所以这里的取向是「宁可留多了也不能删错」：
+#   · 先按时间倒序列出全部，跳过前 N 个（要保留的），只处理后面的；
+#   · 至少保留 1 个：KEEP_ARTIFACTS 传 0 或负数时夹回 1；
+#   · 删除前把清单打出来（可审计 —— 事后能看出哪次升级删了什么）；
+#   · 任一步失败只告警不中止：空间管理不该阻断升级。
+prune_old_artifacts() {
+    local keep="$KEEP_ARTIFACTS"
+    case "$keep" in
+        ''|*[!0-9]*) warn "keep-artifacts 不是数字（$keep），按默认 3 处理"; keep=3 ;;
+    esac
+    [ "$keep" -lt 1 ] && keep=1
+
+    local all total
+    all=$(ls -1dt "$DIR"/backups/*/ 2>/dev/null || true)
+    [ -n "$all" ] || return 0
+    total=$(printf '%s\n' "$all" | grep -c . || true)
+    if [ "$total" -le "$keep" ]; then
+        return 0
+    fi
+
+    local doomed
+    doomed=$(printf '%s\n' "$all" | tail -n +$((keep + 1)))
+    local count
+    count=$(printf '%s\n' "$doomed" | grep -c . || true)
+    log "  清理旧回滚点：保留最近 $keep 个，删除 $count 个"
+    printf '%s\n' "$doomed" | while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        log "    删除 $(basename "$d")"
+        rm -rf "$d" || warn "删除失败（可手工处理）：$d"
+    done
+    ok "回滚点已按上限 $keep 清理（当前 $(ls -1d "$DIR"/backups/*/ 2>/dev/null | grep -c . || true) 个）"
+}
 
 # 取应用版本：必须锚定行首的 `Version:` —— 二进制 version 的输出里还有
 # `Go Version: go1.27.0 linux/amd64` 这一行，用 /Version/ 会先命中它，
@@ -299,6 +340,15 @@ do_upgrade() {
     fi
     [ -x "$DIR/octopus" ] && cp -a "$DIR/octopus" "$artifact/octopus.old-$ts"
     ok "备份到 $artifact（数据 ${ts}.tar.gz + 二进制 octopus.old-$ts）"
+
+    # 只保留最近 N 个回滚点，避免 backups/ 随升级次数无限增长
+    # （实测 7 次升级累积 460M，每个回滚点 73M = 数据 23M + 旧二进制 51M）。
+    #
+    # 三条安全约束：
+    #   1. 在**新回滚点已经建好之后**才清理 —— 先删后建会在中途失败时丢掉唯一的退路；
+    #   2. 至少保留 1 个（KEEP_ARTIFACTS=0 这种输入不能把退路全删光）；
+    #   3. 清理失败只告警、不中止升级 —— 它只是空间管理，不该影响升级本身。
+    prune_old_artifacts
 
     log "== 4. 换二进制 =="
     stop_service
