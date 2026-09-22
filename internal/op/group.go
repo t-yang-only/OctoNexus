@@ -188,7 +188,10 @@ func ensureAutoGroupsLocked(tx *gorm.DB, channelID int, channelName string, mode
 			}
 		}
 	}
-	return nil
+	// 上面只做了「新增」：遍历本次提交的模型，缺分组就建、缺成员就补。
+	// 撤销授权后分组会残留（成员指向已删除的授权），客户端还能在列表里看到、能选中、
+	// 然后失败 —— 所以这里补上「清理」。详见 pruneStaleAutoGroups 的注释。
+	return pruneStaleAutoGroups(tx, channelID, channelName)
 }
 
 // GroupCreate 创建分组及其成员并刷新缓存, 返回创建后的分组。
