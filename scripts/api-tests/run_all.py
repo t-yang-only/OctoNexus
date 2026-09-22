@@ -60,6 +60,8 @@ SUITES = [
      "声明式适配器（白名单 fail closed / 只读能力位 / 不回显凭据 / 只读 APIKey 通道）", "instance,mock"),
     ("manual", "run_manual_subscription_test.py",
      "手动订阅（无接口站点手录余额并入总额 / 只算一次 / 过期停用不计 / 鉴权与校验）", "instance,mock,db"),
+    ("modelmap", "run_model_mapping_test.py",
+     "模型名智能重写（直通不变量 / 长名改写生效 / 优先级 / 停用即失效 / 试跑端点）", "instance,mock,db"),
     ("cipher", "run_credential_encryption_test.py",
      "渠道凭据静态加密（落库密文 / 端到端解密 / 判据自检 / 全库无明文）", "instance,db,mock"),
     ("bodylimit", "run_bodylimit_test.py",

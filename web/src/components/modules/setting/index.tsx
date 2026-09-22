@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SettingAppearance } from './Appearance';
 import { SettingSystem } from './System';
 import { SettingRouting } from './Routing';
+import { SettingModelMapping } from './ModelMapping';
 import { SettingNotify } from './Notify';
 import { SettingAPIKey } from './APIKey';
 import { SettingLLMPrice } from './LLMPrice';
@@ -48,7 +49,8 @@ export function Setting() {
                 <TabsContent value="api" className="px-4">
                     <SettingAPIKey />
                 </TabsContent>
-                <TabsContent value="routing" className="px-4">
+                <TabsContent value="routing" className="space-y-4 px-4">
+                    <SettingModelMapping />
                     <SettingRouting />
                 </TabsContent>
                 <TabsContent value="notify" className="px-4">

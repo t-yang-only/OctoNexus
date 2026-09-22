@@ -32,6 +32,11 @@ func InitCache() error {
 	if err := ManualSubscriptionRefresh(ctx); err != nil {
 		return fmt.Errorf("manual subscription refresh cache error: %v", err)
 	}
+	// 模型名智能重写：转发链路上按请求名找分组之前要读它，因此必须与其它缓存一起就位；
+	// 未配规则时缓存为空，行为与没有本机制时逐字一致。
+	if err := ModelMappingRefresh(ctx); err != nil {
+		return fmt.Errorf("model mapping refresh cache error: %v", err)
+	}
 	return nil
 }
 

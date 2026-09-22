@@ -57,6 +57,7 @@ func TestFreshInstallCreatesAllTables(t *testing.T) {
 		&model.UsageSnapshot{},
 		&model.Plugin{},
 		&model.CredentialSource{},
+		&model.ModelMapping{},
 	}
 	missing := []string{}
 	for _, item := range models {

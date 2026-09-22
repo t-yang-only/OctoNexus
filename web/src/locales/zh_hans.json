@@ -644,6 +644,34 @@
             "routing": "路由策略",
             "notify": "通知",
             "data": "数据与备份"
+        },
+        "modelMapping": {
+            "title": "模型映射",
+            "description": "客户端常写死带版本后缀的模型名（claude-3-5-sonnet-20241022），本地分组名却是简名（claude-sonnet），于是客户端拿到 model not found。这里配规则把请求名改写成目标分组名。未命中任何规则时原名照用，所以不配规则时行为与从前完全一致。",
+            "tryIt": "试一下",
+            "tryPlaceholder": "输入一个客户端会发的模型名，例如 claude-3-5-sonnet-20241022",
+            "run": "测试",
+            "noMatch": "没有命中任何规则，将按原名查找分组",
+            "newRule": "新建规则",
+            "editing": "正在编辑规则",
+            "namePlaceholder": "规则名称（给自己看的备注）",
+            "targetPlaceholder": "目标分组名（本地已存在的分组）",
+            "patternPlaceholder": "匹配表达式",
+            "priority": "优先级",
+            "enabled": "启用",
+            "cancel": "取消",
+            "save": "保存",
+            "add": "添加",
+            "edit": "编辑",
+            "loading": "加载中…",
+            "empty": "还没有规则。没有规则时，客户端必须使用与分组完全同名的模型名。",
+            "requiredHint": "规则名称、匹配表达式、目标分组名都不能为空",
+            "matchTypeHint": "精确＝整名相同（忽略大小写）；通配符支持 * 与 ?（点号是普通字符）；正则按标准语法匹配。数字越大越先匹配。",
+            "matchType": {
+                "exact": "精确",
+                "wildcard": "通配符",
+                "regex": "正则"
+            }
         }
     },
     "group": {

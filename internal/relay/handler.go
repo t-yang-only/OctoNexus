@@ -78,9 +78,22 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			}
 		}
 
-		// 客户端请求的模型名称即分组名称; 分组不存在说明模型名错误, 等待也不会出现该分组。
-		// 分组主键随请求状态一并登记, 界面由此可直接按主键取分组而不必按名称回查。
+		// 模型名智能重写：客户端常写死带版本后缀的模型名（claude-3-5-sonnet-20241022），
+		// 而本地分组名是简名（claude-sonnet）。先按原名找分组（叫得中就零变化），
+		// 查不到时再过一层重写规则拿目标分组名再查一次；两次都不中才算 model not found。
+		//
+		// 重写只决定"用哪个分组"，不改客户端正文——正文里的 model 由各轮出站准备按目标成员改写。
+		// 命中时把 metadata.Model 一并改写：请求状态与重试循环都按它查分组，三处必须同一个名字，
+		// 否则会出现"首次命中重写、重试轮又回到原名"的割裂行为。
 		group, err := op.GroupGetByName(metadata.Model)
+		if err != nil {
+			if rewritten, matched := op.ModelMappingResolveByName(metadata.Model); matched {
+				if g2, err2 := op.GroupGetByName(rewritten); err2 == nil {
+					metadata.Model = rewritten
+					group, err = g2, nil
+				}
+			}
+		}
 		if err != nil {
 			rejectRequest(c, inbound, errors.New("model not found"))
 			return

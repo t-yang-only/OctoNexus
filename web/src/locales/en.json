@@ -644,6 +644,34 @@
             "routing": "Routing",
             "notify": "Notifications",
             "data": "Data & Backup"
+        },
+        "modelMapping": {
+            "title": "Model Mapping",
+            "description": "Clients often hard-code versioned model names (claude-3-5-sonnet-20241022) while local groups use short names (claude-sonnet), so the client gets model not found. Rules here rewrite the requested name into a target group name. When nothing matches, the original name is used unchanged — so behaviour is identical to before until you add a rule.",
+            "tryIt": "Try it",
+            "tryPlaceholder": "Enter a model name a client would send, e.g. claude-3-5-sonnet-20241022",
+            "run": "Test",
+            "noMatch": "No rule matched — the group is looked up by the original name",
+            "newRule": "New rule",
+            "editing": "Editing rule",
+            "namePlaceholder": "Rule name (a note for yourself)",
+            "targetPlaceholder": "Target group name (must already exist)",
+            "patternPlaceholder": "Match pattern",
+            "priority": "Priority",
+            "enabled": "Enabled",
+            "cancel": "Cancel",
+            "save": "Save",
+            "add": "Add",
+            "edit": "Edit",
+            "loading": "Loading…",
+            "empty": "No rules yet. Without rules, clients must send a model name identical to the group name.",
+            "requiredHint": "Rule name, match pattern and target group are all required",
+            "matchTypeHint": "Exact = whole-name match (case-insensitive); wildcard supports * and ? (dots are literal); regex uses standard syntax. Higher priority matches first.",
+            "matchType": {
+                "exact": "Exact",
+                "wildcard": "Wildcard",
+                "regex": "Regex"
+            }
         }
     },
     "group": {

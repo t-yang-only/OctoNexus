@@ -644,6 +644,34 @@
             "routing": "路由策略",
             "notify": "通知",
             "data": "資料與備份"
+        },
+        "modelMapping": {
+            "title": "模型映射",
+            "description": "客戶端常寫死帶版本後綴的模型名（claude-3-5-sonnet-20241022），本地分組名卻是簡名（claude-sonnet），於是客戶端拿到 model not found。這裡配規則把請求名改寫成目標分組名。未命中任何規則時原名照用，所以不配規則時行為與從前完全一致。",
+            "tryIt": "試一下",
+            "tryPlaceholder": "輸入一個客戶端會發的模型名，例如 claude-3-5-sonnet-20241022",
+            "run": "測試",
+            "noMatch": "沒有命中任何規則，將按原名查找分組",
+            "newRule": "新增規則",
+            "editing": "正在編輯規則",
+            "namePlaceholder": "規則名稱（給自己看的備註）",
+            "targetPlaceholder": "目標分組名（本地已存在的分組）",
+            "patternPlaceholder": "匹配表達式",
+            "priority": "優先級",
+            "enabled": "啟用",
+            "cancel": "取消",
+            "save": "儲存",
+            "add": "新增",
+            "edit": "編輯",
+            "loading": "載入中…",
+            "empty": "還沒有規則。沒有規則時，客戶端必須使用與分組完全同名的模型名。",
+            "requiredHint": "規則名稱、匹配表達式、目標分組名都不能為空",
+            "matchTypeHint": "精確＝整名相同（忽略大小寫）；萬用字元支援 * 與 ?（點號是普通字元）；正則按標準語法匹配。數字越大越先匹配。",
+            "matchType": {
+                "exact": "精確",
+                "wildcard": "萬用字元",
+                "regex": "正則"
+            }
         }
     },
     "group": {

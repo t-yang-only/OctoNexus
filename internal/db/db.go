@@ -82,6 +82,8 @@ func InitDB(dbType, dsn string, debug bool) error {
 		// 社区反代扩展插件（R-plugin-001）：同样是纯新增表。
 		&model.Plugin{},
 		&model.CredentialSource{},
+		// 模型名智能重写映射（吸收上游与 New-API 优点）。
+		&model.ModelMapping{},
 		&migrate.MigrationRecord{},
 	); err != nil {
 		return err
