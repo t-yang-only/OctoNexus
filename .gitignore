@@ -15,6 +15,8 @@ __pycache__/
 .venv/
 octopus-test*.exe
 octopus.exe
+# Go 构建被中断时留下的备份文件（如 octopus.exe~）。此前误提交过一次。
+*.exe~
 
 # 外部参考仓库, 不入库
 reference/
