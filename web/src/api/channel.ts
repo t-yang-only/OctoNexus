@@ -322,3 +322,57 @@ export function useFetchModel() {
             apiRequest<FetchModel[]>('/api/v1/channel/fetch-model', { method: 'POST', body: data }),
     });
 }
+
+// T-usability-001 渠道可用性诊断。
+//
+// 回答的是「我配好的模型为什么用不上」：一个模型要能被客户端调用，
+// 必须三层齐全（模型 → 凭据授权 → 分组），任何一层断掉的表现都是
+// 客户端报 model not found，而界面上完全看不出是哪一层。
+// 这里把断点与可执行的原因一并取回来展示。
+export interface ChannelDiagnoseModel {
+    model_name: string;
+    /** 被授权使用该模型的凭据名；为空即「没有任何凭据被授权」。 */
+    grant_keys: string[];
+    /** 对应的自动分组名；空串表示分组不存在。 */
+    group_name: string;
+    usable: boolean;
+    /** 不可用时的可执行原因（不是「不可用」三个字）。 */
+    reason?: string;
+}
+
+export interface ChannelDiagnose {
+    channel_id: number;
+    channel_name: string;
+    enabled: boolean;
+    key_count: number;
+    usable_count: number;
+    total_count: number;
+    models: ChannelDiagnoseModel[];
+    /** 只含不可用的，供界面直接渲染「待处理清单」。 */
+    broken: ChannelDiagnoseModel[];
+}
+
+export interface ChannelDiagnoseSummary {
+    channels: number;
+    total_models: number;
+    usable_models: number;
+    broken_models: number;
+    channels_with_gap: number;
+}
+
+export interface ChannelDiagnoseResponse {
+    summary: ChannelDiagnoseSummary;
+    /** 原因归类（原因文本 → 模型数），让用户知道该优先修哪一类。 */
+    reasons: Record<string, number>;
+    channels: ChannelDiagnose[];
+}
+
+// useChannelDiagnose 取回全部渠道的可用性诊断。
+// 按需开启：它要遍历全部渠道的模型与授权，不在渠道列表首屏就拉。
+export function useChannelDiagnose(enabled = true) {
+    return useQuery({
+        queryKey: ['channels', 'diagnose'],
+        queryFn: () => apiRequest<ChannelDiagnoseResponse>('/api/v1/channel/diagnose'),
+        enabled,
+    });
+}

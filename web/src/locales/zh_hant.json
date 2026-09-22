@@ -1072,6 +1072,14 @@
             "hint": "點右上角的 + 新增第一個渠道；也可以到「號池」或「擴充」裡匯入。",
             "filteredTitle": "沒有符合的渠道",
             "filteredHint": "換個搜尋詞，或把篩選切回「全部」。"
+        },
+        "diagnose": {
+            "title": "可用性診斷",
+            "summary": "全部渠道可用 {usable}/{total} 個模型（{rate}%）",
+            "expand": "展開 {count} 個待處理",
+            "collapse": "收起",
+            "channelGap": "可用 {usable}/{total}",
+            "more": "還有 {count} 個…"
         }
     },
     "unifiedPool": {

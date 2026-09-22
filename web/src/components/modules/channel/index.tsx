@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { ArrowUpAZ } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import { useChannelStats } from '@/api/channel';
+import { DiagnoseBanner } from './DiagnoseBanner';
 import { PageActions, usePageActionsStore } from '@/components/common/PageActions';
 import { MorphingDialogDescription } from '@/components/ui/morphing-dialog';
 import { Card } from './Card';
@@ -96,16 +97,24 @@ export function Channel() {
         );
     }
 
+    // 诊断横幅放在列表上方：它回答的是「为什么我配好的模型用不上」，
+    // 而这个问题在列表本身里完全看不出来（渠道卡片上模型列得好好的）。
+    // 用 flex 包一层是为了让横幅固定、列表自己滚动。
     return (
-        <VirtualizedGrid
-            items={visibleChannels}
-            layout={layout}
-            columns={{ default: 1, sm: 2, md: 3, lg: 4, xl: 5, '2xl': 6 }}
-            estimateItemHeight={232}
-            getItemKey={(channel) => `channel-${channel.channel_id}`}
-            renderItem={(channel) => (
-                <Card channel={channel} />
-            )}
-        />
+        <div className="flex h-full min-h-0 flex-col">
+            <DiagnoseBanner />
+            <div className="min-h-0 flex-1">
+                <VirtualizedGrid
+                    items={visibleChannels}
+                    layout={layout}
+                    columns={{ default: 1, sm: 2, md: 3, lg: 4, xl: 5, '2xl': 6 }}
+                    estimateItemHeight={232}
+                    getItemKey={(channel) => `channel-${channel.channel_id}`}
+                    renderItem={(channel) => (
+                        <Card channel={channel} />
+                    )}
+                />
+            </div>
+        </div>
     );
 }

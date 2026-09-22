@@ -1072,6 +1072,14 @@
             "hint": "Use the + button at the top right to add your first channel, or import one from Pool / Extensions.",
             "filteredTitle": "No matching channels",
             "filteredHint": "Try another search term, or switch the filter back to All."
+        },
+        "diagnose": {
+            "title": "Availability",
+            "summary": "{usable}/{total} models usable across all channels ({rate}%)",
+            "expand": "Show {count} to fix",
+            "collapse": "Hide",
+            "channelGap": "{usable}/{total} usable",
+            "more": "{count} more…"
         }
     },
     "unifiedPool": {
