@@ -61,6 +61,7 @@ func TestFreshInstallCreatesAllTables(t *testing.T) {
 		&model.UsageReportState{},
 		&model.AlertRule{},
 		&model.AlertFire{},
+		&model.RouteCooldown{},
 	}
 	missing := []string{}
 	for _, item := range models {

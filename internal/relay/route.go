@@ -1,12 +1,15 @@
 package relay
 
 import (
+	"context"
 	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
+	"github.com/charmbracelet/log"
 )
 
 // RouteState 是一个分组的进程内路由状态; 跨该分组的全部请求共享。
@@ -74,6 +77,45 @@ func ResetRouteState(groupID int) {
 	defer routeMu.Unlock()
 
 	delete(routes, groupID)
+	// 持久化的冷却也要一起清: 否则分组被删掉后这些行永远没人再读,
+	// 而分组 ID 被复用时会带着别人的冷却"复活"。
+	op.RouteCooldownClearGroup(groupID)
+}
+
+// RestoreRouteCooldowns 把持久化的冷却读回内存, 在实例启动时调用一次。
+//
+// 为什么需要它: 冷却原先只存在进程内存里, 每次重启都会把全部正在冷却的成员一次性放行。
+// 冷却默认 600 秒, 而部署/崩溃自愈/改配置都会重启 —— 刚被上游限流的渠道会被立刻重新打满。
+//
+// 只恢复仍然未到期的条目（到期判断在 op.RouteCooldownLoad 里做并顺手清理）。
+// 读失败只告警: 恢复不了冷却等同于旧行为（全部放行）, 不该让实例起不来。
+func RestoreRouteCooldowns(ctx context.Context) {
+	restored, err := op.RouteCooldownLoad(ctx)
+	if err != nil {
+		log.Warnf("restore route cooldowns failed (cooldowns start empty): %v", err)
+		return
+	}
+	if len(restored) == 0 {
+		return
+	}
+
+	routeMu.Lock()
+	defer routeMu.Unlock()
+
+	total := 0
+	for groupID, cooldowns := range restored {
+		route := routes[groupID]
+		if route == nil {
+			route = &RouteState{GroupID: groupID, Cooldowns: make(map[int]int64)}
+			routes[groupID] = route
+		}
+		for itemID, deadline := range cooldowns {
+			route.Cooldowns[itemID] = deadline
+			total++
+		}
+		publishRouteLocked(route)
+	}
+	log.Infof("restored %d route cooldown(s) across %d group(s) from previous run", total, len(restored))
 }
 
 // pickGroupItem 按分组模式选择本轮目标成员, 没有可用成员时返回零值; group.Items 已按 Priority 升序排列。
@@ -239,7 +281,8 @@ func recordRouteFailureHint(group model.Group, itemID, failures int, latencyMs i
 		}
 	}
 	nowMs := now.UnixMilli()
-	route.Cooldowns[itemID] = nowMs + cooldownMs
+	deadline := nowMs + cooldownMs
+	route.Cooldowns[itemID] = deadline
 	if route.ProbeItemID == itemID {
 		route.ProbeItemID = 0
 	}
@@ -250,6 +293,9 @@ func recordRouteFailureHint(group model.Group, itemID, failures int, latencyMs i
 		route.affinityArmed = true
 	}
 	publishRouteLocked(route)
+	// 落库放在锁内: 与内存状态同一临界区, 否则并发的解除/重打会让库里的值落后于内存。
+	// 写失败只告警不返回错（见 op.RouteCooldownSave 的说明）。
+	op.RouteCooldownSave(group.ID, itemID, deadline)
 	return true
 }
 
@@ -269,6 +315,8 @@ func clearMemberCooldown(group model.Group, itemID int) bool {
 	}
 	delete(route.Cooldowns, itemID)
 	publishRouteLocked(route)
+	// 解除也要落库: 否则重启后这条已解除的冷却会从库里"复活", 把一个已恢复的成员重新封住。
+	op.RouteCooldownClear(group.ID, itemID)
 	return true
 }
 
@@ -297,6 +345,8 @@ func groupRouteLocked(group model.Group) *RouteState {
 	for itemID := range route.Cooldowns {
 		if !items[itemID] {
 			delete(route.Cooldowns, itemID)
+			// 成员已被移出分组: 库里的这条冷却再无意义, 且分组 ID 复用时会带着它复活。
+			op.RouteCooldownClear(group.ID, itemID)
 		}
 	}
 	// 分压累加器同样按成员集合清理: 成员被移除后它的权重余量再无意义, 留着只是内存垃圾。

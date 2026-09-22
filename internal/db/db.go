@@ -89,6 +89,8 @@ func InitDB(dbType, dsn string, debug bool) error {
 		// 告警规则与触发历史（吸收上游 Alerts）：指标型规则（错误率/延迟）与回溯记录。
 		&model.AlertRule{},
 		&model.AlertFire{},
+		// 路由冷却的持久化（T-route-003）：冷却是"上游说别来了"的记账，不该因重启而失效。
+		&model.RouteCooldown{},
 		&migrate.MigrationRecord{},
 	); err != nil {
 		return err

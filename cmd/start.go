@@ -47,6 +47,11 @@ var startCmd = &cobra.Command{
 		}
 		shutdown.Register(op.SaveCache)
 
+		// 恢复上一次运行遗留的路由冷却（T-route-003）：冷却是"上游说别来了"的记账，
+		// 原先只存在进程内存里，每次重启都会把全部冷却中的成员一次性放行。
+		// 放在 InitCache 之后（分组缓存已就绪）、启动转发之前。
+		relay.RestoreRouteCooldowns(context.Background())
+
 		// 凭据静态加密的状态说清楚（R-sec-001）：启用时给出来源（环境变量/密钥文件），
 		// 未启用时明确告诉运维"当前是明文"，免得以为已经加密了。
 		if source := op.CredentialKeySource(); source != "" {
