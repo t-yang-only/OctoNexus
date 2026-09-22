@@ -185,6 +185,32 @@ func requestFaultMessage(err error) string {
 	return "upstream rejected the request: " + message
 }
 
+// requestFaultError 是 requestFaultMessage 的**保留状态码**版本。
+//
+// ## 为什么必须单独有一个
+//
+// handler 里原本写的是 `errors.New(requestFaultMessage(err))` —— 一旦包成
+// 字符串，上游状态码就丢了，而下游两类判断都要用它：
+//
+//	· faultKindOf 的归因分类（T-usability-007）：丢状态码后「请求本身非法」
+//	  会退化成 transient，于是它又被算进渠道通过率 —— 正是那个功能要消除的污染；
+//	· 任何将来要按状态码做处置的地方。
+//
+// 实测踩到：`messages 为空` 被上游 400 拒绝，日志里 fault_kind 却记成了
+// transient（应为 request），根因就是这里。
+//
+// 转成 upstreamStatusError 后错误文本一字不变（客户端看到的还是上游原文），
+// 只是额外把状态码带在错误链上。
+func requestFaultError(err error) error {
+	message := requestFaultMessage(err)
+	if status, ok := upstreamStatusOf(err); ok {
+		return newUpstreamStatusError(status, message)
+	}
+	// 拿不到状态码（不该发生：能走到这个分支说明上游返回了确定性错误）
+	// 时退回普通错误 —— 但仍然是 error 而不是字符串拼接。
+	return errors.New(message)
+}
+
 // 「上游判定请求本身非法」（400 一类）时的两种取向（T-retry-003，用户要求两种都要）。
 // 两种都保留上游原文，区别只在「要不要先用别的成员试一次」：
 //   - RequestFaultActionFailover（默认，与既往行为一致）: 记下这个成员拒绝过，换下一个成员再试；

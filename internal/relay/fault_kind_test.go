@@ -2,6 +2,7 @@ package relay
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -60,8 +61,48 @@ func TestFaultKindNetworkErrorIsTransient(t *testing.T) {
 	}
 }
 
-// 分类必须与失败处置同源：同一批状态码在两边必须落在同一类。
+// requestFaultError 必须**保留状态码** —— 这是分类正确的前提。
 //
+// 实测踩到：handler 里原本写 `errors.New(requestFaultMessage(err))`，
+// 包成字符串后状态码丢失，于是「请求本身非法」在日志里被记成 transient，
+// 又跑回去污染渠道通过率 —— 正是 T-usability-007 要消除的那个污染。
+//
+// 这条判据直接盯住那个退化路径：把返回值的状态码取出来验。
+func TestRequestFaultErrorKeepsStatus(t *testing.T) {
+	original := newUpstreamStatusError(400, "upstream responded 400 Bad Request: bad tools")
+	wrapped := requestFaultError(original)
+
+	status, ok := upstreamStatusOf(wrapped)
+	if !ok {
+		t.Fatalf("requestFaultError 把状态码弄丢了 —— 分类会退化成 transient，" +
+			"请求非法又会污染渠道通过率")
+	}
+	if status != 400 {
+		t.Fatalf("状态码应为 400，实得 %d", status)
+	}
+	// 文本必须一字不变：客户端看到的就是上游原文，这是既有契约。
+	if !strings.Contains(wrapped.Error(), "bad tools") {
+		t.Fatalf("上游原文应保留在错误文本里，实得 %q", wrapped.Error())
+	}
+	// 分类必须正确。
+	if got := faultKindOf(wrapped); got != "request" {
+		t.Fatalf("包过之后应仍归为 request，实得 %q", got)
+	}
+}
+
+// 同一份错误：包之前与包之后的分类必须一致（防"包装时掉信息"）。
+func TestRequestFaultErrorKeepsClassification(t *testing.T) {
+	for _, status := range []int{400, 422, 501} {
+		original := newUpstreamStatusError(status, "rejected")
+		before := faultKindOf(original)
+		after := faultKindOf(requestFaultError(original))
+		if before != after {
+			t.Fatalf("HTTP %d: 包装前后分类不一致（%q → %q），"+
+				"说明 requestFaultError 丢了信息", status, before, after)
+		}
+	}
+}
+
 // 这是防分叉的判据 —— 分开写两套 if-else 是这类代码最常见的腐化方式：
 // 两边单独看都对，合起来就矛盾。
 func TestFaultKindMatchesDisposition(t *testing.T) {

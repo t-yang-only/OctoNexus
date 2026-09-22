@@ -369,12 +369,12 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					// 取向由设置项决定（T-retry-003）: failfast 时第一个成员拒绝就结束请求,
 					// failover（默认）时把该成员记入拒绝集合、换下一个成员再试。
 					if RequestFaultAction() == RequestFaultActionFailFast {
-						failRequest(c, inbound, request, errors.New(requestFaultMessage(err)))
+						failRequest(c, inbound, request, requestFaultError(err))
 						return
 					}
 					rejectedItems[item.ID] = true
 					if allMembersRejected(op.FlattenGroupItems(group), rejectedItems) {
-						failRequest(c, inbound, request, errors.New(requestFaultMessage(err)))
+						failRequest(c, inbound, request, requestFaultError(err))
 						return
 					}
 					continue
