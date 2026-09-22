@@ -29,8 +29,8 @@ func TestDiffNoFalsePositive(t *testing.T) {
 	if len(got.MissingUpstream) != 0 {
 		t.Fatalf("上游明明都有，不该报缺失，实得 %v", got.MissingUpstream)
 	}
-	if got.EffectiveCount != 3 {
-		t.Fatalf("有效数应为 3，实得 %d", got.EffectiveCount)
+	if got.ListedCount != 3 {
+		t.Fatalf("有效数应为 3，实得 %d", got.ListedCount)
 	}
 	if !reflect.DeepEqual(got.NotConfigured, []string{"extra-model"}) {
 		t.Fatalf("上游多出来的应报 not_configured，实得 %v", got.NotConfigured)
@@ -46,8 +46,8 @@ func TestDiffIgnoresCase(t *testing.T) {
 	if len(got.MissingUpstream) != 0 {
 		t.Fatalf("只有大小写不同，不该报缺失（会让用户删掉有效配置），实得 %v", got.MissingUpstream)
 	}
-	if got.EffectiveCount != 2 {
-		t.Fatalf("有效数应为 2，实得 %d", got.EffectiveCount)
+	if got.ListedCount != 2 {
+		t.Fatalf("有效数应为 2，实得 %d", got.ListedCount)
 	}
 }
 
@@ -72,8 +72,8 @@ func TestDiffFindsMissingUpstream(t *testing.T) {
 	if !reflect.DeepEqual(got.MissingUpstream, want) {
 		t.Fatalf("缺失清单应为 %v，实得 %v", want, got.MissingUpstream)
 	}
-	if got.EffectiveCount != 1 {
-		t.Fatalf("33 个配置里只有 1 个上游有 → 有效数应为 1，实得 %d", got.EffectiveCount)
+	if got.ListedCount != 1 {
+		t.Fatalf("33 个配置里只有 1 个上游有 → 有效数应为 1，实得 %d", got.ListedCount)
 	}
 }
 
@@ -86,8 +86,8 @@ func TestDiffAllMissing(t *testing.T) {
 	if len(got.MissingUpstream) != 2 {
 		t.Fatalf("上游为空时两个配置都该报缺失，实得 %v", got.MissingUpstream)
 	}
-	if got.EffectiveCount != 0 {
-		t.Fatalf("有效数应为 0（不能为负），实得 %d", got.EffectiveCount)
+	if got.ListedCount != 0 {
+		t.Fatalf("有效数应为 0（不能为负），实得 %d", got.ListedCount)
 	}
 }
 
@@ -103,8 +103,8 @@ func TestDiffSkipsBlankEntries(t *testing.T) {
 	if len(got.NotConfigured) != 0 {
 		t.Fatalf("空白项不该报 not_configured，实得 %v", got.NotConfigured)
 	}
-	if got.EffectiveCount != 1 {
-		t.Fatalf("只有 1 个非空配置，有效数应为 1，实得 %d", got.EffectiveCount)
+	if got.ListedCount != 1 {
+		t.Fatalf("只有 1 个非空配置，有效数应为 1，实得 %d", got.ListedCount)
 	}
 }
 
@@ -116,7 +116,7 @@ func TestDiffIdentical(t *testing.T) {
 		t.Fatalf("完全一致时不该有任何差异，实得 missing=%v notConfigured=%v",
 			got.MissingUpstream, got.NotConfigured)
 	}
-	if got.EffectiveCount != 3 {
-		t.Fatalf("有效数应为 3，实得 %d", got.EffectiveCount)
+	if got.ListedCount != 3 {
+		t.Fatalf("有效数应为 3，实得 %d", got.ListedCount)
 	}
 }

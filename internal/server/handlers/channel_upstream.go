@@ -140,10 +140,21 @@ func checkChannelUpstream(c *gin.Context) {
 		"probe_ok":         true,
 		"configured_count": countNonBlank(configured),
 		"upstream_count":   len(upstream),
-		"effective_count":  diff.EffectiveCount,
+		"listed_count":     diff.ListedCount,
 		"upstream_models":  upstream,
 		"missing_upstream": diff.MissingUpstream,
 		"not_configured":   diff.NotConfigured,
+		// 这条警告是必须的，不是客套话。
+		//
+		// 实测（2026-09-23）发现 **上游的 /v1/models 清单并不完整**：
+		// 可茶/MiniMax-M3 不在清单里，实际调用却是 200。
+		// 所以 missing_upstream 只能读作「上游清单里没列出来」，
+		// **不能**读作「上游没有这个模型」。
+		//
+		// 把它当成后者会让用户删掉本来能用的配置 —— 那是不可逆的破坏。
+		// 不带这条警告的对比结果，比不提供对比更危险。
+		"warning": "「上游清单未列出」不等于「调不通」：实测发现部分站点的 /v1/models " +
+			"并不完整（未列出的模型仍可能正常响应）。清理配置前请先用该模型发一条真实请求确认。",
 	})
 }
 
@@ -153,8 +164,12 @@ type upstreamDiff struct {
 	MissingUpstream []string
 	// NotConfigured 是上游有但配置里没写的模型 —— 可以补进来。
 	NotConfigured []string
-	// EffectiveCount 是配置里真正可能可用的数量（总配置数 − 上游没有的）。
-	EffectiveCount int
+	// ListedCount 是配置里**同时出现在上游清单中**的数量。
+	//
+	// 刻意不叫 EffectiveCount（有效数）：实测发现上游 /v1/models 并不完整，
+	// 未列出的模型仍可能正常响应，所以这个数**不能**读作「可用的数量」，
+	// 只能读作「上游主动声明支持的数量的下界」。
+	ListedCount int
 }
 
 // diffUpstreamModels 对比「配置里写的模型」与「上游实际有的模型」。
@@ -206,9 +221,9 @@ func diffUpstreamModels(configured, upstream []string) upstreamDiff {
 	sort.Strings(result.MissingUpstream)
 	sort.Strings(result.NotConfigured)
 
-	result.EffectiveCount = countNonBlank(configured) - len(result.MissingUpstream)
-	if result.EffectiveCount < 0 {
-		result.EffectiveCount = 0
+	result.ListedCount = countNonBlank(configured) - len(result.MissingUpstream)
+	if result.ListedCount < 0 {
+		result.ListedCount = 0
 	}
 	return result
 }
