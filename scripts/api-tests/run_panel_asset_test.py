@@ -188,6 +188,7 @@ def main():
         "缺 %s" % (missing_manual or "无"),
     )
 
+
     # P15 分压与限流监控（T-allocate-001 / T-monitor-001）: 首页那一页要真的进产物 ——
     # 监控接口路径、分压模式的选项文案、分压设置项的键名与三语文案, 四类标记都要在 bundle 里找到。
     # 标记挑的是「面板真的会调用/真的会显示」的东西: 页面数据来自 /api/v1/monitor/allocation,
@@ -241,6 +242,48 @@ def main():
         "P17 入站正文上限进产物（设置键 + 三语文案）",
         not missing_bodylimit,
         "缺 %s" % (missing_bodylimit or "无"),
+    )
+
+    # P15 模型映射：面板的「试一下」入口、三条口径提示与三语文案都要进产物。
+    # 标记挑的是「面板真的会调用/真的会显示」的东西（未引用的导出会被打包器摇掉，拿它当标记会假红）。
+    modelmap_markers = ["model-mapping/list", "model-mapping/test", "模型映射",
+                        "试一下", "試一下", "Try it"]
+    missing_modelmap = [marker for marker in modelmap_markers if marker not in bundle]
+    record(
+        "P18 模型映射面板进产物（接口路径 + 试跑入口 + 三语文案）",
+        not missing_modelmap,
+        "缺 %s" % (missing_modelmap or "无"),
+    )
+
+    # P16 用量报告：预览/立即发送两个入口、周期口径文案与三语文案都要进产物。
+    usagereport_markers = ["usage-report/preview", "usage-report/send", "用量报告", "用量報告",
+                           "Usage Reports", "立即发送", "立即發送", "Send now"]
+    missing_usagereport = [marker for marker in usagereport_markers if marker not in bundle]
+    record(
+        "P19 用量报告面板进产物（预览/发送接口 + 三语文案）",
+        not missing_usagereport,
+        "缺 %s" % (missing_usagereport or "无"),
+    )
+
+    # P17 告警规则：两条防噪音机制的文案必须进产物 —— 它们是这个功能能不能用的分水岭，
+    # 界面上不解释清楚，用户配完就会被噪音淹没然后关掉整个功能。
+    alertrule_markers = ["alert-rule/evaluate", "alert-rule/run", "告警规则", "告警規則",
+                         "Alert Rules", "样本下限", "樣本下限", "Min samples"]
+    missing_alertrule = [marker for marker in alertrule_markers if marker not in bundle]
+    record(
+        "P20 告警规则面板进产物（试算/立即检查接口 + 防噪音文案 + 三语文案）",
+        not missing_alertrule,
+        "缺 %s" % (missing_alertrule or "无"),
+    )
+
+    # P18 客户端配置导出：五个目标的名称与「转发口地址」这个必填项都要进产物。
+    cliexport_markers = ["cli-export/generate", "客户端配置导出", "客戶端設定匯出",
+                         "Client Config Export", "转发口地址", "轉發口位址", "Relay base URL"]
+    missing_cliexport = [marker for marker in cliexport_markers if marker not in bundle]
+    record(
+        "P21 客户端配置导出面板进产物（导出接口 + 五目标 + 三语文案）",
+        not missing_cliexport,
+        "缺 %s" % (missing_cliexport or "无"),
     )
 
     locales = {"简体": "统一号池", "繁體": "統一號池", "English": "Unified pool"}
