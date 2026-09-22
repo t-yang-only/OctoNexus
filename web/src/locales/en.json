@@ -690,6 +690,42 @@
                 "weekly": "Weekly",
                 "monthly": "Monthly"
             }
+        },
+        "alertRule": {
+            "title": "Alert Rules",
+            "description": "Metric-based alerts: notify your configured channels when a channel's error rate or average latency exceeds a threshold over a recent window. Complements the existing event notifications (balance hit zero, probe recovered) — failures are scattered, so there is no single event to hook onto.",
+            "newRule": "New rule",
+            "namePlaceholder": "Rule name (e.g. \"channel error rate too high\")",
+            "channelPlaceholder": "Channel name",
+            "threshold": "Threshold",
+            "window": "Window (min)",
+            "minRequests": "Min samples",
+            "cooldown": "Cooldown (min)",
+            "hint": "Min samples is what keeps alerts quiet: below it nothing is evaluated, otherwise a single unlucky failure reads as a 100% error rate. Cooldown is per rule AND per channel, so one bad channel cannot consume another's alert budget.",
+            "add": "Add",
+            "loading": "Loading…",
+            "empty": "No rules yet. Without rules no metric alerts are produced.",
+            "nameRequired": "Rule name is required",
+            "channelRequired": "A channel name is required when scope is \"specific channel\"",
+            "noSamples": "No samples in the window — nothing to evaluate yet",
+            "runNow": "Check now",
+            "ran": "Fired this round",
+            "recentFires": "Recent fires",
+            "minutesShort": "m",
+            "metrics": {
+                "error_rate": "Error rate",
+                "latency": "Avg latency"
+            },
+            "scopes": {
+                "all": "All channels",
+                "channel": "Specific channel"
+            },
+            "reason": {
+                "breached": "would fire",
+                "within_threshold": "within threshold",
+                "insufficient_samples": "insufficient samples, not evaluated",
+                "cooldown": "in cooldown, not repeated"
+            }
         }
     },
     "group": {

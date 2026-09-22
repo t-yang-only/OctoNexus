@@ -8,6 +8,7 @@ import { SettingRouting } from './Routing';
 import { SettingModelMapping } from './ModelMapping';
 import { SettingNotify } from './Notify';
 import { SettingUsageReport } from './UsageReport';
+import { SettingAlertRule } from './AlertRule';
 import { SettingAPIKey } from './APIKey';
 import { SettingLLMPrice } from './LLMPrice';
 import { SettingAccount } from './Account';
@@ -57,6 +58,7 @@ export function Setting() {
                 <TabsContent value="notify" className="space-y-4 px-4">
                     <SettingNotify />
                     <SettingUsageReport />
+                    <SettingAlertRule />
                 </TabsContent>
                 <TabsContent value="data" className="space-y-4 px-4">
                     <SettingAccount />

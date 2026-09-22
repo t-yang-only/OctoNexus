@@ -690,6 +690,42 @@
                 "weekly": "週報",
                 "monthly": "月報"
             }
+        },
+        "alertRule": {
+            "title": "告警規則",
+            "description": "按指標報警：某個渠道最近一段時間錯誤率或平均耗時超過閾值時，推到已配置的通知渠道。與既有的「事件通知」（餘額歸零、探活恢復）互補——失敗往往是散落的，沒有單一事件可以掛鉤，只能按指標判定。",
+            "newRule": "新增規則",
+            "namePlaceholder": "規則名稱（例如「渠道錯誤率過高」）",
+            "channelPlaceholder": "渠道名",
+            "threshold": "閾值",
+            "window": "視窗（分鐘）",
+            "minRequests": "樣本下限",
+            "cooldown": "冷卻（分鐘）",
+            "hint": "樣本下限是防噪音的關鍵：視窗內請求數低於它一律不判定，否則一次偶然失敗會被算成 100% 錯誤率。冷卻按「規則 + 渠道」獨立，一個壞渠道不會吃掉別的渠道的告警名額。",
+            "add": "新增",
+            "loading": "載入中…",
+            "empty": "還沒有規則。沒有規則時不會產生任何指標告警。",
+            "nameRequired": "規則名稱不能為空",
+            "channelRequired": "作用範圍為「指定渠道」時必須填渠道名",
+            "noSamples": "視窗內沒有樣本，暫時無法判定",
+            "runNow": "立即檢查",
+            "ran": "本輪觸發",
+            "recentFires": "最近觸發記錄",
+            "minutesShort": "分",
+            "metrics": {
+                "error_rate": "錯誤率",
+                "latency": "平均耗時"
+            },
+            "scopes": {
+                "all": "全部渠道",
+                "channel": "指定渠道"
+            },
+            "reason": {
+                "breached": "會觸發",
+                "within_threshold": "未越閾值",
+                "insufficient_samples": "樣本不足，不判定",
+                "cooldown": "冷卻中，不重複報"
+            }
         }
     },
     "group": {

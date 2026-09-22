@@ -86,6 +86,9 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.ModelMapping{},
 		// 用量报告的发送状态（吸收上游 Usage Reports）：记"哪个周期已发过"，保证同周期不补发。
 		&model.UsageReportState{},
+		// 告警规则与触发历史（吸收上游 Alerts）：指标型规则（错误率/延迟）与回溯记录。
+		&model.AlertRule{},
+		&model.AlertFire{},
 		&migrate.MigrationRecord{},
 	); err != nil {
 		return err

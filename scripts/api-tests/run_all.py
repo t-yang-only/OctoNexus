@@ -64,6 +64,8 @@ SUITES = [
      "模型名智能重写（直通不变量 / 长名改写生效 / 优先级 / 停用即失效 / 试跑端点）", "instance,mock,db"),
     ("usagereport", "run_usage_report_test.py",
      "用量报告（窗口口径 / 周期键唯一 / 预览不投递 / 立即发送不占名额 / 正文自证）", "instance,db"),
+    ("alertrule", "run_alert_rule_test.py",
+     "告警规则（样本下限防噪音 / 真实触发 / 冷却按渠道独立 / 试算含冷却 / 最终形态校验）", "instance,mock,db"),
     ("cipher", "run_credential_encryption_test.py",
      "渠道凭据静态加密（落库密文 / 端到端解密 / 判据自检 / 全库无明文）", "instance,db,mock"),
     ("bodylimit", "run_bodylimit_test.py",
