@@ -20,9 +20,18 @@ import (
 //
 // 自动读数永远优先于人工录入：人工只是"接口读不到时的兜底"，接口一旦读出数就不再用手工值。
 
+// BalanceReasonNoRecord 是"没读到余额、但也没有任何读数记录"的原因码。
+//
+// 为什么必须有它：面板上摆的是「未读到 N 个」和一个按原因归类的清单。
+// 若读不到原因的渠道既不给码、也不进归类，两个数字就会对不上 ——
+// 实测生产就是「未读到 26」配「网络不可达 25」，而少掉的那个渠道
+// 在明细里既没有原因、也无从找出是哪一个。
+// 归类必须覆盖全部未读到的渠道：宁可用一个诚实的兜底码，也不要静默漏掉。
+const BalanceReasonNoRecord = "no_record"
+
 // BalanceReasonRow 是一条"为什么没读到余额"的记录。
 type BalanceReasonRow struct {
-	Key  string    `json:"reason"` // 机器可读原因码（unreachable/no_endpoint/unauthorized/unparsable/proxy_node）
+	Key  string    `json:"reason"` // 机器可读原因码（unreachable/no_endpoint/unauthorized/unparsable/proxy_node/no_record）
 	Text string    `json:"text"`   // 给人看的解释（面板直接显示）
 	At   time.Time `json:"at"`
 }

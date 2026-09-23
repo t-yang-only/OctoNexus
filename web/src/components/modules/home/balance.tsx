@@ -238,6 +238,15 @@ export function Balance() {
                         {Object.entries(reasons).map(([code, count]) => (
                             <li key={code}>{t(`reason.${code}` as never)}：{count}</li>
                         ))}
+                        {/* 把归类合计与未读到总数并排摆出来：这张账能一眼自核。
+                            后端已保证每个未读到的渠道都有原因码（读不到原因的归 no_record），
+                            这里再显示一次是为了让"少算了"在界面上直接可见，而不是要用户自己加。 */}
+                        <li className="text-foreground/70">
+                            {t('reasonTotal', {
+                                counted: Object.values(reasons).reduce((sum, n) => sum + n, 0),
+                                total: unknown,
+                            })}
+                        </li>
                     </ul>
                 </div>
             )}

@@ -374,7 +374,9 @@
       "manualUnitHint": "Scale: {points} points = 1 unit; set 0 to clear",
       "manualAt": "entered at {at}",
       "reasonSummary": "Unread channels grouped by cause (the site does not expose it, we are not mis-computing):",
+      "reasonTotal": "classified {counted} / unknown {total}",
       "reason": {
+        "no_record": "no scan record yet",
         "no_endpoint": "site has no balance endpoint",
         "unauthorized": "upstream refused (credential or WAF)",
         "unreachable": "network unreachable",

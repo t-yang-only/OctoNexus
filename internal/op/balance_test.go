@@ -197,3 +197,78 @@ func TestNormalizeBalanceUnitFallsBack(t *testing.T) {
 		t.Errorf("零点折算 = %v, want 0", got)
 	}
 }
+
+// TestBalanceSummaryReasonCountsCoverEveryUnknown 归类必须覆盖全部"未读到"的渠道 ——
+// 面板上摆的是「未读到 N 个」和一张按原因归类的清单；两个数字对不上时
+// 用户只能自己去加，而且根本找不出少掉的那一个是谁。
+//
+// 这条不变量最初是坏的：读不到原因的渠道既不给原因码、也不进归类，
+// 生产实测就出现「未读到 26」配「网络不可达 25」。所以这里同时钉三件事：
+// ① 每个未读到的渠道都必须有非空原因码（读不到原因的归 no_record）；
+// ② ReasonCounts 的合计必须等于 UnknownChannels；
+// ③ 原因码必须能找到文案，否则界面会显示成空标签。
+func TestBalanceSummaryReasonCountsCoverEveryUnknown(t *testing.T) {
+	SettingSetStringForTest(model.SettingKeyBalancePointsPerUnit, "500000", true)
+	SettingSetStringForTest(model.SettingKeyBalanceCurrency, "USD", true)
+	t.Cleanup(func() {
+		SettingSetStringForTest(model.SettingKeyBalancePointsPerUnit, "", false)
+		SettingSetStringForTest(model.SettingKeyBalanceCurrency, "", false)
+		RecordChannelBalanceReason(9031, "", "")
+	})
+
+	seedBalanceCaches(t,
+		[]model.Channel{
+			{ID: 9031, ChannelConfig: model.ChannelConfig{Name: "有原因的站", Enabled: true}},
+			{ID: 9032, ChannelConfig: model.ChannelConfig{Name: "从没扫过的站", Enabled: true}},
+			// 停用的渠道同样进明细与归类（既有口径：面板列的是全部渠道，
+			// 停用只是"现在没在用"，它的余额仍是用户要掌握的事实）。
+			// 这里显式钉住这个口径，免得日后有人"顺手"把它过滤掉而没人发现。
+			{ID: 9033, ChannelConfig: model.ChannelConfig{Name: "停用站", Enabled: false}},
+			{ID: 9034, ChannelConfig: model.ChannelConfig{Name: "已知余额站", Enabled: true}},
+		},
+		nil, nil,
+	)
+	RecordChannelBalance(9034, 500000) // 已知，不该出现在未读到的归类里
+	RecordChannelBalanceReason(9031, "unreachable", "网络不可达")
+	// 9032 与 9033 刻意不记原因 —— 这就是修复前会漏掉账的那一类。
+
+	summary := BalanceSummaryGet()
+
+	if summary.UnknownChannels != 3 {
+		t.Fatalf("UnknownChannels = %d, want 3（9031 + 9032 + 9033，停用渠道也计入）", summary.UnknownChannels)
+	}
+
+	total := 0
+	for key, count := range summary.ReasonCounts {
+		total += count
+		if key == "" {
+			t.Errorf("出现空原因码（计数 %d）：每个未读到的渠道都必须能归类", count)
+		}
+	}
+	if total != summary.UnknownChannels {
+		t.Errorf("归类合计 = %d, 未读到 = %d：两个数字必须相等，否则界面上的账对不上",
+			total, summary.UnknownChannels)
+	}
+	if got := summary.ReasonCounts[BalanceReasonNoRecord]; got != 2 {
+		t.Errorf("no_record 计数 = %d, want 2（从没扫过的站 + 停用站）", got)
+	}
+	if got := summary.ReasonCounts["unreachable"]; got != 1 {
+		t.Errorf("unreachable 计数 = %d, want 1", got)
+	}
+
+	// 明细层同样必须逐行给得出来源：面板展开看的就是这些行。
+	for _, row := range summary.Channels {
+		if row.ChannelID == 9034 {
+			if !row.Known || row.ReasonCode != "" {
+				t.Errorf("已知渠道不该带原因码 = %+v", row)
+			}
+			continue
+		}
+		if row.ReasonCode == "" {
+			t.Errorf("渠道 %d(%s) 未读到却没有原因码", row.ChannelID, row.ChannelName)
+		}
+		if row.ReasonCode == "unreachable" && row.ReasonText == "" {
+			t.Errorf("渠道 %d 的原因码没有配文案，界面会显示空标签", row.ChannelID)
+		}
+	}
+}

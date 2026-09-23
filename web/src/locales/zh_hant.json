@@ -374,7 +374,9 @@
       "manualUnitHint": "口徑：{points} 點 = 1 單位；填 0 可清除輸入",
       "manualAt": "輸入於 {at}",
       "reasonSummary": "未讀到的渠道依原因歸類（不是我們算錯，而是站點側讀不到）：",
+      "reasonTotal": "歸類合計 {counted} / 未讀到 {total}",
       "reason": {
+        "no_record": "沒有讀數記錄（從未掃過）",
         "no_endpoint": "該站點沒有餘額介面",
         "unauthorized": "上游拒絕讀取（憑證或被 WAF 擋）",
         "unreachable": "網路不可達",

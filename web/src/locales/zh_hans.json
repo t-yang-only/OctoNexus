@@ -374,7 +374,9 @@
       "manualUnitHint": "口径：{points} 点 = 1 单位；填 0 可清除录入",
       "manualAt": "录入于 {at}",
       "reasonSummary": "未读到的渠道按原因归类（都不是我们算错，而是站点侧读不到）：",
+      "reasonTotal": "归类合计 {counted} / 未读到 {total}",
       "reason": {
+        "no_record": "没有读数记录（从未扫过）",
         "no_endpoint": "该站点没有余额接口",
         "unauthorized": "上游拒绝读取（凭据或被 WAF 挡）",
         "unreachable": "网络不可达",

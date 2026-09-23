@@ -89,14 +89,20 @@ func BalanceSummaryGet() model.BalanceSummary {
 			// 未读到：带上"为什么"（原因码 + 一句人话），面板才不至于只显示"未读到"。
 			summary.UnknownChannels++
 			row.Note = channel.BalanceNote
-			if key, text := ChannelBalanceReason(channel.ID); key != "" {
-				row.ReasonCode = key
-				row.ReasonText = text
-				if summary.ReasonCounts == nil {
-					summary.ReasonCounts = map[string]int{}
-				}
-				summary.ReasonCounts[key]++
+			key, text := ChannelBalanceReason(channel.ID)
+			if key == "" {
+				// 没有任何读数记录（从未扫过，或上次的记录已被清掉）时也要归类。
+				// 不归类的话 ReasonCounts 的合计会小于 UnknownChannels，
+				// 面板上就会出现「未读到 26」配「网络不可达 25」这种差一个的账，
+				// 而少掉的那个渠道连原因都查不到是谁。
+				key = BalanceReasonNoRecord
 			}
+			row.ReasonCode = key
+			row.ReasonText = text
+			if summary.ReasonCounts == nil {
+				summary.ReasonCounts = map[string]int{}
+			}
+			summary.ReasonCounts[key]++
 		}
 		summary.TotalMonthlyRemaining += row.MonthlyRemaining
 		summary.Channels = append(summary.Channels, row)
