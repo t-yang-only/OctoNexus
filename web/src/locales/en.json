@@ -873,6 +873,20 @@
             "hint": "Use the + button at the top right to create one — the group name is the model name clients pass in.",
             "filteredTitle": "No matching groups",
             "filteredHint": "Try another search term."
+        },
+        "usage": {
+            "title": "Usage",
+            "summary": "{used} of {total} groups have been called ({rate}%)",
+            "breakdown": "{auto} auto-generated / {manual} manual",
+            "expand": "Show details",
+            "collapse": "Hide",
+            "caveat": "\\u201cNever called\\u201d does not mean \\u201csafe to delete\\u201d \\u2014 spare groups and not-yet-enabled ones legitimately have no traffic. Facts only here.",
+            "topTitle": "Most-called groups",
+            "calls": "{count} calls",
+            "members": "{count} members",
+            "auto": "auto",
+            "manual": "manual",
+            "unused": "The other {count} have no calls in the current log window ({window} records)"
         }
     },
     "model": {

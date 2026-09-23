@@ -215,3 +215,44 @@ export function useDeleteGroup() {
         onSuccess: (_, id) => removeGroupCache(id),
     });
 }
+
+// T-usability-009 分组使用情况。
+//
+// 生产实测：418 个分组里只有 41 个被调用过（94% 从未使用），
+// 而它们**全部**是客户端可直接调用的模型名 —— 用户在 AI 客户端里会看到 418 个条目。
+export interface GroupUsageItem {
+    group_id: number;
+    name: string;
+    /** 选路模式（manual/allocate/smart）—— 比「是否启用」更能说明这个分组是干什么的。 */
+    mode: string;
+    item_count: number;
+    /** 名字形态是「渠道名/模型名」—— 保存渠道时自动生成的分组。 */
+    is_auto: boolean;
+    /** 窗口内调用次数；0 表示从未被调用过。 */
+    call_count: number;
+    /** 最后一次调用的时间；零值表示从未调用。 */
+    last_call_at: string;
+}
+
+export interface GroupUsageStats {
+    total: number;
+    used: number;
+    unused: number;
+    auto: number;
+    manual: number;
+    window: number;
+    groups: GroupUsageItem[];
+}
+
+// useGroupUsage 取分组使用情况。
+//
+// 注意这个接口的定位：**只陈述事实，不给「该删哪个」的结论**。
+// 未被调用不等于该删（备用分组、待启用分组合法地没有流量），
+// 删不删由掌握上下文的人决定。
+export function useGroupUsage(enabled = true) {
+    return useQuery({
+        queryKey: ['groups', 'usage'],
+        queryFn: () => apiRequest<GroupUsageStats>('/api/v1/group/usage'),
+        enabled,
+    });
+}

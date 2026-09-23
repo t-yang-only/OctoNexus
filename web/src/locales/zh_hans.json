@@ -873,6 +873,20 @@
             "hint": "点右上角的 + 新建一个分组；分组的名字就是客户端要填的模型名。",
             "filteredTitle": "没有匹配的分组",
             "filteredHint": "换个搜索词试试。"
+        },
+        "usage": {
+            "title": "使用情况",
+            "summary": "共 {total} 个分组，其中 {used} 个被调用过（{rate}%）",
+            "breakdown": "自动生成 {auto} / 手工命名 {manual}",
+            "expand": "展开明细",
+            "collapse": "收起",
+            "caveat": "「未被调用」不等于「可以删除」：备用分组、待启用的分组都合法地没有流量。这里只陈述事实。",
+            "topTitle": "调用最多的分组",
+            "calls": "调用 {count} 次",
+            "members": "成员 {count} 个",
+            "auto": "自动生成",
+            "manual": "手工",
+            "unused": "其余 {count} 个在当前日志窗口（{window} 条）内没有调用记录"
         }
     },
     "model": {

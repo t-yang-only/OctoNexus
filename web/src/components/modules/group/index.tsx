@@ -4,6 +4,7 @@ import { useTranslations } from 'use-intl';
 import { GroupCard } from './Card';
 import { CreateDialogContent } from './Create';
 import { useRuntimeClock } from './MemberStatus';
+import { GroupUsageBanner } from './UsageBanner';
 import { useGroupList } from '@/api/group';
 import { PageActions, usePageActionsStore } from '@/components/common/PageActions';
 import { VirtualizedGrid } from '@/components/common/VirtualizedGrid';
@@ -87,19 +88,26 @@ export function Group() {
         );
     }
 
+    // 使用情况横幅放在列表上方：它回答的是「我建的这些分组哪些在用」，
+    // 而这个问题在条目列表里完全看不出来。用 flex 包一层让横幅固定、列表自己滚动。
     return (
-        <VirtualizedGrid
-            items={visibleGroups}
-            columns={{ default: 1, md: 2, lg: 3 }}
-            estimateItemHeight={520}
-            getItemKey={(group) => group.id}
-            renderItem={(group) => {
-                let deadline = group.runtime.affinity_until;
-                for (const cooldownUntil of Object.values(group.runtime.cooldowns)) {
-                    deadline = Math.max(deadline, cooldownUntil);
-                }
-                return <GroupCard group={group} now={deadline > runtimeNow ? runtimeNow : deadline} />;
-            }}
-        />
+        <div className="flex h-full min-h-0 flex-col">
+            <GroupUsageBanner />
+            <div className="min-h-0 flex-1">
+                <VirtualizedGrid
+                    items={visibleGroups}
+                    columns={{ default: 1, md: 2, lg: 3 }}
+                    estimateItemHeight={520}
+                    getItemKey={(group) => group.id}
+                    renderItem={(group) => {
+                        let deadline = group.runtime.affinity_until;
+                        for (const cooldownUntil of Object.values(group.runtime.cooldowns)) {
+                            deadline = Math.max(deadline, cooldownUntil);
+                        }
+                        return <GroupCard group={group} now={deadline > runtimeNow ? runtimeNow : deadline} />;
+                    }}
+                />
+            </div>
+        </div>
     );
 }

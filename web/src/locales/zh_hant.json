@@ -873,6 +873,20 @@
             "hint": "點右上角的 + 新建一個分組；分組的名字就是客戶端要填的模型名。",
             "filteredTitle": "沒有符合的分組",
             "filteredHint": "換個搜尋詞試試。"
+        },
+        "usage": {
+            "title": "使用情況",
+            "summary": "共 {total} 個分組，其中 {used} 個被調用過（{rate}%）",
+            "breakdown": "自動生成 {auto} / 手工命名 {manual}",
+            "expand": "展開明細",
+            "collapse": "收起",
+            "caveat": "「未被調用」不等於「可以刪除」：備用分組、待啟用的分組都合法地沒有流量。這裡只陳述事實。",
+            "topTitle": "調用最多的分組",
+            "calls": "調用 {count} 次",
+            "members": "成員 {count} 個",
+            "auto": "自動生成",
+            "manual": "手工",
+            "unused": "其餘 {count} 個在當前日誌窗口（{window} 筆）內沒有調用記錄"
         }
     },
     "model": {
