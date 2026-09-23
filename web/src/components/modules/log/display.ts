@@ -1,4 +1,4 @@
-import type { RelayHistoryItem, RelayLogOverview } from '@/api/log';
+import type { RelayAttemptDetail, RelayHistoryItem, RelayLogOverview } from '@/api/log';
 
 // 日志卡片的容错字段解析（NM-DS-008；语义借鉴 fork 的 display.ts，实现按本地数据结构重写）。
 //
@@ -61,6 +61,13 @@ export interface LogDisplayFields {
     targetProtocol: number;
     apiKeyName: string;
     error: string;
+    // attemptChain 是每一轮尝试的明细链（T-trace-001），按轮次升序；老数据为空数组。
+    //
+    // 两个来源都给这个字段且口径一致（见 api/log.ts 的 attempt_chain 注释）：
+    // 链上只含已结束的轮次，正在进行的那轮由 targetChannel/round 表达。
+    attemptChain: RelayAttemptDetail[];
+    // attemptChainTruncated 标记链被截断过，界面必须提示"前面还有"。
+    attemptChainTruncated: boolean;
     source: 'live' | 'history';
 }
 
@@ -156,6 +163,11 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
         targetProtocol: source.target_protocol,
         apiKeyName: source.api_key_name || '',
         error: source.error || '',
+        // 尝试链: 实时快照是 attempt_chain（进程内 RequestState），历史行是 attempt_detail（落库字段，
+        // 见 model.RelayLog —— 用 AttemptDetail 是为了与 RelayLog.Attempts 计数区分开）。
+        // 两者同义同口径，这里收敛成一套；缺字段时给空数组而不是 undefined，调用方不必到处判空。
+        attemptChain: (live ? source.attempt_chain : source.attempt_detail) ?? [],
+        attemptChainTruncated: source.attempts_truncated === true,
         source: live ? 'live' : 'history',
     };
 }

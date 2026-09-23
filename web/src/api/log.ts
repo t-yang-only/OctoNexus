@@ -52,7 +52,32 @@ export interface RelayHistoryItem {
     // 与 Status 的区别是关键: Status 只说"这次失败了"，FaultKind 说"这次失败该算在谁的账上"。
     // 后端在产生错误的那一刻定类并落库（历史）或随 SSE 下发（实时），前端只做展示与筛选，绝不重新分类。
     fault_kind?: FaultKind;
+    // attempt_detail 是每一轮尝试的明细链（T-trace-001），按轮次顺序。
+    //
+    // 回答的是既有字段回答不了的问题: Attempts 只说"试了几次"、TargetChannel 只说"最后用了谁"，
+    // **中间试过谁、各自为什么失败** 只能从这里看。某个成员每次都失败、每次都要绕开它，
+    // 从最终结果上看和"这个分组有点慢"毫无区别。
+    //
+    // 与实时快照的 attempt_chain 同义（同一份数据的落库形态），命名沿用后端字段。
+    // 老数据（升级前落库）没有这个字段，故为可选。
+    attempt_detail?: RelayAttemptDetail[];
+    // attempts_truncated 标记尝试链是否被截断（只保留最后 RelayAttemptDetailMax 轮）。
+    // 界面必须据此提示"前面还有"，否则读的人会以为这就是全部。
+    attempts_truncated?: boolean;
     error: string;
+}
+
+// RelayAttemptDetail 是单轮尝试的落库快照，与后端 model.RelayAttemptDetail 一一对应。
+export interface RelayAttemptDetail {
+    // round 是这一轮在请求内的序号，从 1 起，与面板上的"第几轮"同口径。
+    round: number;
+    channel: string;
+    model: string;
+    wait_ms: number;
+    // fault_kind 空串表示这一轮没有归因：要么它成功了，要么它是被人工中止的（不是渠道故障）。
+    fault_kind?: FaultKind;
+    // error 是上游返回的错误原文；空串表示本轮没报错。
+    error?: string;
 }
 
 // FaultKind 是失败归因分类，与后端 model.RelayLog.FaultKind 一一对应。
@@ -144,6 +169,15 @@ export interface RelayLogOverview {
     sending: boolean;
     // fault_kind 同 RelayHistoryItem：失败归因分类，实时流由后端直接下发（RequestState 带该字段）。
     fault_kind?: FaultKind;
+    // attempt_chain 是已结束轮次的尝试明细（T-trace-001）。
+    //
+    // 实时快照与历史行都给这个字段，但口径一致: 只含**已结束**的轮次，
+    // 正在进行的那轮由 target_channel / target_model / round 表达 —— 两者不重叠，
+    // 于是"链上全部轮次 + 当前轮"恒等于本次请求打过的全部成员。
+    // 实时看它就能看到"刚刚这几次都试了谁、为什么失败"，不必等请求结束落库。
+    attempt_chain?: RelayAttemptDetail[];
+    // attempts_truncated 标记尝试链是否被截断（只保留最后 RelayAttemptDetailMax 轮）。
+    attempts_truncated?: boolean;
     error?: string;
 }
 

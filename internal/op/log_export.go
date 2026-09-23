@@ -30,7 +30,7 @@ const RelayLogExportMaxRows = 200000
 // 只有行主键能唯一定位一行, 下游做去重/回查时不必再猜。
 var relayLogExportHeader = []string{
 	"日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "上游自称模型", "模型一致", "目标渠道", "上游协议", "首字节(ms)", "耗时(ms)", "上游轮次", "判定理由",
-	"输入tokens", "缓存命中tokens", "输出tokens", "费用", "API Key", "错误",
+	"输入tokens", "缓存命中tokens", "输出tokens", "费用", "API Key", "错误", "尝试明细",
 }
 
 // RelayLogExportCSV 按筛选条件把请求级明细写成 CSV, 返回写出的行数(不含表头)。
@@ -112,7 +112,35 @@ func relayLogExportRow(entry model.RelayLog) []string {
 		strconv.FormatFloat(entry.Cost, 'f', -1, 64),
 		entry.APIKeyName,
 		entry.Error,
+		attemptDetailLabel(entry),
 	}
+}
+
+// attemptDetailLabel 把尝试链压成一行供表格阅读（T-trace-001）。
+//
+// 为什么导出成文本而不是 JSON: 这一列是给人扫的——"第2轮 channelB 401(member)"
+// 一眼就能看出是谁在拖后腿; 原样吐 JSON 在表格工具里只会是一坨需要再解析的东西。
+// 需要机器处理时用接口的 attempt_detail 字段（结构化, 带完整原文）。
+func attemptDetailLabel(entry model.RelayLog) string {
+	if len(entry.AttemptDetail) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(entry.AttemptDetail))
+	for _, attempt := range entry.AttemptDetail {
+		label := fmt.Sprintf("#%d %s %dms", attempt.Round, attempt.Channel, attempt.WaitMs)
+		if attempt.FaultKind != "" {
+			label += " " + attempt.FaultKind
+		} else {
+			label += " ok"
+		}
+		parts = append(parts, label)
+	}
+	joined := strings.Join(parts, " | ")
+	if entry.AttemptsTruncated {
+		// 截断必须写在明面上: 只给后半段而不说明, 读的人会以为这就是全部。
+		joined = "…(前段已截断) " + joined
+	}
+	return joined
 }
 
 // protocolLabel 把协议位掩码写成可读名: 导出给人和表格工具看, 数字位掩码没有意义。

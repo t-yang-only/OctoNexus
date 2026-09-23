@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -122,11 +123,11 @@ func TestMemberBusyCountFollowsRounds(t *testing.T) {
 		t.Fatalf("busy(72) = %d, want 0", got)
 	}
 
-	first.finishRound("")
+	first.finishRound(nil, false)
 	if got := memberBusyCount(71); got != 1 {
 		t.Fatalf("busy(71) = %d after one round finished, want 1 (no leak, no over-count)", got)
 	}
-	second.finishRound("upstream 500")
+	second.finishRound(errors.New("upstream 500"), false)
 	if got := memberBusyCount(71); got != 0 {
 		t.Fatalf("busy(71) = %d after both rounds finished, want 0", got)
 	}

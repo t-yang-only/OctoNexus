@@ -1007,6 +1007,11 @@
       "stopFailed": "停止当前轮次失败",
       "waitingChannelSelection": "正在等待选择渠道",
       "waitingResponse": "正在等待上游响应",
+      "attemptChain": "尝试明细",
+      "attemptChainHint": "按轮次列出这次请求打过的每个成员及各自结果。回答的是「换过谁、为什么换」——只看总次数和最终渠道，看不出某个成员在反复拖后腿。",
+      "attemptOk": "已接管",
+      "attemptTruncated": "前面还有更多轮次未列出",
+      "attemptEmpty": "本次请求只打过一个成员",
       "responseStreaming": "上游已响应，流式传输正在进行"
     },
     "filter": {

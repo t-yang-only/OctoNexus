@@ -355,8 +355,11 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				result, err = raceResult, raceErr
 			}
 			if err != nil {
-				// 记录本轮上游调用已经结束及其失败原因。
-				request.finishRound(err.Error())
+				// 人工中止（本轮被本地取消，非上游失败）: 归档时不计错误与分类。
+				// 判定条件与下面的分支逐字同源，只是提前到这里以便交给 finishRound。
+				aborted := ctx.Err() == nil && context.Cause(roundCtx) == context.Canceled
+				// 记录本轮上游调用已经结束及其失败原因（带 error 对象，供归因分类取状态码）。
+				request.finishRound(err, aborted)
 				// 父上下文结束说明客户端已经取消, 归还探测占用并以取消终态结束请求。
 				if ctx.Err() != nil {
 					releaseRouteProbe(group, item.ID)
@@ -364,7 +367,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					return
 				}
 				// 仅人工中止本轮时不计失败也不等待; 响应超时属于真实失败并消耗尝试次数。
-				if context.Cause(roundCtx) == context.Canceled {
+				if aborted {
 					releaseRouteProbe(group, item.ID)
 					continue
 				}
@@ -433,7 +436,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				continue
 			}
 			// 记录本轮已经取得可提交的上游响应。
-			request.finishRound("")
+			request.finishRound(nil, false)
 			roundWaitTime := time.Since(roundStartedAt).Milliseconds() // 流式响应只统计等待首帧的时间。
 			// 上游成功后解除该成员的冷却与探测占用, 并按路由配置开始亲和。
 			recordRouteSuccess(group, item.ID, roundWaitTime)

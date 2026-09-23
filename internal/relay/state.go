@@ -52,7 +52,17 @@ type RequestState struct {
 	Sending       bool   `json:"sending"`            // 最新一轮是否仍在等待上游响应。
 	TargetItemID  int    `json:"-"`                  // 最新一轮选中的成员行 ID（GroupItem.ID）; 仅供 least_busy 统计在途, 不进状态流与日志对外结构。
 	Decision      string `json:"decision,omitempty"` // 本轮选路判定（T-decision-001）: "mode=smart;tier=decision;reason=affinity;slot=1;attempt=2", 每轮刷新。
-	Error         string `json:"error,omitempty"`    // 最新一轮的失败原因, 请求结束后即为最终错误。
+	// AttemptChain 是**已结束轮次**的尝试明细（T-trace-001），按轮次顺序追加。
+	//
+	// 只收已结束的轮次，当前进行中的那轮由 Target* 字段表达 —— 两者不重叠，
+	// 于是"链上全部轮次 + 当前轮"恒等于本次请求打过的全部成员，不会漏也不会重。
+	//
+	// 为什么在中间轮归档、而不是等终态一次性收集：每一轮结束时目标字段会被下一轮覆盖
+	// （startRound 直接赋值），中间信息在那一刻就永久丢失了，事后无从重建。
+	AttemptChain []model.RelayAttemptDetail `json:"attempt_chain,omitempty"`
+	// AttemptsTruncated 标记尝试链是否因超长被截断（只保留后 RelayAttemptDetailMax 轮）。
+	AttemptsTruncated bool   `json:"attempts_truncated,omitempty"`
+	Error             string `json:"error,omitempty"` // 最新一轮的失败原因, 请求结束后即为最终错误。
 	// FaultKind 是这次失败的归因分类（T-usability-007），只在失败终态时有值。
 	// 取值见 model.RelayLog.FaultKind 的注释；分类必须在**产生错误的那一刻**做，
 	// 因为那时才有状态码可用（落库时只剩错误文本，从文本反推会误判）。
@@ -63,6 +73,13 @@ type RequestState struct {
 	apiKeyID      int                                        // 发起请求的 API Key ID, 用于请求完成后的归属统计。
 	usageRecorder func(promptTokens, completionTokens int64) // Key 级 TPM 记账回调, 鉴权层注入, 终态时调用一次。
 	cancel        context.CancelFunc                         // 中止最新一轮上游请求, 仅在该轮等待响应期间非空。
+
+	// 以下三个字段是**本轮**的结果暂存（T-trace-001），供归档进 AttemptChain 时使用。
+	// 单独存放而不是复用 Error/FaultKind 的原因：那两者是"最新一轮"的对外语义，
+	// 终态时还会被 markFailed 覆写成最终归因；混用会让中间轮的分类被终态覆盖掉。
+	roundWaitMs    int64
+	roundFaultKind string
+	roundErrText   string
 }
 
 const streamBuffer = 16 // 单个状态流连接的非阻塞消息缓冲容量。
@@ -118,6 +135,9 @@ func (r *RequestState) startRound(cancel context.CancelFunc, itemID int, channel
 	mu.Lock()
 	defer mu.Unlock()
 
+	// 归档上一轮（T-trace-001）: 紧接着的赋值会覆盖 Target*, 这是还能读到它的最后时刻。
+	r.archiveRoundLocked()
+
 	r.Round++
 	r.RoundStartedAt = time.Now()
 	r.TargetItemID = itemID
@@ -126,9 +146,36 @@ func (r *RequestState) startRound(cancel context.CancelFunc, itemID int, channel
 	r.TargetProtocol = protocol
 	r.Sending = true
 	r.Error = ""
+	r.roundWaitMs, r.roundFaultKind, r.roundErrText = 0, "", ""
 	r.cancel = cancel
 	publishRequestLocked(r)
 	return r.Round
+}
+
+// archiveRoundLocked 把第 r.Round 轮追加进尝试链; 调用方必须持有锁。
+//
+// 两个调用点都归档"当前 r.Round 那一轮", 但时机不同因而语义不同:
+//   - startRound 在自增**之前**调用 → 归档的是刚结束的上一轮;
+//   - finishLocked 在终态时调用 → 归档的是最后一轮。
+//
+// 合起来覆盖全部轮次, 且每轮恰好归档一次。
+func (r *RequestState) archiveRoundLocked() {
+	if r.Round == 0 {
+		return // 还没打过任何一轮上游（分组不存在、成员解析失败等）
+	}
+	r.AttemptChain = append(r.AttemptChain, model.RelayAttemptDetail{
+		Round:     r.Round,
+		Channel:   r.TargetChannel,
+		Model:     r.TargetModel,
+		WaitMs:    r.roundWaitMs,
+		FaultKind: r.roundFaultKind,
+		Error:     r.roundErrText,
+	})
+	if len(r.AttemptChain) > model.RelayAttemptDetailMax {
+		// 从头部截断而非尾部: 排查"谁在拖后腿"时, 靠近终态的轮次信息量更大。
+		r.AttemptChain = r.AttemptChain[len(r.AttemptChain)-model.RelayAttemptDetailMax:]
+		r.AttemptsTruncated = true
+	}
 }
 
 // finishRound 记录本轮上游结果, errText 为空表示已取得可提交响应。
@@ -186,13 +233,36 @@ func (r *RequestState) setDecision(decision string) {
 	r.Decision = decision
 }
 
-func (r *RequestState) finishRound(errText string) {
+// finishRound 记录本轮上游调用已经结束及其结果（T-trace-001 起接收 error 对象而非文本）。
+//
+// 为什么参数从 errText string 改为 err error：本轮要落进尝试链的归因分类必须用**状态码**判，
+// 而状态码只存在于 error 对象里；等到只剩文本时再分类只能靠猜（上游措辞千变万化）。
+// 这与 markFailed 里 FaultKind 的处理是同一个道理，两处口径同源。
+//
+// aborted 表示本轮是被本地取消的（人工中止），既不是上游故障也不该出现在失败原因里：
+// 归档时清空错误与分类、只保留耗时——否则一次人为中断会被永久记成"这个渠道坏了"。
+func (r *RequestState) finishRound(err error, aborted bool) {
 	mu.Lock()
 	defer mu.Unlock()
 
 	r.Sending = false
-	r.Error = errText
 	r.cancel = nil
+	r.roundWaitMs = time.Since(r.RoundStartedAt).Milliseconds()
+	errText := ""
+	if err != nil {
+		errText = err.Error()
+	}
+	if err != nil && !aborted {
+		r.roundErrText = errText
+		r.roundFaultKind = faultKindOf(err)
+	} else {
+		r.roundErrText, r.roundFaultKind = "", ""
+	}
+	// Error 保持既有语义不变: 最新一轮的失败原因（成功或人工中止的那轮会清空它）。
+	r.Error = errText
+	if aborted {
+		r.Error = ""
+	}
 	publishRequestLocked(r)
 }
 
@@ -375,6 +445,9 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 	if r.Usage.PromptTokensDetails != nil {
 		cachedTokens = r.Usage.PromptTokensDetails.CachedTokens
 	}
+	// 归档最后一轮（T-trace-001）: 中间轮在各自的 startRound 里已归档, 这里补上当前轮,
+	// 使 AttemptChain 覆盖 1..Round 的全部轮次。从未打过上游时（Round==0）内部会直接跳过。
+	r.archiveRoundLocked()
 	op.RelayLogSave(model.RelayLog{
 		RequestID:      r.ID,
 		Status:         string(r.Status),
@@ -397,6 +470,10 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 		Cost:           r.Cost,
 		Error:          r.Error,
 		FaultKind:      r.FaultKind,
+		// 尝试链: 回答"中途换过谁、各自为何失败"。单轮成功时长度为 1（只有它自己），
+		// 与 Attempts 一致; 有重试时是完整链路。
+		AttemptDetail:     r.AttemptChain,
+		AttemptsTruncated: r.AttemptsTruncated,
 	})
 	publishRequestLocked(r)
 

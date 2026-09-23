@@ -33,6 +33,22 @@ type RelayLog struct {
 	// 0 表示还没发起过上游请求就结束了(分组不存在、成员解析失败等)。
 	// 首字竞速的多路并发算**一轮**(它们同时发出, 抢的是同一个逻辑轮次), 与面板上的"第几轮"同口径。
 	Attempts int `json:"attempts"`
+	// AttemptDetail 是**每一轮尝试的明细链**（T-trace-001），按轮次顺序记录打向上游的每个成员
+	// 及其结果。只存已经结束的轮次 —— 最后一轮（成功/终态失败的那轮）由既有字段
+	// TargetChannel / TargetModel / DurationMs / Error 表达，因此不进本字段，避免同一事实存两份。
+	//
+	// 为什么必须落库而不是靠既有字段反推：Attempts 只告诉你"试了几次"，TargetChannel 只告诉你
+	// "最后用了谁"。**中间试过谁、各自为什么失败，在既有结构里没有任何位置** ——
+	// 而"换个成员就好了"的判断恰恰只能从这里得出：某个成员每次都失败、每次都要绕开它，
+	// 从最终结果上看和"这个分组有点慢"毫无区别。实测动机：生产某次请求 attempts=6、
+	// 另一次 attempts=10，事后完全无法回答"是哪几个成员在拖"。
+	//
+	// 与 RelayLog.FaultKind 同源：这里的 fault_kind 也用产生错误那一刻的状态码分类，
+	// 不从错误文本反推（措辞千变万化，必然误判）。Error 存上游原文供人看原文。
+	AttemptDetail []RelayAttemptDetail `json:"attempt_detail" gorm:"serializer:json"`
+	// AttemptsTruncated 标记尝试链是否被截断（只保留前 RelayAttemptDetailMax 轮）。
+	// 存在的理由：截断后链条不再完整，若静默丢弃，读的人会以为"就试了这些"。
+	AttemptsTruncated bool `json:"attempts_truncated"`
 	// Decision 是这次请求的选路判定（T-decision-001）: 形如
 	// "mode=smart;tier=decision;reason=affinity;slot=1;attempt=2"。
 	// 回答"为什么走了这个成员"——模式、命中的档位、决定这次选择的机制（亲和保持/冷却恢复探测/
@@ -64,6 +80,32 @@ type RelayLog struct {
 	FaultKind string    `json:"fault_kind" gorm:"index"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime;index"`
 }
+
+// RelayAttemptDetail 是单轮尝试的落库快照（T-trace-001）。
+//
+// 只记"谁 + 什么原因"，不记响应体与请求体：排查"为什么换人"用不到正文，
+// 落了反而让日志体积与隐私面一起膨胀。
+type RelayAttemptDetail struct {
+	// Round 是这一轮在请求内的序号, 从 1 起, 与面板上的"第几轮"同口径。
+	Round int `json:"round"`
+	// Channel / Model 是这一轮实际打向上游的渠道名与模型名。
+	Channel string `json:"channel"`
+	Model   string `json:"model"`
+	// WaitMs 是这一轮从发起到判定的耗时毫秒数。
+	WaitMs int64 `json:"wait_ms"`
+	// FaultKind 取值与 RelayLog.FaultKind 一致（request / member / transient）；
+	// 人工中止的轮次为空串 —— 那不是上游的问题，不该算进任何一类失败。
+	FaultKind string `json:"fault_kind,omitempty"`
+	// Error 是上游返回的错误原文；空串表示本轮没有报错（由下一轮接管说明本轮实际未成功提交）。
+	Error string `json:"error,omitempty"`
+}
+
+// RelayAttemptDetailMax 是尝试链最多保留的轮数。
+//
+// 上限存在的理由是"一次异常请求不该让单行日志无界增长"：生产实测最大轮次到过 10，
+// 保留 32 轮已有 3 倍余量；超出时从**头部**截断并置 AttemptsTruncated，
+// 因为排查换人问题时靠近终态的几轮信息量更大。
+const RelayAttemptDetailMax = 32
 
 // RelayLogFilter 是历史查询的筛选条件, 空值表示不过滤。
 // Q 为关键字, 在模型/渠道/错误信息三列做 LIKE 匹配。

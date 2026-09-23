@@ -1007,6 +1007,11 @@
       "stopFailed": "Failed to stop current round",
       "waitingChannelSelection": "Waiting for channel selection",
       "waitingResponse": "Waiting for upstream response",
+      "attemptChain": "Attempt detail",
+      "attemptChainHint": "Every member this request hit, round by round, with each outcome. This answers \"who was swapped out, and why\" — a total count and the final channel cannot show that one member keeps dragging the request down.",
+      "attemptOk": "took over",
+      "attemptTruncated": "earlier rounds omitted",
+      "attemptEmpty": "This request hit a single member",
       "responseStreaming": "Upstream responded; streaming is in progress"
     },
     "filter": {

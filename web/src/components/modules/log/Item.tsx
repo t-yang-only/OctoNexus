@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { formatCacheHitRate, formatCNYCost, formatFirstByteMs, formatTPS } from '@/lib/log-metrics';
 import { formatJsonForCopy, resolveLogDisplay } from './display';
 import { useLogFieldVisibility } from './store';
+import { AttemptChainPanel } from './AttemptChainPanel';
 import { CopyIconButton } from '@/components/common/CopyButton';
 import { toast } from 'sonner';
 import { MemberStatus } from '@/components/modules/group/MemberStatus';
@@ -350,6 +351,10 @@ function LogDetail({ log, now }: { log: RelayLogOverview; now: number }) {
                             )}
                         </div>
                     </div>
+
+                    {/* 尝试明细: 补齐"中间换过谁、各自为何失败"——卡片上的 attempts 只是计数、
+                        最终渠道只说明结果, 两者都答不出某个成员在反复拖后腿。 */}
+                    <AttemptChainPanel chain={logDisplay.attemptChain} truncated={logDisplay.attemptChainTruncated} />
 
                     <div className="flex flex-col rounded-2xl border border-border bg-muted/30 overflow-hidden min-h-0">
                         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-muted/50 px-3 md:px-4">
