@@ -1010,6 +1010,13 @@
       "responseStreaming": "上游已回應，串流傳輸正在進行"
     },
     "filter": {
+      "faultKind": "失敗歸因",
+      "faultAll": "全部",
+      "faultRequest": "請求非法",
+      "faultMember": "成員故障",
+      "faultTransient": "可恢復",
+      "faultNone": "未分類",
+      "faultKindHint": "歸因由後端在失敗發生時就地判定，前端只做展示與篩選；計數只統計失敗的請求，「未分類」含升級前的歷史記錄。",
       "status": "狀態",
       "all": "全部",
       "fields": "卡片欄位",

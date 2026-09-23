@@ -1010,6 +1010,13 @@
       "responseStreaming": "上游已响应，流式传输正在进行"
     },
     "filter": {
+      "faultKind": "失败归因",
+      "faultAll": "全部",
+      "faultRequest": "请求非法",
+      "faultMember": "成员故障",
+      "faultTransient": "可恢复",
+      "faultNone": "未分类",
+      "faultKindHint": "归因由后端在失败发生时就地判定，前端只做展示与筛选；计数只统计失败的请求，「未分类」含升级前的历史记录。",
       "status": "状态",
       "all": "全部",
       "fields": "卡片字段",

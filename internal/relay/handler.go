@@ -208,12 +208,30 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				// 实测踩到：撤销 senseaudio 的授权后留下 23 个成员数为 0 的分组，
 				// 调用它们全部挂到超时。上限取 60 秒：足够覆盖冷却/临时故障的重试窗口，
 				// 又不会让客户端等太久。
+				// 走 failRequest 而不是 rejectRequest：这里请求状态**已经登记**（newRequestState 在其之上），
+				// 用只写响应不写状态的出口会让这条记录永远停在 running，最后被 ctx 分支收尾成
+				// status=canceled + error="context canceled" —— 服务端自己的判定被记成"客户端取消"，
+				// 与事实相反，且归因桶里看不到它（实测踩到：T-faultkind-probe 那条 400 就是这样丢的）。
+				//
+				// 归因走 request（请求侧）：分组没有可用成员是配置/授权的问题，
+				// 不是某个成员的故障，不该污染渠道通过率 —— 与 400 请求非法同档。
 				if memberUnavailableWaitedEnough(unavailableWaitSince) {
-					rejectRequest(c, inbound, fmt.Errorf(
+					// 走 failRequest 而不是 rejectRequest：这里请求状态**已经登记**（newRequestState 在其之上），
+					// 用只写响应不写状态的出口会让这条记录永远停在 running，最后被 ctx 分支收尾成
+					// status=canceled + error="context canceled" —— 服务端自己的判定被记成"客户端取消"，
+					// 与事实相反，且归因桶里看不到它（实测踩到：T-faultkind-probe 那条 400 就是这样丢的）。
+					//
+					// 归因走 request（请求侧）：分组没有可用成员是配置/授权的问题，
+					// 不是某个成员的故障，不该污染渠道通过率 —— 与 400 请求非法同档。
+					//
+					// 必须显式造一个**带 400 状态码**的错误：这里的错误是本地产生的，
+					// 没有上游状态码可继承，直接传裸 fmt.Errorf 会让 requestFaultError
+					// 退回普通 error，faultKindOf 又按 transient 兜底 —— 归因照样错。
+					failRequest(c, inbound, request, newUpstreamStatusError(http.StatusBadRequest, fmt.Sprintf(
 						"group %q has no available member after waiting %ds "+
 							"(members may be cooling, disabled, or their grants removed); "+
 							"check the group's members and the channel grants",
-						group.Name, memberUnavailableWaitCapSeconds))
+						group.Name, memberUnavailableWaitCapSeconds)))
 					return
 				}
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {

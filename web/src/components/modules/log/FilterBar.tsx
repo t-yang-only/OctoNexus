@@ -2,12 +2,12 @@ import { useMemo, useState } from 'react';
 import { Download, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import { toast } from 'sonner';
-import { exportRelayLogs, type RelayLogOverview, type RequestState } from '@/api/log';
+import { exportRelayLogs, type FaultKind, type RelayLogOverview, type RequestState } from '@/api/log';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { buttonVariants } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { matchLogMemoryFilter, type LogMemoryFilter } from './filter';
+import { matchLogMemoryFilter, type LogFaultFilter, type LogMemoryFilter } from './filter';
 export type { LogMemoryFilter };
 import {
     LOG_AUTO_REFRESH_OPTIONS,
@@ -15,6 +15,32 @@ import {
     useLogFieldVisibilityStore,
     type LogFieldName,
 } from './store';
+
+// FAULT_FILTERS 是失败归因的筛选档位, 顺序即弹窗内排列顺序。
+// all/none 之外的三档与后端 model.RelayLog.FaultKind 一一对应, 前端不新增口径。
+const FAULT_FILTERS: Array<{ value: LogFaultFilter; labelKey: string }> = [
+    { value: 'all', labelKey: 'faultAll' },
+    { value: 'request', labelKey: 'faultRequest' },
+    { value: 'member', labelKey: 'faultMember' },
+    { value: 'transient', labelKey: 'faultTransient' },
+    { value: 'none', labelKey: 'faultNone' },
+];
+
+// countFaultKinds 统计各归因档位的当前条数。
+// 只统计 **failed** 的记录: 归因回答的是"这次失败算谁的账", 取消/成功/进行中根本没有账可算。
+// 若把 canceled 也算进「未分类」, 用户会把它读成「有一条失败但不知道算谁」——那是错的结论。
+// 同样的理由, 「全部」档 = 当前失败总数, 它必须与 状态=failed 筛出来的条数一致。
+function countFaultKinds(logs: RelayLogOverview[]): Record<LogFaultFilter, number> {
+    const counts: Record<LogFaultFilter, number> = { all: 0, request: 0, member: 0, transient: 0, none: 0 };
+    for (const log of logs) {
+        if (log.status !== 'failed') continue;
+        counts.all += 1;
+        const kind = (log.fault_kind || '') as FaultKind | '';
+        if (kind === 'request' || kind === 'member' || kind === 'transient') counts[kind] += 1;
+        else counts.none += 1;
+    }
+    return counts;
+}
 
 // LOG_FIELD_LABEL_KEYS 是十个可见性开关的文案键, 顺序即弹窗内排列顺序。
 const LOG_FIELD_LABEL_KEYS: Array<{ field: LogFieldName; labelKey: string }> = [
@@ -35,21 +61,24 @@ const LOG_FIELD_LABEL_KEYS: Array<{ field: LogFieldName; labelKey: string }> = [
 interface LogToolbarProps {
     filter: LogMemoryFilter; // 当前内存筛选条件。
     onFilterChange: (filter: LogMemoryFilter) => void; // 更新内存筛选条件。
+    logs: RelayLogOverview[]; // 全量内存日志, 供归因筛选块显示各档条数。
 }
 
 // useFilteredLogs 对 SSE 内存列表做本地过滤, 输入引用不变时返回同一数组引用以跳过重渲染。
+// 三个维度全为默认值时直接返回原数组 —— 新增维度必须同步这个短路条件, 否则会出现"筛选生效了但列表没变"。
 export function useFilteredLogs(logs: RelayLogOverview[], filter: LogMemoryFilter): RelayLogOverview[] {
     return useMemo(() => {
-        if (filter.status === 'all' && !filter.query.trim()) return logs;
+        if (filter.status === 'all' && filter.faultKind === 'all' && !filter.query.trim()) return logs;
         return logs.filter((log) => matchLogMemoryFilter(log, filter));
     }, [logs, filter]);
 }
 
 // LogToolbar 渲染日志页的内存筛选栏与字段可见性/自动刷新偏好弹窗。
 // 筛选只在前端内存列表上执行, 不经过后端; 持久化筛选等 relay_logs 分页口径稳定后再接。
-export function LogToolbar({ filter, onFilterChange }: LogToolbarProps) {
+export function LogToolbar({ filter, onFilterChange, logs }: LogToolbarProps) {
     const t = useTranslations('log.list');
     const tf = useTranslations('log.filter');
+    const faultCounts = useMemo(() => countFaultKinds(logs), [logs]);
     const visibility = useLogFieldVisibilityStore((s) => s.visibility);
     const toggleField = useLogFieldVisibilityStore((s) => s.toggleField);
     const resetFields = useLogFieldVisibilityStore((s) => s.resetFields);
@@ -174,6 +203,30 @@ export function LogToolbar({ filter, onFilterChange }: LogToolbarProps) {
                                     </button>
                                 ))}
                             </div>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <p className="text-xs font-medium text-muted-foreground">{tf('faultKind')}</p>
+                            <div className="grid grid-cols-2 gap-2">
+                                {FAULT_FILTERS.map((item) => (
+                                    <button
+                                        key={item.value}
+                                        type="button"
+                                        aria-pressed={filter.faultKind === item.value}
+                                        onClick={() => onFilterChange({ ...filter, faultKind: item.value })}
+                                        className={cn(
+                                            'flex h-8 items-center justify-center gap-1 rounded-lg border px-2 text-xs font-medium transition-colors',
+                                            filter.faultKind === item.value
+                                                ? 'border-primary/30 bg-primary text-primary-foreground'
+                                                : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
+                                        )}
+                                    >
+                                        <span className="truncate">{tf(item.labelKey)}</span>
+                                        <span className="shrink-0 tabular-nums opacity-70">{faultCounts[item.value]}</span>
+                                    </button>
+                                ))}
+                            </div>
+                            <p className="text-[10px] leading-snug text-muted-foreground/70">{tf('faultKindHint')}</p>
                         </div>
 
                         <div className="grid gap-2">

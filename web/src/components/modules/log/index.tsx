@@ -13,7 +13,7 @@ export function Log() {
     const t = useTranslations('log');
     const { logs, isLoading, error, refresh } = useLogs();
     const interval = useLogAutoRefreshStore((s) => s.interval);
-    const [filter, setFilter] = useState<LogMemoryFilter>({ status: 'all', query: '' });
+    const [filter, setFilter] = useState<LogMemoryFilter>({ status: 'all', faultKind: 'all', query: '' });
     const filtered = useFilteredLogs(logs, filter);
     const shownIsFiltered = filtered.length !== logs.length;
 
@@ -49,7 +49,7 @@ export function Log() {
                 </div>
             )}
             <div className="flex shrink-0 items-center justify-between gap-2">
-                <LogToolbar filter={filter} onFilterChange={setFilter} />
+                <LogToolbar filter={filter} onFilterChange={setFilter} logs={logs} />
                 {shownIsFiltered && (
                     <span className="truncate text-xs text-muted-foreground">
                         {t('list.filtered', { shown: filtered.length, total: logs.length })}

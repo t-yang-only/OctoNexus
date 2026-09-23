@@ -48,8 +48,17 @@ export interface RelayHistoryItem {
     cached_tokens: number;
     completion_tokens: number;
     cost: number;
+    // fault_kind 是失败的归因分类: request / member / transient，空串表示非失败或未分类。
+    // 与 Status 的区别是关键: Status 只说"这次失败了"，FaultKind 说"这次失败该算在谁的账上"。
+    // 后端在产生错误的那一刻定类并落库（历史）或随 SSE 下发（实时），前端只做展示与筛选，绝不重新分类。
+    fault_kind?: FaultKind;
     error: string;
 }
+
+// FaultKind 是失败归因分类，与后端 model.RelayLog.FaultKind 一一对应。
+// request=请求本身非法（不计渠道故障）；member=成员自身问题；transient=可恢复（超时/网络/5xx）。
+// undefined 或空串表示未分类：可能非失败，也可能是升级前写入的历史行 —— 两者都不得猜测归类。
+export type FaultKind = 'request' | 'member' | 'transient';
 
 // RelayHistoryFilter 是历史查询的筛选条件, 空串表示不过滤。
 export interface RelayHistoryFilter {
@@ -133,6 +142,8 @@ export interface RelayLogOverview {
     reported_model?: string;
     model_mismatch?: boolean;
     sending: boolean;
+    // fault_kind 同 RelayHistoryItem：失败归因分类，实时流由后端直接下发（RequestState 带该字段）。
+    fault_kind?: FaultKind;
     error?: string;
 }
 

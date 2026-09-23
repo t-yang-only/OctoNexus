@@ -1010,6 +1010,13 @@
       "responseStreaming": "Upstream responded; streaming is in progress"
     },
     "filter": {
+      "faultKind": "Failure attribution",
+      "faultAll": "All",
+      "faultRequest": "Invalid request",
+      "faultMember": "Member",
+      "faultTransient": "Transient",
+      "faultNone": "Unclassified",
+      "faultKindHint": "Attribution is decided by the backend at failure time; the UI only filters it. Counts cover failed requests only; unclassified includes pre-upgrade records.",
       "status": "Status",
       "all": "All",
       "fields": "Card fields",
