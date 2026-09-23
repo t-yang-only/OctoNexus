@@ -457,3 +457,37 @@ export async function verifyChannelModels(channelId: number): Promise<ModelVerif
         method: 'POST',
     });
 }
+// T-perf-001 渠道延迟画像。
+//
+// 实测发现 17 个渠道的上游 TLS 握手从 1ms 到 1177ms（差三个数量级），
+// 慢的上游会拖慢每一次转发。relay_logs 里早就有首字节耗时，这里把它变成画像。
+//
+// 用中位数而不是平均值：首字节分布是长尾的，偶发卡顿会把均值拉高，
+// 让一个平时很快的渠道看起来很差 —— 用户感知到的"典型速度"是中位数。
+export interface ChannelLatencyRow {
+    channel: string;
+    /** 样本数。**太少时下面的数字不可信**，界面据此决定是否展示。 */
+    samples: number;
+    first_byte_p50_ms: number;
+    first_byte_p90_ms: number;
+    duration_p50_ms: number;
+    /** 首字节超过阈值的次数，用来分辨「慢是常态还是偶发」。 */
+    slow_count: number;
+}
+
+export interface ChannelLatencyStats {
+    /** 判定「慢」的阈值，随结果返回 —— 界面上的「慢」必须与它对应。 */
+    slow_threshold_ms: number;
+    /** 扫描到的日志条数（含未走到渠道的，它们的落差本身是信号）。 */
+    window: number;
+    /** 按首字节中位数升序：**快的在前**（看这个表是为了挑快的用）。 */
+    channels: ChannelLatencyRow[];
+}
+
+export function useChannelLatency(window = 500, enabled = true) {
+    return useQuery({
+        queryKey: ['channels', 'latency', window],
+        queryFn: () => apiRequest<ChannelLatencyStats>(`/api/v1/channel/latency?window=${window}`),
+        enabled,
+    });
+}

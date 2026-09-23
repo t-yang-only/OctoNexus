@@ -1131,6 +1131,17 @@
             "upstreamRejected": "Upstream returned HTTP {status} — check model name or permissions",
             "more": "{count} more…",
             "allUsable": "All usable"
+        },
+        "latency": {
+            "window": "Based on the last {total} requests",
+            "threshold": "Slow threshold {ms}ms",
+            "colChannel": "Channel",
+            "colP50": "First byte p50",
+            "colP90": "First byte p90",
+            "colDuration": "Duration p50",
+            "colSlow": "Slow/samples",
+            "noSamples": "No committed first bytes in this window yet",
+            "lowSampleHint": "Channels with fewer than 5 samples: numbers are indicative only."
         }
     },
     "unifiedPool": {

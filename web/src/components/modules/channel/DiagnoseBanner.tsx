@@ -4,6 +4,7 @@ import { useTranslations } from 'use-intl';
 import { useChannelDiagnose } from '@/api/channel';
 import { Badge } from '@/components/ui/badge';
 import { FaultStatsPanel } from './FaultStatsPanel';
+import { LatencyPanel } from './LatencyPanel';
 import { UpstreamCheckPanel } from './UpstreamCheckPanel';
 import { VerifyModelsPanel } from './VerifyModelsPanel';
 import { Button } from '@/components/ui/button';
@@ -109,6 +110,9 @@ export function DiagnoseBanner() {
                     {/* 真实通过率：把「渠道故障」与「请求问题」分开 —— 
                         一个通过率回答不了两个问题。 */}
                     <FaultStatsPanel />
+
+                    {/* 延迟画像：慢的上游会拖慢每一次转发，而用户看不出是渠道的问题。 */}
+                    <LatencyPanel />
 
                     {/* 真实调用级实测：前三层诊断都答不了「上游到底认不认这个名字」。
                         会真打上游，所以只能手动触发。 */}

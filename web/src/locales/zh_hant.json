@@ -1131,6 +1131,17 @@
             "upstreamRejected": "上游返回 HTTP {status} —— 查模型名或權限",
             "more": "還有 {count} 個…",
             "allUsable": "全部可用"
+        },
+        "latency": {
+            "window": "基於最近 {total} 筆請求",
+            "threshold": "慢閾值 {ms}ms",
+            "colChannel": "渠道",
+            "colP50": "首字節中位",
+            "colP90": "首字節 P90",
+            "colDuration": "總耗時中位",
+            "colSlow": "慢/樣本",
+            "noSamples": "窗口內沒有已提交首字節的請求，暫時無法比較延遲",
+            "lowSampleHint": "樣本數少於 5 的渠道，數字僅供參考。"
         }
     },
     "unifiedPool": {
