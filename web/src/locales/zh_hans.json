@@ -1027,6 +1027,20 @@
     "transientFault": "可恢复 {count}",
     "requestFault": "请求非法 {count}"
 },
+    "stopReason": {
+        "title": "终止原因",
+        "source": "（来自{source}）",
+        "reasonBudget": "尝试次数用尽才放弃",
+        "reasonAllRejected": "全部成员都判定该请求非法",
+        "reasonFailFast": "配置要求首个成员拒绝即结束",
+        "reasonMemberFault": "成员自身问题且已无其他成员",
+        "reasonNoMember": "分组内没有可用成员",
+        "reasonClientCancel": "客户端主动断开",
+        "sourceConfig": "配置",
+        "sourceUpstream": "上游",
+        "sourceClient": "客户端",
+        "sourceSystem": "系统规则"
+    },
     "filter": {
       "faultKind": "失败归因",
       "faultAll": "全部",

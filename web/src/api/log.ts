@@ -52,6 +52,18 @@ export interface RelayHistoryItem {
     // 与 Status 的区别是关键: Status 只说"这次失败了"，FaultKind 说"这次失败该算在谁的账上"。
     // 后端在产生错误的那一刻定类并落库（历史）或随 SSE 下发（实时），前端只做展示与筛选，绝不重新分类。
     fault_kind?: FaultKind;
+    // stop_reason 是**为什么停下来**的结构化记录（T-trace-003），
+    // 形如 "action=stop;reason=attempt_budget_exhausted;source=config"；空串表示升级前的存量行。
+    //
+    // 与 fault_kind 是补充关系而不是重复：
+    //   fault_kind  这次失败**算谁的账**（request/member/transient）
+    //   stop_reason **哪条规则**终止了请求、这条规则**从哪来**
+    //
+    // 为什么缺它不行：同样是失败终态，"试到次数上限才放弃"（去查上游是否大面积故障）
+    // 与"全部成员都说这个请求非法"（去改请求）的处置动作完全不同，
+    // 而 fault_kind 两者都可能记成 request。只看 error 文本更不行 ——
+    // 后端有五个终止出口，都能产生同一句 upstream_error 的 502。
+    stop_reason?: string;
     // attempt_detail 是每一轮尝试的明细链（T-trace-001），按轮次顺序。
     //
     // 回答的是既有字段回答不了的问题: Attempts 只说"试了几次"、TargetChannel 只说"最后用了谁"，
@@ -169,6 +181,8 @@ export interface RelayLogOverview {
     sending: boolean;
     // fault_kind 同 RelayHistoryItem：失败归因分类，实时流由后端直接下发（RequestState 带该字段）。
     fault_kind?: FaultKind;
+    // stop_reason 同 RelayHistoryItem：为什么停下来（T-trace-003），随实时流下发。
+    stop_reason?: string;
     // attempt_chain 是已结束轮次的尝试明细（T-trace-001）。
     //
     // 实时快照与历史行都给这个字段，但口径一致: 只含**已结束**的轮次，

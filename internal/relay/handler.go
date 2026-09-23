@@ -227,11 +227,14 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					// 必须显式造一个**带 400 状态码**的错误：这里的错误是本地产生的，
 					// 没有上游状态码可继承，直接传裸 fmt.Errorf 会让 requestFaultError
 					// 退回普通 error，faultKindOf 又按 transient 兜底 —— 归因照样错。
+					// 终止原因是"没有可用成员"：等待上限到了仍等不到人。
+					// source 记 config —— 等多久由 memberUnavailableWaitCapSeconds 决定，
+					// 而"成员为什么不可用"是分组与授权的配置状态。
 					failRequest(c, inbound, request, newUpstreamStatusError(http.StatusBadRequest, fmt.Sprintf(
 						"group %q has no available member after waiting %ds "+
 							"(members may be cooling, disabled, or their grants removed); "+
 							"check the group's members and the channel grants",
-						group.Name, memberUnavailableWaitCapSeconds)))
+						group.Name, memberUnavailableWaitCapSeconds)), stopReasonNoMember, stopSourceConfig)
 					return
 				}
 				if !request.wait(ctx, group.RelayConfig.MemberRetryIntervalSeconds) {
@@ -379,7 +382,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				attempts++
 				lastErr = err
 				if attempts >= attemptCap(len(op.FlattenGroupItems(group)), group.RelayConfig.MemberMaxAttempts) {
-					failRequest(c, inbound, request, lastErr)
+					// 终止原因是"预算用尽"：成员在反复失败，试到上限才放弃。
+					// 这与"全体拒绝"的处置完全不同 —— 这是查上游是否大面积故障的信号。
+					failRequest(c, inbound, request, lastErr, stopReasonBudget, stopSourceConfig)
 					return
 				}
 				disposition := classifyUpstreamFailure(err)
@@ -390,12 +395,17 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					// 取向由设置项决定（T-retry-003）: failfast 时第一个成员拒绝就结束请求,
 					// failover（默认）时把该成员记入拒绝集合、换下一个成员再试。
 					if RequestFaultAction() == RequestFaultActionFailFast {
-						failRequest(c, inbound, request, requestFaultError(err))
+						// 终止原因是"配置要求快速失败"：source 记 config，
+						// 与下面的 all_members_rejected（系统规则）刻意区分 ——
+						// 这个改设置就好，那个要改请求。
+						failRequest(c, inbound, request, requestFaultError(err), stopReasonFailFast, stopSourceConfig)
 						return
 					}
 					rejectedItems[item.ID] = true
 					if allMembersRejected(op.FlattenGroupItems(group), rejectedItems) {
-						failRequest(c, inbound, request, requestFaultError(err))
+						// 终止原因是"全体成员都判定该请求非法"：上游一致拒绝，
+						// source 记 upstream —— 这不是本地的规则，是上游共同给的结论。
+						failRequest(c, inbound, request, requestFaultError(err), stopReasonAllRejected, stopSourceUpstream)
 						return
 					}
 					continue
@@ -616,12 +626,20 @@ func publishDecision(c *gin.Context, request *RequestState, group model.Group, f
 // 触发条件: 单请求尝试次数达到上限（上游 issue #388/#338 的无限重试）, 或所有成员都以
 // "请求本身非法" 拒绝了同一份请求。没有这个出口时, 重试循环会一直转到客户端自己超时为止 ——
 // 客户端看到的是"卡住", 而服务端还在每秒一次地打上游。
-func failRequest(c *gin.Context, inbound transformer.Inbound, request *RequestState, err error) {
+//
+// reason/source 是**为什么停下来**的结构化记录（T-trace-003）。它们不是可选的装饰：
+// 这个函数有五个调用点，每个调用点产生的都是同一句 "upstream_error" 的 502 响应，
+// 只从响应看不出是哪条规则终止的（试到上限？全体拒绝？配置要求快速失败？），
+// 而四种情形的处置动作完全不同。调用点必须各自如实传自己的原因。
+func failRequest(c *gin.Context, inbound transformer.Inbound, request *RequestState, err error, reason, source string) {
 	message := "all members failed"
 	if err != nil && err.Error() != "" {
 		message = err.Error()
 	}
 	request.markFailed(err, "", nil)
+	// 终止原因在 markFailed 之后写：markFailed 不碰这个字段，
+	// 但在它之前写会与它内部的发布时序纠缠，放在后面更直白。
+	request.recordStopReason(reason, source)
 	response := inbound.TransformError(c.Request.Context(), &llm.ResponseError{
 		StatusCode: http.StatusBadGateway,
 		Detail:     llm.ErrorDetail{Message: message, Type: "upstream_error"},

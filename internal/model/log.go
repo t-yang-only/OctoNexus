@@ -77,8 +77,24 @@ type RelayLog struct {
 	// 实测动机：senseaudio 的通过率一度显示 31.6%，看起来像渠道坏了，
 	// 实际上那 25 次失败全是「用 chat 接口调 TTS/图像等专用模型」造成的请求非法 ——
 	// 把它算进渠道通过率，会让用户去修一个根本没坏的东西。
-	FaultKind string    `json:"fault_kind" gorm:"index"`
-	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime;index"`
+	FaultKind string `json:"fault_kind" gorm:"index"`
+	// StopReason 是请求**为什么停下来**的结构化记录（T-trace-003），
+	// 形如 "action=stop;reason=attempt_budget_exhausted;source=config"；空串表示尚未记录。
+	//
+	// 与 FaultKind 是两件事，都必须有：
+	//   FaultKind  这次失败**算谁的账**（request/member/transient）
+	//   StopReason **哪条规则**终止了请求、这条规则**从哪来**
+	//
+	// 为什么需要它：同样是失败终态，"试到次数上限才放弃"（去查上游是否大面积故障）
+	// 与"全部成员都说这个请求非法"（去改请求）的处置动作完全不同，
+	// 而 FaultKind 两者都可能记成同一个值。只看错误文本更不行 ——
+	// 五个终止出口都能产生 502，文本里看不出是哪一条规则生效的。
+	//
+	// 设计吸收自同类项目 new-api 的 service.PolicyDecision
+	// （Action/Reason/Source 三字段 + 集中式 DecideRelayRetry），
+	// 本项目此前把决策散在各处 if/else 里，只在 return 前拼错误文本。
+	StopReason string    `json:"stop_reason"`
+	CreatedAt  time.Time `json:"created_at" gorm:"autoCreateTime;index"`
 }
 
 // RelayAttemptDetail 是单轮尝试的落库快照（T-trace-001）。

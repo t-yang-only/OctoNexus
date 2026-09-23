@@ -67,6 +67,13 @@ type RequestState struct {
 	// 取值见 model.RelayLog.FaultKind 的注释；分类必须在**产生错误的那一刻**做，
 	// 因为那时才有状态码可用（落库时只剩错误文本，从文本反推会误判）。
 	FaultKind string `json:"fault_kind,omitempty"`
+	// StopReason 记录**为什么停下来**（T-trace-003），终态时有值。
+	//
+	// 与 FaultKind 的分工：FaultKind 说"这次失败算谁的账"，StopReason 说"哪条规则
+	// 终止了请求、这条规则从哪来"。两者都缺一不可 —— 同样是失败终态，
+	// "预算用尽"（查上游）与"全体成员判定请求非法"（改请求）的处置完全不同，
+	// 只看 FaultKind 区分不出来。
+	StopReason string `json:"stop_reason,omitempty"`
 
 	body          string                                     // 客户端原始请求体, 体积大故不进状态流, 由独立接口按需拉取。
 	responseBody  string                                     // 聚合后的完整最终响应体, 同样按需拉取。
@@ -350,6 +357,15 @@ func (r *RequestState) markSucceeded(responseBody string, usage *llm.Usage) {
 	r.Status = StatusSuccess
 	r.Error = ""
 	r.responseBody = responseBody
+	// 成功路径的终止原因固定为"请求正常结束"（T-trace-003）。
+	// 这里直接写而不走 recordStopReason：两者语义完全确定，不需要出口来传；
+	// 而且此刻已持有锁，不能调用会再次加锁的函数。
+	r.StopReason = StopReason{
+		Action:   stopAction,
+		Reason:   stopReasonCompleted,
+		Source:   stopSourceSystem,
+		Attempts: r.Round,
+	}.Text()
 	r.finishLocked(usage)
 }
 
@@ -367,6 +383,33 @@ func (r *RequestState) markFailed(err error, responseBody string, usage *llm.Usa
 		r.responseBody = responseBody
 	}
 	r.finishLocked(usage)
+}
+
+// recordStopReason 记录本次请求**为什么停下来**（T-trace-003）。
+//
+// 与 markFailed 分开而不是合并进它：markFailed 在多个出口都被调用（含流式中断、
+// 客户端取消这些"不是任何人的错"的情形），而终止原因是**出口自己才知道**的信息 ——
+// 同一个 markFailed 从五个不同出口进来，只有出口知道自己是"预算用尽"还是"全体拒绝"。
+//
+// 只覆盖不追加：一个请求只会终止一次，先写的那个出口才是真实原因。
+// （若出现重复调用，保留首次比保留最后一次更接近事实。）
+func (r *RequestState) recordStopReason(reason, source string) {
+	// 空原因直接返回。**变异检查结论：这个早退在功能上是冗余的** ——
+	// 即便放它过去，下面 StopReason.Text() 对空 Reason 也返回空串，
+	// 最终 r.StopReason 依然是空（实测把守卫改成恒 false，用例全绿）。
+	// 保留它的理由不是正确性而是代价：调用方持有锁时无谓加锁会短暂阻塞
+	// 状态流的其他读者，而空 reason 是明确的调用错误、不该走到加锁。
+	// 这里如实记录冗余，避免后人误以为删掉它会漏掉某条用例覆盖的行为。
+	if reason == "" {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if r.StopReason != "" {
+		return
+	}
+	text := StopReason{Action: stopAction, Reason: reason, Source: source, Attempts: r.Round}.Text()
+	r.StopReason = text
 }
 
 // faultKindOf 把一次上游失败归到三类之一，供通过率统计排除「不是渠道的锅」的那种。
@@ -401,6 +444,15 @@ func (r *RequestState) markCanceled(err error, responseBody string, usage *llm.U
 	if responseBody != "" {
 		r.responseBody = responseBody
 	}
+	// 取消路径的终止原因固定为"客户端取消"（T-trace-003），source 记 client。
+	// 这条最容易被误当成渠道故障：取消不是任何一方的问题，
+	// 界面据此可以明确告诉用户"这一条不用管"。
+	r.StopReason = StopReason{
+		Action:   stopAction,
+		Reason:   stopReasonClientCancel,
+		Source:   stopSourceClient,
+		Attempts: r.Round,
+	}.Text()
 	r.finishLocked(usage)
 }
 
@@ -470,6 +522,7 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 		Cost:           r.Cost,
 		Error:          r.Error,
 		FaultKind:      r.FaultKind,
+		StopReason:     r.StopReason,
 		// 尝试链: 回答"中途换过谁、各自为何失败"。单轮成功时长度为 1（只有它自己），
 		// 与 Attempts 一致; 有重试时是完整链路。
 		AttemptDetail:     r.AttemptChain,

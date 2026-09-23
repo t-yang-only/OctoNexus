@@ -1027,6 +1027,20 @@
     "transientFault": "可恢復 {count}",
     "requestFault": "請求非法 {count}"
 },
+    "stopReason": {
+        "title": "終止原因",
+        "source": "（來自{source}）",
+        "reasonBudget": "嘗試次數用盡才放棄",
+        "reasonAllRejected": "全部成員都判定該請求非法",
+        "reasonFailFast": "配置要求首個成員拒絕即結束",
+        "reasonMemberFault": "成員自身問題且已無其他成員",
+        "reasonNoMember": "分組內沒有可用成員",
+        "reasonClientCancel": "客戶端主動斷開",
+        "sourceConfig": "配置",
+        "sourceUpstream": "上游",
+        "sourceClient": "客戶端",
+        "sourceSystem": "系統規則"
+    },
     "filter": {
       "faultKind": "失敗歸因",
       "faultAll": "全部",

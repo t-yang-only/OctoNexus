@@ -1027,6 +1027,20 @@
     "transientFault": "transient {count}",
     "requestFault": "request {count}"
 },
+    "stopReason": {
+        "title": "Stop reason",
+        "source": "(from {source})",
+        "reasonBudget": "gave up after exhausting the attempt budget",
+        "reasonAllRejected": "every member rejected the request",
+        "reasonFailFast": "config stops on the first rejection",
+        "reasonMemberFault": "member fault with no alternative left",
+        "reasonNoMember": "no usable member in the group",
+        "reasonClientCancel": "client disconnected",
+        "sourceConfig": "config",
+        "sourceUpstream": "upstream",
+        "sourceClient": "client",
+        "sourceSystem": "system rule"
+    },
     "filter": {
       "faultKind": "Failure attribution",
       "faultAll": "All",

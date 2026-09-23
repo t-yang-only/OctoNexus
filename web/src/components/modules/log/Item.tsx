@@ -16,6 +16,7 @@ import { formatCacheHitRate, formatCNYCost, formatFirstByteMs, formatTPS } from 
 import { formatJsonForCopy, resolveLogDisplay } from './display';
 import { useLogFieldVisibility } from './store';
 import { AttemptChainPanel } from './AttemptChainPanel';
+import { StopReasonPanel } from './StopReasonPanel';
 import { CopyIconButton } from '@/components/common/CopyButton';
 import { toast } from 'sonner';
 import { MemberStatus } from '@/components/modules/group/MemberStatus';
@@ -355,6 +356,13 @@ function LogDetail({ log, now }: { log: RelayLogOverview; now: number }) {
                     {/* 尝试明细: 补齐"中间换过谁、各自为何失败"——卡片上的 attempts 只是计数、
                         最终渠道只说明结果, 两者都答不出某个成员在反复拖后腿。 */}
                     <AttemptChainPanel chain={logDisplay.attemptChain} truncated={logDisplay.attemptChainTruncated} />
+
+                    {/* 终止原因（T-trace-003）: 与上面的尝试明细是两件事 ——
+                        明细说"每一轮各自怎么了", 这里说"整条请求被哪条规则终止的、
+                        规则从哪来"。同为失败终态,"预算用尽"要去查上游、
+                        "全体成员判定请求非法"要去改请求, 只看故障归因分不出来。
+                        正常成功结束不渲染（绝大多数日志都是它）。 */}
+                    <StopReasonPanel stopReason={logDisplay.stopReason} />
 
                     <div className="flex flex-col rounded-2xl border border-border bg-muted/30 overflow-hidden min-h-0">
                         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-muted/50 px-3 md:px-4">

@@ -68,6 +68,9 @@ export interface LogDisplayFields {
     attemptChain: RelayAttemptDetail[];
     // attemptChainTruncated 标记链被截断过，界面必须提示"前面还有"。
     attemptChainTruncated: boolean;
+    // stopReason 是**为什么停下来**的结构化记录（T-trace-003），形如
+    // "action=stop;reason=X;source=Y"；空串表示正常结束或升级前的存量行。
+    stopReason: string;
     source: 'live' | 'history';
 }
 
@@ -168,6 +171,7 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
         // 两者同义同口径，这里收敛成一套；缺字段时给空数组而不是 undefined，调用方不必到处判空。
         attemptChain: (live ? source.attempt_chain : source.attempt_detail) ?? [],
         attemptChainTruncated: source.attempts_truncated === true,
+    stopReason: source.stop_reason ?? '',
         source: live ? 'live' : 'history',
     };
 }
