@@ -256,3 +256,36 @@ export function useGroupUsage(enabled = true) {
         enabled,
     });
 }
+// T-perf-003 分组维度延迟画像。
+//
+// 用户调用的不是渠道而是分组（客户端填的是 Max-flash 这类名字），
+// 而分组内部还要选路 —— 所以"这个分组多快"只能按分组统计。
+export interface GroupLatencyRow {
+    group_id: number;
+    name: string;
+    mode: string;
+    /** 成员数。**必须与延迟一起看**：单成员分组没有选择空间，慢也只能用它。 */
+    member_count: number;
+    samples: number;
+    /** 真的记到首字节的样本数；为 0 时首字节那两个数字无意义（显示「—」）。 */
+    first_byte_samples: number;
+    first_byte_p50_ms: number;
+    first_byte_p90_ms: number;
+    duration_p50_ms: number;
+    slow_count: number;
+}
+
+export interface GroupLatencyStats {
+    slow_threshold_ms: number;
+    window: number;
+    /** 按样本数倒序：**我常用的在前**（渠道画像则是快的在前，取向不同）。 */
+    groups: GroupLatencyRow[];
+}
+
+export function useGroupLatency(window = 500, enabled = true) {
+    return useQuery({
+        queryKey: ['groups', 'latency', window],
+        queryFn: () => apiRequest<GroupLatencyStats>(`/api/v1/group/latency?window=${window}`),
+        enabled,
+    });
+}

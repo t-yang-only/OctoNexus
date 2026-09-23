@@ -893,6 +893,18 @@
             "auto": "自动生成",
             "manual": "手工",
             "unused": "其余 {count} 个在当前日志窗口（{window} 条）内没有调用记录"
+        },
+        "latency": {
+            "title": "分组耗时",
+            "window": "基于最近 {total} 条请求",
+            "threshold": "慢阈值 {ms}ms",
+            "colGroup": "分组",
+            "colMembers": "成员",
+            "colP50": "首字节中位",
+            "colP90": "首字节 P90",
+            "colSlow": "慢/样本",
+            "noChoice": "（单成员）",
+            "semantics": "「首字节」从请求发出算到上游吐出第一个字节，包含上游自身的排队与推理时间 —— 它比网络延迟更接近你实际感受到的等待。"
         }
     },
     "model": {

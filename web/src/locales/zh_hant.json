@@ -893,6 +893,18 @@
             "auto": "自動生成",
             "manual": "手工",
             "unused": "其餘 {count} 個在當前日誌窗口（{window} 筆）內沒有調用記錄"
+        },
+        "latency": {
+            "title": "分組耗時",
+            "window": "基於最近 {total} 筆請求",
+            "threshold": "慢閾值 {ms}ms",
+            "colGroup": "分組",
+            "colMembers": "成員",
+            "colP50": "首字節中位",
+            "colP90": "首字節 P90",
+            "colSlow": "慢/樣本",
+            "noChoice": "（單成員）",
+            "semantics": "「首字節」從請求發出算到上游吐出第一個字節，包含上游自身的排隊與推理時間 —— 它比網路延遲更接近你實際感受到的等待。"
         }
     },
     "model": {

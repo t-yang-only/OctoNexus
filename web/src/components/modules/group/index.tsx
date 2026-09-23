@@ -4,6 +4,7 @@ import { useTranslations } from 'use-intl';
 import { GroupCard } from './Card';
 import { CreateDialogContent } from './Create';
 import { useRuntimeClock } from './MemberStatus';
+import { GroupLatencyPanel } from './GroupLatencyPanel';
 import { GroupUsageBanner } from './UsageBanner';
 import { useGroupList } from '@/api/group';
 import { PageActions, usePageActionsStore } from '@/components/common/PageActions';
@@ -93,6 +94,9 @@ export function Group() {
     return (
         <div className="flex h-full min-h-0 flex-col">
             <GroupUsageBanner />
+            {/* 分组维度的耗时：用户调用的是分组而不是渠道，
+                而分组内部还要选路 —— 这个数据只有按分组统计才看得见。 */}
+            <GroupLatencyPanel />
             <div className="min-h-0 flex-1">
                 <VirtualizedGrid
                     items={visibleGroups}

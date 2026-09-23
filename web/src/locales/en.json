@@ -893,6 +893,18 @@
             "auto": "auto",
             "manual": "manual",
             "unused": "The other {count} have no calls in the current log window ({window} records)"
+        },
+        "latency": {
+            "title": "Group latency",
+            "window": "Based on the last {total} requests",
+            "threshold": "Slow threshold {ms}ms",
+            "colGroup": "Group",
+            "colMembers": "Members",
+            "colP50": "First byte p50",
+            "colP90": "First byte p90",
+            "colSlow": "Slow/samples",
+            "noChoice": "(single member)",
+            "semantics": "First byte measures from request sent to the upstream's first output byte, including upstream queueing and inference — closer to the wait you actually feel than network latency."
         }
     },
     "model": {
