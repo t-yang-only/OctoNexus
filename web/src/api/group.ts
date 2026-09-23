@@ -264,6 +264,8 @@ export interface GroupLatencyRow {
     group_id: number;
     name: string;
     mode: string;
+    /** 分组已被删除（日志还在保留期内）。界面据此把它滤掉 —— 用户已经删了它。 */
+    deleted: boolean;
     /** 成员数。**必须与延迟一起看**：单成员分组没有选择空间，慢也只能用它。 */
     member_count: number;
     samples: number;

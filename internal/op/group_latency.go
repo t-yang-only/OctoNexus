@@ -29,6 +29,14 @@ type GroupLatency struct {
 	GroupID int    `json:"group_id"`
 	Name    string `json:"name"`
 	Mode    string `json:"mode"`
+	// Deleted 标记「分组已被删除，但日志还在保留期内」。
+	//
+	// 这类条目**保留在后端是对的**（日志是事实，7 天保留期内它确实发生过），
+	// 但**不该出现在"我常用的分组多快"这个视图里** —— 用户已经删了它。
+	//
+	// 单独给一个布尔而不是让前端匹配占位名字符串：
+	// 靠 `name == "(已删除的分组)"` 判断是脆弱的，改一次文案就失效。
+	Deleted bool `json:"deleted"`
 	// MemberCount 是分组当前的成员数。**必须与延迟一起看**：
 	// 单成员分组没有选择空间，慢不慢都只能用它。
 	MemberCount      int   `json:"member_count"`
@@ -133,9 +141,11 @@ func GroupLatencyStats(ctx context.Context, window int) (GroupLatencySummary, er
 			FirstByteSamples: int64(len(b.firstBytes)),
 			SlowCount:        b.slow,
 		}
-		// 分组已被删除但日志还在：名字为空，用 id 兜底可辨认。
-		if row.Name == "" {
+		// 分组已被删除但日志还在：给可辨认的占位名 + 显式标记，
+		// 前端据 Deleted 把它从"常用分组"视图里滤掉。
+		if _, exists := meta[gid]; !exists {
 			row.Name = "(已删除的分组)"
+			row.Deleted = true
 		}
 		row.FirstByteP50Ms = percentile(b.firstBytes, 0.50)
 		row.FirstByteP90Ms = percentile(b.firstBytes, 0.90)

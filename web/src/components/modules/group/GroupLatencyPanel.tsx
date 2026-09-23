@@ -25,7 +25,11 @@ export function GroupLatencyPanel() {
     if (data.window === 0) return null;
 
     // 只展示有延迟样本的分组：没有样本的排在后面对读者无信息量。
-    const rows = data.groups.filter((g) => g.first_byte_samples > 0).slice(0, 8);
+    // 两重过滤：已删除的分组不该出现在「我常用的分组多快」里（用户已经删了它），
+    // 没有首字节样本的也滤掉（显示出来只有 0ms，没有信息量）。
+    const rows = data.groups
+        .filter((g) => !g.deleted && g.first_byte_samples > 0)
+        .slice(0, 8);
     if (rows.length === 0) return null;
 
     return (

@@ -185,6 +185,21 @@ func TestGroupLatencyHandlesDeletedGroup(t *testing.T) {
 	if stats.Groups[0].Name == "" {
 		t.Fatalf("已删除的分组必须有可辨认的名字（不能是空字符串）")
 	}
+	// **必须给出显式标记**：让前端靠 name == "(已删除的分组)" 判断是脆弱的
+	// （改一次文案就失效），而且"已删除"这个信息本身值得单独表达。
+	if !stats.Groups[0].Deleted {
+		t.Fatalf("已删除的分组应带 Deleted 标记，否则界面只能靠匹配文案来过滤")
+	}
+	// 反向对照：存在的分组不能被标成已删除 ——
+	// 否则界面上所有分组都会消失，而那看起来像功能坏了。
+	alive := seedGroupForLatency(t, conn, "alive", 1)
+	seedGroupLatencyLog(conn, alive, "ch", 100, 200)
+	stats2, _ := GroupLatencyStats(context.Background(), 100)
+	for _, g := range stats2.Groups {
+		if g.Name == "alive" && g.Deleted {
+			t.Fatalf("存在的分组不该被标成已删除")
+		}
+	}
 }
 
 // 未提交首字节的请求不进首字节分布（与渠道画像同一口径）。
