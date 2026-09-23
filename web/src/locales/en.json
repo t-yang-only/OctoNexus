@@ -1141,7 +1141,8 @@
             "colDuration": "Duration p50",
             "colSlow": "Slow/samples",
             "noSamples": "No committed first bytes in this window yet",
-            "lowSampleHint": "Channels with fewer than 5 samples: numbers are indicative only."
+            "lowSampleHint": "Channels with fewer than 5 samples: numbers are indicative only.",
+            "semantics": "First byte measures from request sent to the upstream's first output byte, so it includes upstream queueing and inference — a better proxy for the wait you actually feel than network latency."
         }
     },
     "unifiedPool": {

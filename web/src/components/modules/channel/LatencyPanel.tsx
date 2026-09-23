@@ -37,6 +37,11 @@ export function LatencyPanel() {
                 </span>
             </div>
 
+            {/* 这条说明是必须的：首字节里含着上游自己的处理时间，
+                不加说明用户会以为慢是网络问题（实测 TLS 握手只有 1ms，
+                而首字节中位数可达 4515ms —— 差的是上游排队）。 */}
+            <p className="text-xs text-muted-foreground/80">{t('semantics')}</p>
+
             {withData.length === 0 ? (
                 <p className="text-xs text-muted-foreground">{t('noSamples')}</p>
             ) : (
@@ -55,9 +60,13 @@ export function LatencyPanel() {
                             {withData.map((r) => (
                                 <tr key={r.channel} className="border-t border-border/40">
                                     <td className="py-1 font-medium">{r.channel}</td>
-                                    <td className="py-1 text-right font-mono">{r.first_byte_p50_ms}ms</td>
+                                    <td className="py-1 text-right font-mono">
+                                        {/* 没有首字节样本时显示「—」而不是 0ms —— 
+                                            0ms 会被读成「快得不可思议」，实际是没数据。 */}
+                                        {r.first_byte_samples > 0 ? r.first_byte_p50_ms + 'ms' : '—'}
+                                    </td>
                                     <td className="py-1 text-right font-mono text-muted-foreground">
-                                        {r.first_byte_p90_ms}ms
+                                        {r.first_byte_samples > 0 ? r.first_byte_p90_ms + 'ms' : '—'}
                                     </td>
                                     <td className="py-1 text-right font-mono text-muted-foreground">
                                         {r.duration_p50_ms}ms

@@ -468,6 +468,8 @@ export interface ChannelLatencyRow {
     channel: string;
     /** 样本数。**太少时下面的数字不可信**，界面据此决定是否展示。 */
     samples: number;
+    /** 真的记到首字节的样本数。为 0 时首字节那两个数字无意义（应显示为「—」）。 */
+    first_byte_samples: number;
     first_byte_p50_ms: number;
     first_byte_p90_ms: number;
     duration_p50_ms: number;

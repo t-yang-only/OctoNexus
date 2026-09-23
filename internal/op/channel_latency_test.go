@@ -82,6 +82,17 @@ func TestLatencyExcludesNeverCommitted(t *testing.T) {
 	if broken.FirstByteP50Ms != 0 {
 		t.Fatalf("从未提交首字节的渠道不该有首字节耗时（应为 0），实得 %d", broken.FirstByteP50Ms)
 	}
+	// **关键判据**：必须能区分「真的 0ms」与「没有首字节数据」。
+	//
+	// 没有这个计数时，界面只能把 FirstByteP50Ms=0 显示成「0ms」——
+	// 用户会以为这个渠道快得不可思议，而实际是它从没成功吐过字节。
+	// 实测踩到：TypeSafe 渠道全部 fb=-1，面板上显示成 0ms。
+	if broken.FirstByteSamples != 0 {
+		t.Fatalf("全失败的渠道首字节样本应为 0，实得 %d", broken.FirstByteSamples)
+	}
+	if fast.FirstByteSamples != 3 {
+		t.Fatalf("fast 有 3 条提交记录，首字节样本应为 3，实得 %d", fast.FirstByteSamples)
+	}
 	// 但它的耗时是 0 不该被排到"最快"的第一位 —— 排序按首字节中位数，
 	// 0 会排最前。这是可接受的：界面上会显示样本数与"—"。
 	// 这里只断言数字正确，不断言排序（排序取向由界面决定）。

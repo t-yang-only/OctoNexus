@@ -30,7 +30,18 @@ type ChannelLatency struct {
 	// Samples 是本渠道在窗口内的样本数。**样本太少时下面的数字不可信** ——
 	// 由调用方根据这个值决定是否展示。
 	Samples int64 `json:"samples"`
+	// FirstByteSamples 是**真的记到首字节**的样本数。
+	//
+	// 必须与 Samples 分开：某些路径（如非标准协议直通）不记录首字节，
+	// 此时 FirstByteP50Ms 为 0 —— 而 0 在界面上会显示成「0ms」，
+	// 让人以为「这个渠道快得不可思议」。有了这个计数，界面才能区分
+	// 「真的 0ms」与「没有首字节数据」。
+	FirstByteSamples int64 `json:"first_byte_samples"`
 	// FirstByteP50Ms / P90Ms 是首字节耗时的中位数与 p90。
+	//
+	// **注意这不是纯网络延迟**：它从请求发出算到上游吐出第一个字节，
+	// 因而包含上游自己的排队与推理时间。实测同一条链路（TLS 握手 1ms）
+	// 下首字节中位数可达 4515ms —— 差的是上游处理，不是网络。
 	// 只统计**已提交首字节**的请求（FirstByteMs >= 0）：
 	// 未提交的那些是因为失败或取消，把它们算进来会污染"这个渠道有多快"。
 	FirstByteP50Ms int64 `json:"first_byte_p50_ms"`
@@ -122,9 +133,10 @@ func ChannelLatencyStats(ctx context.Context, window int) (ChannelLatencySummary
 	}
 	for name, b := range byChannel {
 		c := ChannelLatency{
-			Channel:   name,
-			Samples:   int64(len(b.durations)),
-			SlowCount: b.slow,
+			Channel:          name,
+			Samples:          int64(len(b.durations)),
+			FirstByteSamples: int64(len(b.firstBytes)),
+			SlowCount:        b.slow,
 		}
 		c.FirstByteP50Ms = percentile(b.firstBytes, 0.50)
 		c.FirstByteP90Ms = percentile(b.firstBytes, 0.90)
