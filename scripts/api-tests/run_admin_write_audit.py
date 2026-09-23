@@ -268,6 +268,25 @@ for p, method in ID_PATHS:
         note += "（幂等删除，已单独记录）"
     record("%s %s" % (method, p), ok, note)
 
+# ------------------------------------------------------- 404 语义（T-usability-012）
+print()
+print("=" * 70)
+print("五、删除不存在的资源：必须 **404**，不是 500")
+print("   500 表示「服务端故障、可重试」，而「资源不存在」是确定的不该重试的结论 ——")
+print("   混用会让调用方把明确的「东西没了」误报成故障并重试。")
+NOT_FOUND_PATHS = [
+    ("/api/v1/apikey/delete/999999", "DELETE", "API key"),
+    ("/api/v1/channel/delete/999999", "DELETE", "渠道"),
+    ("/api/v1/group/delete/999999", "DELETE", "分组"),
+]
+for p, method, what in NOT_FOUND_PATHS:
+    code, body = call(method, p, raw_body=None)
+    ok = code == 404
+    record("删除不存在的%s 回 404" % what, ok, "HTTP %s %s" % (code, "" if ok else body[:60]))
+    # 消息要说明是哪个 id 没找到，不能只是一句 "not found"。
+    if ok and "999999" not in body:
+        record("  且消息含具体 id %s" % what, False, body[:80])
+
 # ------------------------------------------------------- 数据变更核对
 print()
 print("=" * 70)

@@ -235,7 +235,8 @@ func deleteGroup(c *gin.Context) {
 		return
 	}
 	if err := op.GroupDel(id, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		// 删除不存在的分组该回 404 而不是 500（T-usability-012）。
+		writeOpError(c, err)
 		return
 	}
 	relay.ResetRouteState(id)

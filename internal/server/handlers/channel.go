@@ -191,7 +191,8 @@ func deleteChannel(c *gin.Context) {
 		return
 	}
 	if err := op.ChannelDel(id, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		// 删除不存在的渠道该回 404 而不是 500（T-usability-012）。
+		writeOpError(c, err)
 		return
 	}
 	if err := op.LLMCleanupGhosts(c.Request.Context()); err != nil {

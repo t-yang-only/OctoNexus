@@ -450,7 +450,8 @@ func validateGroupTreeRefs(conn *gorm.DB, items []model.GroupItem) error {
 func GroupDel(id int, ctx context.Context) error {
 	group, ok := groupCache.Get(id)
 	if !ok {
-		return fmt.Errorf("group not found")
+		// 哨兵错误：让 handler 能识别「分组不存在」并回 404 而不是 500（T-usability-012）。
+		return NotFoundf("group %d not found", id)
 	}
 	if err := groupDelOn(db.GetDB().WithContext(ctx), id); err != nil {
 		return err

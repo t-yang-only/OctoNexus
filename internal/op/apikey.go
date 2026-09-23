@@ -83,7 +83,9 @@ func APIKeyDelete(id int, ctx context.Context) error {
 	}
 	result := db.GetDB().WithContext(ctx).Delete(&k)
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("API key not found")
+		// 用哨兵错误而不是普通 fmt.Errorf：让 handler 能识别「资源不存在」
+		// 并回 404，而不是把确定的"东西没了"报成 500 服务端故障（T-usability-012）。
+		return NotFoundf("API key %d not found", id)
 	}
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete API key: %w", result.Error)

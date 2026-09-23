@@ -110,7 +110,9 @@ func deleteAPIKey(c *gin.Context) {
 		return
 	}
 	if err := op.APIKeyDelete(idNum, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		// 用 writeOpError 而不是固定的 500：删除一个不存在的 Key 时，
+		// op 层返回的是「资源不存在」——那该是 404，不是服务端故障（T-usability-012）。
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, nil)

@@ -256,7 +256,8 @@ func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
 // ChannelDel 删除渠道及其凭据, 模型与渠道授权, 关联分组项由数据库外键级联删除。
 func ChannelDel(id int, ctx context.Context) error {
 	if _, ok := channelCache.Get(id); !ok {
-		return fmt.Errorf("channel not found")
+		// 哨兵错误：让 handler 能识别「渠道不存在」并回 404 而不是 500（T-usability-012）。
+		return NotFoundf("channel %d not found", id)
 	}
 	grantIDs := channelGrantIDs(id)
 	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
