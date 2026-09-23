@@ -72,6 +72,8 @@ SUITES = [
      "渠道凭据静态加密（落库密文 / 端到端解密 / 判据自检 / 全库无明文）", "instance,db,mock"),
     ("cidr", "run_apikey_cidr_test.py",
      "Key 来源 IP 白名单（空白名单放行 / 拦与放 / 裸 IP 语义 / 伪造 XFF 无效 / 受信代理生效 / 非法网段被拒）", "instance,db,mock"),
+    ("notfound", "run_notfound_semantics_test.py",
+     "资源不存在的语义（全部带 id 的写路径：必须 4xx 不能 5xx；幂等删除与校验层拒绝是预期行为）", "instance,db"),
     ("apihealth", "run_admin_api_audit.py",
      "管理面接口健康（54 个 GET 逐个探测 / 导出格式按预期判定 / 流式可连接 / APIKeyAuth 正确拒绝）", "instance,db"),
     ("usabilitydiag", "run_usability_diag_test.py",
