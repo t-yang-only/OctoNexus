@@ -237,6 +237,15 @@
       }
     },
     "allocation": {
+      "filter": {
+        "all": "All",
+        "problem": "Problems",
+        "ok": "Healthy",
+        "placeholder": "Search model / channel / key / group",
+        "noMatch": "No matching member - try another keyword, or click \"All\" to see the full list.",
+        "showing": "{shown} of {total}",
+        "clear": "Clear filters"
+      },
       "title": "Quota spread and rate-limit monitor",
       "subtitle": "How many requests each member has left, how much traffic it gets, and why it is being skipped (read-only snapshot, refreshes every 30s)",
       "loading": "Loading the allocation snapshot…",
