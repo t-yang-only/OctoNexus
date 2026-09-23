@@ -1090,6 +1090,14 @@
             "notListed": "清單未列出",
             "more": "還有 {count} 個…",
             "allConsistent": "配置與上游清單一致"
+        },
+        "faultStats": {
+            "window": "統計最近 {total} 筆請求",
+            "experience": "體驗通過率",
+            "channel": "渠道健康度",
+            "unclassified": "其中 {count} 筆是升級前的歷史記錄（無歸因分類），未計入渠道健康度",
+            "gapHint": "下列渠道的兩個數值差距明顯 —— 差距來自「請求本身非法」，不是渠道故障：",
+            "gap": "體驗 {experience}% / 渠道健康度 {channel}%，差距來自 {requestFault} 次請求非法"
         }
     },
     "unifiedPool": {

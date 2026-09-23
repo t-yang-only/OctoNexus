@@ -1090,6 +1090,14 @@
             "notListed": "not listed upstream",
             "more": "{count} more…",
             "allConsistent": "Config matches upstream list"
+        },
+        "faultStats": {
+            "window": "Last {total} requests",
+            "experience": "Success rate",
+            "channel": "Channel health",
+            "unclassified": "{count} of them are pre-upgrade records without attribution, excluded from channel health",
+            "gapHint": "These channels show a clear gap between the two rates — the gap comes from invalid requests, not channel faults:",
+            "gap": "{experience}% success vs {channel}% channel health, gap from {requestFault} invalid requests"
         }
     },
     "unifiedPool": {

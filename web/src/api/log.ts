@@ -224,3 +224,52 @@ export function useLogResponseBody(id: number, startedAt: string, enabled: boole
         staleTime: Infinity,
     });
 }
+
+// T-usability-008 真实通过率（失败按归因分桶）。
+//
+// 两个通过率回答两个不同的问题，只给一个必然误导一半场景：
+//   successRate  用户发起的请求有多少成功了 —— 体验视角
+//   channelRate  这个渠道本身健康吗       —— 诊断视角（排除了「请求本身非法」）
+//
+// 实测：senseaudio 的 successRate 只有 31.6%，但 channelRate 接近 100% ——
+// 那 25 次失败全是「用 chat 接口调 TTS/图像模型」造成的请求非法，跟渠道无关。
+export interface RelayFaultCounts {
+    success: number;
+    /** 客户端主动断开：既不算成功也不算失败。 */
+    canceled: number;
+    /** 请求本身非法（400 一类）：任何成员都会同样拒绝，**不计入渠道健康度**。 */
+    request_fault: number;
+    /** 成员自身问题（凭据无效/无权限/模型不存在）：算渠道故障。 */
+    member_fault: number;
+    /** 可恢复失败（超时/限流/5xx/网络）：算渠道故障。 */
+    transient_fault: number;
+    /**
+     * 失败但未归类（升级前的存量行没有 fault_kind）。
+     *
+     * 单独列出而不是并进某一类：**不知道的不能猜** ——
+     * 猜成渠道故障会把历史账算到渠道头上，而原因根本不在它身上。
+     */
+    unclassified: number;
+}
+
+export interface ChannelFaults extends RelayFaultCounts {
+    channel: string;
+    success_rate: number;
+    channel_rate: number;
+}
+
+export interface RelayFaultStats extends RelayFaultCounts {
+    window: number;
+    channels: ChannelFaults[];
+}
+
+// useRelayFaultStats 取真实通过率。
+// window 用**条数**而不是天数：部署后流量差异极大，
+// 按天取会让「最近一天只有 3 条」的渠道得出毫无意义的比例。
+export function useRelayFaultStats(window = 500, enabled = true) {
+    return useQuery({
+        queryKey: ['logs', 'fault-stats', window],
+        queryFn: () => apiRequest<RelayFaultStats>(`/api/v1/log/fault-stats?window=${window}`),
+        enabled,
+    });
+}

@@ -3,6 +3,7 @@ import { useTranslations } from 'use-intl';
 
 import { useChannelDiagnose } from '@/api/channel';
 import { Badge } from '@/components/ui/badge';
+import { FaultStatsPanel } from './FaultStatsPanel';
 import { UpstreamCheckPanel } from './UpstreamCheckPanel';
 import { Button } from '@/components/ui/button';
 
@@ -103,6 +104,10 @@ export function DiagnoseBanner() {
                             </div>
                         ))}
                     </div>
+
+                    {/* 真实通过率：把「渠道故障」与「请求问题」分开 —— 
+                        一个通过率回答不了两个问题。 */}
+                    <FaultStatsPanel />
 
                     {/* 配置层的缺口列完了，接一段「配置 vs 上游」的核查 —— 
                         它是另一个问题：配置齐全不代表上游提供。手动触发，会真打上游。 */}
