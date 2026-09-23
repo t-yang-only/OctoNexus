@@ -72,6 +72,8 @@ SUITES = [
      "渠道凭据静态加密（落库密文 / 端到端解密 / 判据自检 / 全库无明文）", "instance,db,mock"),
     ("cidr", "run_apikey_cidr_test.py",
      "Key 来源 IP 白名单（空白名单放行 / 拦与放 / 裸 IP 语义 / 伪造 XFF 无效 / 受信代理生效 / 非法网段被拒）", "instance,db,mock"),
+    ("apihealth", "run_admin_api_audit.py",
+     "管理面接口健康（54 个 GET 逐个探测 / 导出格式按预期判定 / 流式可连接 / APIKeyAuth 正确拒绝）", "instance,db"),
     ("usabilitydiag", "run_usability_diag_test.py",
      "可用性诊断四层（配置层诊断 / 通过率归因分桶 / 上游清单对比 / 分组使用 / 真实调用级实测）", "instance,db"),
     ("webdav", "run_webdav_backup_test.py",
