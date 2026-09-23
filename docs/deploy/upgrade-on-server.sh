@@ -103,7 +103,13 @@ prune_old_artifacts() {
 # `Go Version: go1.27.0 linux/amd64` 这一行，用 /Version/ 会先命中它，
 # 于是"版本"被显示成 Go 版本（本轮演练实测）。
 version_of() {
-    [ -x "$1" ] || return 0
+    # 区分「没有可执行位」与「跑起来但读不到版本」：两者都返回空，
+    # 但前者是上传方式的问题（scp 不保留 exec 位），后者才是二进制的问题。
+    # 调用方据此给出不同的提示，否则一律报「跑不起来」会把人引向错误方向。
+    [ -f "$1" ] || return 0
+    if [ ! -x "$1" ]; then
+        chmod +x "$1" 2>/dev/null || return 0
+    fi
     "$1" version 2>/dev/null | tr -d '\r' | awk -F': ' '/^Version:/{print $2; exit}' || true
 }
 
@@ -289,7 +295,9 @@ do_upgrade() {
     fi
     local new_version
     new_version=$(version_of "$new_bin")
-    [ -n "$new_version" ] || die "新二进制跑不起来（version 子命令失败）"
+    # 走到这里说明 chmod 也修不了，通常是架构不符或文件损坏。
+    # 把排查入口直接写进提示，不要只说「跑不起来」。
+    [ -n "$new_version" ] || die "新二进制读不到版本号（已尝试 chmod +x）：请确认它是目标架构的 ELF（file $new_bin），且发布件完整（sha256 一致）"
     ok "新二进制版本 $new_version"
 
     log "== 2. 现状 =="
