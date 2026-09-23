@@ -1014,6 +1014,19 @@
       "attemptEmpty": "本次請求只打過一個成員",
       "responseStreaming": "上游已回應，串流傳輸正在進行"
     },
+"attemptStats": {
+    "title": "嘗試鏈聚合",
+    "scanned": "掃過 {count} 條帶明細的請求",
+    "multiRound": "換過成員",
+    "affected": "有失敗輪",
+    "explain": "「有失敗輪」含最終成功的請求——某輪失敗後換人成功了，那輪在這之前的所有統計裡都看不見。",
+    "truncated": "其中 {count} 條的輪次被截斷，聚合值會偏低",
+    "attempts": "共嘗試 {count} 次",
+    "failures": "失敗",
+    "memberFault": "成員故障 {count}",
+    "transientFault": "可恢復 {count}",
+    "requestFault": "請求非法 {count}"
+},
     "filter": {
       "faultKind": "失敗歸因",
       "faultAll": "全部",

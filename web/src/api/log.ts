@@ -318,3 +318,61 @@ export function useRelayFaultStats(window = 500, enabled = true) {
         enabled,
     });
 }
+
+// T-trace-002 尝试链聚合：谁在被反复试错。
+//
+// ## 与 fault_stats 的分工（两者刻意不同，都要有）
+//
+//   fault_stats   按**最终结果**归因 —— 成功率 / 渠道健康度
+//   attempt_stats 按**每一次尝试**归因 —— 谁在被反复试错
+//
+// 关键差异：一次**成功**的请求里 A 失败、B 接手成功 ——
+// fault_stats 完全看不到 A 的失败（那条日志 status=success），本接口能看到。
+export interface AttemptChannelStat {
+    channel: string;
+    /** 被尝试的轮数（含成功的轮）。分母是尝试次数，不是请求数。 */
+    attempts: number;
+    /** 失败的轮数。 */
+    failures: number;
+    /** 成功的轮数（正常每请求最多 1 次，因为成功即结束）。 */
+    successes: number;
+    /** 失败里「请求本身非法」：换个成员也一样结局。 */
+    request_fault: number;
+    /** 失败里「成员自身问题」：凭据/权限/模型不存在。 */
+    member_fault: number;
+    /** 失败里「可恢复」：超时/限流/5xx/网络。 */
+    transient_fault: number;
+    /** 失败但没带归因（升级前的存量轮）：不知道的不能猜。 */
+    unclassified_fault: number;
+    /** 最近一次失败的原文（后端已按字符截断）。 */
+    last_error?: string;
+    /** 最近一次失败所在日志的 id，便于回溯到具体那条。 */
+    last_error_log_id?: number;
+}
+
+export interface AttemptChainStats {
+    /** 扫过的日志条数。 */
+    window: number;
+    /** 其中带尝试链的条数。window - scanned 是升级前的存量行。 */
+    scanned: number;
+    /** 链被截断过的日志条数：这类日志轮次不完整，聚合值会偏低。 */
+    truncated: number;
+    /** 换过人（>1 轮）的请求数。 */
+    multi_round_requests: number;
+    /**
+     * 有过**失败轮**的请求数。
+     *
+     * 与 fault_stats 的失败数刻意不同：这里的请求最终可能是**成功**的。
+     * 两者之差就是「试错但最终成功」的请求量 —— 正是本视图存在的理由。
+     */
+    affected_requests: number;
+    channels: AttemptChannelStat[];
+}
+
+export function useAttemptChainStats(window = 500, enabled = true) {
+    return useQuery({
+        queryKey: ['logs', 'attempt-stats', window],
+        queryFn: () => apiRequest<AttemptChainStats>(`/api/v1/log/attempt-stats?window=${window}`),
+        enabled,
+    });
+}

@@ -1014,6 +1014,19 @@
       "attemptEmpty": "本次请求只打过一个成员",
       "responseStreaming": "上游已响应，流式传输正在进行"
     },
+"attemptStats": {
+    "title": "尝试链聚合",
+    "scanned": "扫过 {count} 条带明细的请求",
+    "multiRound": "换过成员",
+    "affected": "有失败轮",
+    "explain": "「有失败轮」含最终成功的请求——某轮失败后换人成功了，那轮在这之前的所有统计里都看不见。",
+    "truncated": "其中 {count} 条的轮次被截断，聚合值会偏低",
+    "attempts": "共尝试 {count} 次",
+    "failures": "失败",
+    "memberFault": "成员故障 {count}",
+    "transientFault": "可恢复 {count}",
+    "requestFault": "请求非法 {count}"
+},
     "filter": {
       "faultKind": "失败归因",
       "faultAll": "全部",

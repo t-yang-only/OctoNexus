@@ -1014,6 +1014,19 @@
       "attemptEmpty": "This request hit a single member",
       "responseStreaming": "Upstream responded; streaming is in progress"
     },
+"attemptStats": {
+    "title": "Attempt chain summary",
+    "scanned": "Scanned {count} requests with detail",
+    "multiRound": "Switched member",
+    "affected": "Had a failed round",
+    "explain": "\"Had a failed round\" includes requests that still succeeded — a failed round followed by a successful retry is invisible to every other statistic here.",
+    "truncated": "{count} of them were truncated, so totals are understated",
+    "attempts": "{count} attempts",
+    "failures": "failed",
+    "memberFault": "member {count}",
+    "transientFault": "transient {count}",
+    "requestFault": "request {count}"
+},
     "filter": {
       "faultKind": "Failure attribution",
       "faultAll": "All",

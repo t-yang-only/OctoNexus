@@ -1,8 +1,9 @@
-import { Loader2, Logs } from 'lucide-react';
+import { Logs, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { useLogs } from '@/api/log';
 import { VirtualizedGrid } from '@/components/common/VirtualizedGrid';
+import { AttemptStatsPanel } from './AttemptStatsPanel';
 import { LogCard } from './Item';
 import { LogToolbar, useFilteredLogs, type LogMemoryFilter } from './FilterBar';
 import { useLogAutoRefreshStore } from './store';
@@ -66,6 +67,13 @@ export function Log() {
                     getItemKey={(log) => `log-${log.id}`}
                     renderItem={(log) => <LogCard log={log} />}
                 />
+            </div>
+            {/* 尝试链聚合（T-trace-002）：回答"谁在被反复试错"。
+                放在列表**下方**而不是上方：它是背景诊断信息，
+                列表才是这个页面要给人看的东西，不该被统计挤下去。
+                面板自身在无数据/无异常时返回 null，正常时不占版面。 */}
+            <div className="shrink-0">
+                <AttemptStatsPanel />
             </div>
         </div>
     );
