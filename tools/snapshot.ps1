@@ -1,4 +1,4 @@
-# 生成源码快照：只含 git 跟踪的文件。
+﻿# 生成源码快照：只含 git 跟踪的文件。
 #
 # 为什么必须用 git archive 而不是 Copy-Item -Recurse：
 # 工作目录里躺着大量被 .gitignore 排除的产物 —— octopus.exe(70MB)、
