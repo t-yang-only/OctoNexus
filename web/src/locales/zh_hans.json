@@ -543,7 +543,13 @@
                 "confirm": "确认",
                 "allowedCIDRs": "来源 IP 白名单",
                 "allowedCIDRsPlaceholder": "留空则不限制，如 10.0.0.0/8, 192.168.1.5",
-                "allowedCIDRsHint": "填单个 IP 或 CIDR 网段，逗号分隔；留空表示不限制"
+                "allowedCIDRsHint": "填单个 IP 或 CIDR 网段，逗号分隔；留空表示不限制",
+                "modelSearchPlaceholder": "搜索模型名…",
+                "clearSelection": "清空已选（{count}）",
+                "hideAuto": "隐藏自动生成",
+                "showAuto": "显示自动生成",
+                "noMatchingModels": "没有匹配的模型",
+                "filteredCount": "显示 {shown} / 共 {total} 个"
             },
             "stats": {
                 "noData": "暂无统计数据",

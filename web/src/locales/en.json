@@ -543,7 +543,13 @@
                 "confirm": "Confirm",
                 "allowedCIDRs": "Source IP allowlist",
                 "allowedCIDRsPlaceholder": "Empty means unrestricted, e.g. 10.0.0.0/8, 192.168.1.5",
-                "allowedCIDRsHint": "One IP or CIDR per entry, comma separated; empty means unrestricted"
+                "allowedCIDRsHint": "One IP or CIDR per entry, comma separated; empty means unrestricted",
+                "modelSearchPlaceholder": "Search model name…",
+                "clearSelection": "Clear selection ({count})",
+                "hideAuto": "Hide auto-generated",
+                "showAuto": "Show auto-generated",
+                "noMatchingModels": "No matching models",
+                "filteredCount": "Showing {shown} of {total}"
             },
             "stats": {
                 "noData": "No statistics available",
