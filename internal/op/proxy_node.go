@@ -199,7 +199,9 @@ func ProxyNodeEndpoint(nodeID int) (string, error) {
 	conn := proxyNodeDB(nil)
 	var node model.ProxyNode
 	if err := conn.First(&node, nodeID).Error; err != nil {
-		return "", fmt.Errorf("代理节点不存在（id=%d）：请重新选择节点", nodeID)
+		// 哨兵错误：让 handler 回 404 而不是 502（T-usability-012）。
+		// 502 表示"上游网关故障、可重试"，而"节点不存在"是确定的、不该重试的结论。
+		return "", NotFoundf("代理节点不存在（id=%d）：请重新选择节点", nodeID)
 	}
 	if !node.Enabled {
 		return "", fmt.Errorf("代理节点 %q 已停用", node.Name)
@@ -440,6 +442,12 @@ func ProxySubscriptionRefresh(ctx context.Context, conn *gorm.DB, id int) (Proxy
 	}
 	var sub model.ProxySubscription
 	if err := conn.First(&sub, id).Error; err != nil {
+		// 直接透传 gorm.ErrRecordNotFound 时，handler 无法识别它该回 404
+		// （gorm 的错误类型属于实现细节，不该泄漏到 HTTP 层）——
+		// 换成项目自己的哨兵错误（T-usability-012）。
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ProxyImportResult{}, NotFoundf("订阅 %d 不存在", id)
+		}
 		return ProxyImportResult{}, err
 	}
 	if !secret.IsSealed(sub.URLCipher) {

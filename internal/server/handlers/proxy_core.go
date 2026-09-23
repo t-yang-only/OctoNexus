@@ -88,6 +88,12 @@ func proxyNodeProbeExit(c *gin.Context) {
 	}
 	ip, err := proxycore.ProbeNode(c.Request.Context(), id)
 	if err != nil {
+		// 「节点不存在」是 404（确定的、不该重试）；
+		// 其余（出口不通、探测超时）保持 502 —— 那是真正的外部依赖问题（T-usability-012）。
+		if op.IsNotFound(err) {
+			resp.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
 		resp.Error(c, http.StatusBadGateway, err.Error())
 		return
 	}

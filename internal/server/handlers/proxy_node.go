@@ -152,6 +152,12 @@ func proxyNodeImport(c *gin.Context) {
 	if body.SubID > 0 {
 		result, err := op.ProxySubscriptionRefresh(c.Request.Context(), nil, body.SubID)
 		if err != nil {
+			// 「订阅不存在」是 404；其余（拉取失败、解密失败）保持 502 ——
+			// 那是真正的上游/网关问题，502 语义正确（T-usability-012）。
+			if op.IsNotFound(err) {
+				resp.Error(c, http.StatusNotFound, err.Error())
+				return
+			}
 			resp.Error(c, http.StatusBadGateway, err.Error())
 			return
 		}
@@ -241,6 +247,11 @@ func proxySubscriptionRefresh(c *gin.Context) {
 	}
 	result, err := op.ProxySubscriptionRefresh(c.Request.Context(), nil, id)
 	if err != nil {
+		// 同上一处：订阅不存在 → 404；拉取失败 → 502（T-usability-012）。
+		if op.IsNotFound(err) {
+			resp.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
 		resp.Error(c, http.StatusBadGateway, err.Error())
 		return
 	}
