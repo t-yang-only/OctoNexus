@@ -5,6 +5,7 @@ import { useChannelDiagnose } from '@/api/channel';
 import { Badge } from '@/components/ui/badge';
 import { FaultStatsPanel } from './FaultStatsPanel';
 import { UpstreamCheckPanel } from './UpstreamCheckPanel';
+import { VerifyModelsPanel } from './VerifyModelsPanel';
 import { Button } from '@/components/ui/button';
 
 // DiagnoseBanner 在渠道页顶部显示可用率，并在有缺口时给出「配了却用不上」的清单。
@@ -108,6 +109,10 @@ export function DiagnoseBanner() {
                     {/* 真实通过率：把「渠道故障」与「请求问题」分开 —— 
                         一个通过率回答不了两个问题。 */}
                     <FaultStatsPanel />
+
+                    {/* 真实调用级实测：前三层诊断都答不了「上游到底认不认这个名字」。
+                        会真打上游，所以只能手动触发。 */}
+                    <VerifyModelsPanel channelIds={(data?.channels ?? []).map((c) => c.channel_id)} />
 
                     {/* 配置层的缺口列完了，接一段「配置 vs 上游」的核查 —— 
                         它是另一个问题：配置齐全不代表上游提供。手动触发，会真打上游。 */}

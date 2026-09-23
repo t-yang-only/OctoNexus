@@ -1118,6 +1118,19 @@
             "unclassified": "{count} of them are pre-upgrade records without attribution, excluded from channel health",
             "gapHint": "These channels show a clear gap between the two rates — the gap comes from invalid requests, not channel faults:",
             "gap": "{experience}% success vs {channel}% channel health, gap from {requestFault} invalid requests"
+        },
+        "verify": {
+            "run": "Verify model availability",
+            "running": "Verifying {done}/{total} (channel {current})",
+            "finished": "Checked {total} models, {usable} usable",
+            "cost": "This sends one real request per model (concurrency 3, max_tokens=1) and consumes upstream quota.",
+            "truncated": "More models than the per-run limit; only the first batch was checked. Run again for the rest.",
+            "noTargets": "No enabled-credential + granted model pairs to verify",
+            "channelResult": "{usable}/{total} usable",
+            "networkFailure": "Request did not reach upstream ({error}) — check network or proxy",
+            "upstreamRejected": "Upstream returned HTTP {status} — check model name or permissions",
+            "more": "{count} more…",
+            "allUsable": "All usable"
         }
     },
     "unifiedPool": {

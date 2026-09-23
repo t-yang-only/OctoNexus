@@ -418,3 +418,42 @@ export function useUpstreamCheck(channelId?: number, enabled = false) {
         staleTime: 5 * 60 * 1000,
     });
 }
+// T-verify-004 渠道模型的批量可用性实测。
+//
+// 回答「上游到底认不认这个名字」——三层诊断都答不了：
+//   配置层诊断：看的是"我们自己这边的账"，齐全也不代表上游认
+//   上游清单对比：清单本身不完整（实测有模型不在清单里却能调通）
+// 唯一可靠的判据是**发一次真实请求**。
+export interface ModelVerifyResult {
+    model: string;
+    /** 上游接受了这次请求（HTTP 2xx）。 */
+    usable: boolean;
+    /** 上游 HTTP 状态码；**0 表示请求没发出去**（网络/代理问题）。 */
+    status: number;
+    error?: string;
+    latency_ms: number;
+}
+
+export interface ModelVerifyResponse {
+    channel_id: number;
+    channel_name: string;
+    total: number;
+    usable: number;
+    unusable: number;
+    /** 模型数超过上限被截断 —— 用户有权知道实测没覆盖全部。 */
+    truncated?: boolean;
+    max_targets?: number;
+    results: ModelVerifyResult[];
+    /** 无需实测时的说明（如没有「已启用凭据+已授权」的组合）。 */
+    note?: string;
+}
+
+// verifyChannelModels 对一个渠道做批量实测。
+//
+// **这是个会真打上游的操作**（每个模型一次请求），所以做成命令式而非 query：
+// 绝不挂在任何自动渲染路径上。并发在后端固定为 3（防风控）。
+export async function verifyChannelModels(channelId: number): Promise<ModelVerifyResponse> {
+    return apiRequest<ModelVerifyResponse>(`/api/v1/channel/${channelId}/verify-models`, {
+        method: 'POST',
+    });
+}

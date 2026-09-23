@@ -1118,6 +1118,19 @@
             "unclassified": "其中 {count} 筆是升級前的歷史記錄（無歸因分類），未計入渠道健康度",
             "gapHint": "下列渠道的兩個數值差距明顯 —— 差距來自「請求本身非法」，不是渠道故障：",
             "gap": "體驗 {experience}% / 渠道健康度 {channel}%，差距來自 {requestFault} 次請求非法"
+        },
+        "verify": {
+            "run": "實測模型可用性",
+            "running": "實測中 {done}/{total}（渠道 {current}）",
+            "finished": "已實測 {total} 個模型，其中 {usable} 個可用",
+            "cost": "這個操作會對每個模型發一次真實請求（並發 3、max_tokens=1），會佔用上游額度。",
+            "truncated": "模型數超過單次上限，本次只實測了前一批；需要完整結果請分批進行。",
+            "noTargets": "沒有「已啟用憑據 + 已授權」的模型組合，無可實測對象",
+            "channelResult": "可用 {usable}/{total}",
+            "networkFailure": "請求未送達（{error}）—— 查網路或代理",
+            "upstreamRejected": "上游返回 HTTP {status} —— 查模型名或權限",
+            "more": "還有 {count} 個…",
+            "allUsable": "全部可用"
         }
     },
     "unifiedPool": {
