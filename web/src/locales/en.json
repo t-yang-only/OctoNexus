@@ -201,6 +201,12 @@
       }
     },
     "rank": {
+      "filterPlaceholder": "Search model or channel",
+      "filterNoMatch": "No matching entry - try another keyword",
+      "clear": "Clear",
+      "showing": "Showing {shown} of {total}",
+      "showMore": "Show all ({count} more)",
+      "collapse": "Collapse",
       "channel": "Channel",
       "model": "Model",
       "noData": "No ranking data",

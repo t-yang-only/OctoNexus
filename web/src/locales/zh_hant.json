@@ -201,6 +201,12 @@
       }
     },
     "rank": {
+      "filterPlaceholder": "搜尋模型或渠道",
+      "filterNoMatch": "沒有符合的項目 —— 換個關鍵字試試",
+      "clear": "清除",
+      "showing": "顯示 {shown} / 共 {total}",
+      "showMore": "展開全部（還有 {count} 條）",
+      "collapse": "收起",
       "channel": "渠道",
       "model": "模型",
       "noData": "暫無排行數據",

@@ -201,6 +201,12 @@
       }
     },
     "rank": {
+      "filterPlaceholder": "搜索模型或渠道",
+      "filterNoMatch": "没有匹配的条目 —— 换个关键词试试",
+      "clear": "清除",
+      "showing": "显示 {shown} / 共 {total}",
+      "showMore": "展开全部（还有 {count} 条）",
+      "collapse": "收起",
       "channel": "渠道",
       "model": "模型",
       "noData": "暂无排行数据",
