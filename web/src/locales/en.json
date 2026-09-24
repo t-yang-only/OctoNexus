@@ -1036,6 +1036,8 @@
         "reasonMemberFault": "member fault with no alternative left",
         "reasonNoMember": "no usable member in the group",
         "reasonClientCancel": "client disconnected",
+        "reasonCommitted": "response already committed, cannot switch member",
+        "reasonUnrecorded": "this exit did not record a stop reason",
         "sourceConfig": "config",
         "sourceUpstream": "upstream",
         "sourceClient": "client",

@@ -483,7 +483,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					if ctx.Err() != nil {
 						request.markCanceled(ctx.Err(), string(result.body), result.usage)
 					} else {
-						request.markFailed(err, string(result.body), result.usage)
+						// 响应体已 markCommitted，这个失败只可能是"写客户端"造成的，
+						// 已提交就不可能再换成员（commit guard）。
+						request.markFailed(err, string(result.body), result.usage, stopReasonCommitGuard, stopSourceClient)
 					}
 					return
 				}
@@ -592,7 +594,10 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				if ctx.Err() != nil {
 					request.markCanceled(ctx.Err(), string(responseBody), result.usage)
 				} else {
-					request.markFailed(err, string(responseBody), result.usage)
+					// 流式收尾失败：读上下游（网络中断）还是写客户端，这里分不出来，
+					// 因此传空让它落成 unrecorded —— 如实表示"这个出口没有细分原因"，
+					// 不为了好看硬安一个可能错的来源。
+					request.markFailed(err, string(responseBody), result.usage, "", "")
 				}
 				return
 			}
@@ -636,10 +641,9 @@ func failRequest(c *gin.Context, inbound transformer.Inbound, request *RequestSt
 	if err != nil && err.Error() != "" {
 		message = err.Error()
 	}
-	request.markFailed(err, "", nil)
-	// 终止原因在 markFailed 之后写：markFailed 不碰这个字段，
-	// 但在它之前写会与它内部的发布时序纠缠，放在后面更直白。
-	request.recordStopReason(reason, source)
+	// 终止原因随 markFailed 一起进锁：markFailed 内部会落库历史快照，
+	// 原因必须在落库**之前**写好，否则写进去的是空值（v0.61.0 生产实证）。
+	request.markFailed(err, "", nil, reason, source)
 	response := inbound.TransformError(c.Request.Context(), &llm.ResponseError{
 		StatusCode: http.StatusBadGateway,
 		Detail:     llm.ErrorDetail{Message: message, Type: "upstream_error"},

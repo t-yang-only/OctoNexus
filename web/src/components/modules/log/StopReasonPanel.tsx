@@ -31,6 +31,8 @@ const REASON_KEYS: Record<string, string> = {
     member_fault_no_alternative: 'reasonMemberFault',
     no_available_member: 'reasonNoMember',
     client_canceled: 'reasonClientCancel',
+    response_committed: 'reasonCommitted',
+    unrecorded: 'reasonUnrecorded',
 };
 
 // source 取值 → i18n 键名。source 决定"该去改什么"。

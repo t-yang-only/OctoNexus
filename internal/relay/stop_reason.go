@@ -57,6 +57,13 @@ const (
 	stopReasonClientCancel = "client_canceled"
 	// stopReasonCommitGuard 已向上游提交（首字节已写出）后的失败，不能再换成员。
 	stopReasonCommitGuard = "response_committed"
+	// stopReasonUnrecorded 该出口没有标注终止原因。
+	//
+	// 它不是一种"终止规则"，而是一个**实现缺陷的可见信号**：留空会与
+	// "本字段上线之前的历史行"混在一起，谁也不知道新的空值意味着漏标。
+	// 记成 unrecorded 之后，"这条为什么是 unrecorded"就只有一个答案 ——
+	// 某个调 markFailed 的出口没传 reason，去补它。
+	stopReasonUnrecorded = "unrecorded"
 )
 
 // 终止来源（Source）取值：这条规则从哪来。

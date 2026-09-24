@@ -370,7 +370,16 @@ func (r *RequestState) markSucceeded(responseBody string, usage *llm.Usage) {
 }
 
 // markFailed 以失败终态定稿请求, 最终错误取自本次失败原因。
-func (r *RequestState) markFailed(err error, responseBody string, usage *llm.Usage) {
+//
+// reason/source 是**终止原因**（T-trace-003），由调用出口传入：同一个 markFailed
+// 会被多个出口调用（预算用尽/全体拒绝/快速失败/无可用成员……），只有出口自己
+// 知道是哪一个。空 reason 记为 unrecorded，让"忘记标注"变成看得见的信号。
+//
+// **必须在 finishLocked 之前写**：finishLocked 内部就要把快照落库，
+// 之后 再写只能改内存、追不回已经写进去的那一行 —— 生产复验时失败请求的
+// stop_reason 就是这样落成空值的（v0.61.0 时序 bug：落库发生在写原因之前）。
+// markSucceeded / markCanceled 从一开始就是这个顺序，三者现在同构。
+func (r *RequestState) markFailed(err error, responseBody string, usage *llm.Usage, reason, source string) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -382,10 +391,11 @@ func (r *RequestState) markFailed(err error, responseBody string, usage *llm.Usa
 	if responseBody != "" {
 		r.responseBody = responseBody
 	}
+	r.recordStopReasonLocked(reason, source)
 	r.finishLocked(usage)
 }
 
-// recordStopReason 记录本次请求**为什么停下来**（T-trace-003）。
+// recordStopReasonLocked 记录本次请求**为什么停下来**（T-trace-003）；调用方必须持有锁。
 //
 // 与 markFailed 分开而不是合并进它：markFailed 在多个出口都被调用（含流式中断、
 // 客户端取消这些"不是任何人的错"的情形），而终止原因是**出口自己才知道**的信息 ——
@@ -393,23 +403,25 @@ func (r *RequestState) markFailed(err error, responseBody string, usage *llm.Usa
 //
 // 只覆盖不追加：一个请求只会终止一次，先写的那个出口才是真实原因。
 // （若出现重复调用，保留首次比保留最后一次更接近事实。）
-func (r *RequestState) recordStopReason(reason, source string) {
-	// 空原因直接返回。**变异检查结论：这个早退在功能上是冗余的** ——
-	// 即便放它过去，下面 StopReason.Text() 对空 Reason 也返回空串，
-	// 最终 r.StopReason 依然是空（实测把守卫改成恒 false，用例全绿）。
-	// 保留它的理由不是正确性而是代价：调用方持有锁时无谓加锁会短暂阻塞
-	// 状态流的其他读者，而空 reason 是明确的调用错误、不该走到加锁。
-	// 这里如实记录冗余，避免后人误以为删掉它会漏掉某条用例覆盖的行为。
-	if reason == "" {
-		return
-	}
-	mu.Lock()
-	defer mu.Unlock()
+//
+// 空 reason 记为 unrecorded 而不是留空：留空会与"字段上线之前的历史行"混在一起，
+// 而这个版本之后仍然为空只可能是某个出口忘了标 —— 那是需要被看见的实现缺陷。
+func (r *RequestState) recordStopReasonLocked(reason, source string) {
 	if r.StopReason != "" {
 		return
 	}
-	text := StopReason{Action: stopAction, Reason: reason, Source: source, Attempts: r.Round}.Text()
-	r.StopReason = text
+	if reason == "" {
+		reason = stopReasonUnrecorded
+	}
+	if source == "" {
+		source = stopSourceSystem
+	}
+	r.StopReason = StopReason{
+		Action:   stopAction,
+		Reason:   reason,
+		Source:   source,
+		Attempts: r.Round,
+	}.Text()
 }
 
 // faultKindOf 把一次上游失败归到三类之一，供通过率统计排除「不是渠道的锅」的那种。

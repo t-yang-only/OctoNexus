@@ -1036,6 +1036,8 @@
         "reasonMemberFault": "成員自身問題且已無其他成員",
         "reasonNoMember": "分組內沒有可用成員",
         "reasonClientCancel": "客戶端主動斷開",
+        "reasonCommitted": "回應已提交，不能再換成員",
+        "reasonUnrecorded": "該出口未標註終止原因",
         "sourceConfig": "配置",
         "sourceUpstream": "上游",
         "sourceClient": "客戶端",

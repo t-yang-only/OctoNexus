@@ -87,32 +87,46 @@ func TestAllRejectedAndFailFastShareFaultKindButDifferInSource(t *testing.T) {
 	}
 }
 
-// recordStopReason 只覆盖不追加：一个请求只终止一次，先写的出口才是真实原因。
+// 只覆盖不追加：一个请求只终止一次，先写的出口才是真实原因。
 //
 // 负向对照：若实现改成"后者覆盖前者"，重复调用两次后拿到的是伪造原因。
-func TestRecordStopReasonKeepsFirstWrite(t *testing.T) {
-	state := &RequestState{}
-	state.recordStopReason(stopReasonBudget, stopSourceConfig)
+func TestMarkFailedKeepsFirstStopReason(t *testing.T) {
+	openStopReasonTestDB(t)
+
+	state := &RequestState{ID: 8901}
+	state.markFailed(errTestCanceled{}, "", nil, stopReasonBudget, stopSourceConfig)
 	first := state.StopReason
 
-	// 模拟一个不该发生的二次调用（如 defer 里的兜底出口）。
-	state.recordStopReason(stopReasonNoMember, stopSourceConfig)
+	// 模拟一个不该发生的二次定稿（如 defer 里的兜底出口）。
+	state.markFailed(errTestCanceled{}, "", nil, stopReasonNoMember, stopSourceConfig)
 
 	if state.StopReason != first {
-		t.Fatalf("二次调用覆盖了首次原因：%q -> %q", first, state.StopReason)
+		t.Fatalf("二次定稿覆盖了首次原因：%q -> %q", first, state.StopReason)
 	}
 	if !strings.Contains(state.StopReason, stopReasonBudget) {
 		t.Errorf("保留的应是首次原因 budget，got %q", state.StopReason)
 	}
 }
 
-// 空 reason 不写入：避免产生"有记录但不知道原因"的假数据。
-func TestRecordStopReasonIgnoresEmpty(t *testing.T) {
-	state := &RequestState{}
-	state.recordStopReason("", stopSourceSystem)
+// 出口没传 reason 时记 unrecorded，而不是留空。
+//
+// 留空会与"字段上线之前的历史行"混成一堆，谁也不知道新的空值意味着漏标；
+// unrecorded 只有一个解释：某个调 markFailed 的出口忘了标。
+func TestMarkFailedRecordsUnrecordedWhenReasonMissing(t *testing.T) {
+	openStopReasonTestDB(t)
 
-	if state.StopReason != "" {
-		t.Errorf("空 reason 不该写入，got %q", state.StopReason)
+	state := &RequestState{ID: 8902}
+	state.markFailed(errTestCanceled{}, "", nil, "", "")
+
+	if !strings.Contains(state.StopReason, stopReasonUnrecorded) {
+		t.Errorf("缺省原因应记为 %q，got %q", stopReasonUnrecorded, state.StopReason)
+	}
+	// source 也不能留空，否则文本里会出现 "source=" 这种残缺键值。
+	if !strings.Contains(state.StopReason, "source="+stopSourceSystem) {
+		t.Errorf("缺省 source 应回落到 system，got %q", state.StopReason)
+	}
+	if state.StopReason == "" {
+		t.Fatal("StopReason 不能为空串 —— 那与历史空值无法区分")
 	}
 }
 
@@ -151,7 +165,11 @@ func TestSuccessAndCancelPathsWriteOwnReason(t *testing.T) {
 	}
 }
 
-// openStopReasonTestDB 提供本组用例所需的最小 DB（成功/取消路径会触发统计落库）。
+// openStopReasonTestDB 提供本组用例所需的最小 DB。
+//
+// 成功/取消路径会触发统计落库，失败路径还要额外落 relay_logs 历史快照 ——
+// 后者正是本组最关键的判据所在（终止原因必须"写进库里"而不仅是留在内存），
+// 所以 RelayLog 必须一并迁移，否则查表会报表不存在。
 // 与 route_cooldown_test.go 同一套装置口径：内存库 + 用完即换。
 func openStopReasonTestDB(t *testing.T) {
 	t.Helper()
@@ -162,6 +180,7 @@ func openStopReasonTestDB(t *testing.T) {
 	}
 	if err := conn.AutoMigrate(
 		&model.StatsTotal{}, &model.StatsDaily{}, &model.StatsHourly{}, &model.StatsAPIKey{},
+		&model.RelayLog{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -175,16 +194,47 @@ func (errTestCanceled) Error() string { return "context canceled" }
 
 // Attempts 要如实反映"试了几次才放弃" —— 它是判断"预算用尽"严重程度的唯一依据。
 func TestStopReasonCarriesAttempts(t *testing.T) {
-	state := &RequestState{Round: 7}
-	state.recordStopReason(stopReasonBudget, stopSourceConfig)
+	openStopReasonTestDB(t)
 
-	// Round 被记录进 Attempts 字段（Text() 只输出三个键，Attempts 走 JSON 结构体）。
-	sr := StopReason{Action: stopAction, Reason: stopReasonBudget, Source: stopSourceConfig, Attempts: state.Round}
-	if sr.Attempts != 7 {
-		t.Errorf("Attempts = %d, want 7", sr.Attempts)
+	state := &RequestState{ID: 8903, Round: 7}
+	state.markFailed(errTestCanceled{}, "", nil, stopReasonBudget, stopSourceConfig)
+
+	if !strings.Contains(state.StopReason, stopReasonBudget) {
+		t.Errorf("StopReason = %q, 应含 %q", state.StopReason, stopReasonBudget)
 	}
-	// 文本里不含 attempts，保持与 Decision.Text() 同形的三键格式。
+	// 文本里不含 attempts，保持与 Decision.Text() 同形的三键格式
+	// （尝试次数另有 relay_logs.attempts 列承载）。
 	if strings.Contains(state.StopReason, "attempts=") {
 		t.Errorf("Text() 不该包含 attempts（与 Decision.Text() 格式保持一致），got %q", state.StopReason)
+	}
+}
+
+// **本轮 bug 的回归判据**：终止原因必须写进 relay_logs，而不只是留在内存。
+//
+// v0.61.0 的失败请求在生产上落库为空的根因是时序：finishLocked 内部就落库了，
+// 而原因是在 markFailed 返回**之后**才由调用方补写 —— 写进内存的那一份
+// 追不回已经落好的行。所以判据必须是**查表**，而不是断言 state.StopReason：
+// 后者在两种实现下都非空（改前也一样），根本抓不住这个 bug。
+//
+// 负向对照：把原因写入移到 finishLocked 之后，本用例必须变红。
+func TestMarkFailedPersistsStopReasonIntoLogRow(t *testing.T) {
+	openStopReasonTestDB(t)
+
+	state := &RequestState{ID: 8904, Round: 3}
+	state.markFailed(errTestCanceled{}, "", nil, stopReasonAllRejected, stopSourceUpstream)
+
+	var row model.RelayLog
+	if err := db.GetDB().Where("request_id = ?", uint64(8904)).First(&row).Error; err != nil {
+		t.Fatalf("落库的历史快照查不到：%v", err)
+	}
+	if row.StopReason == "" {
+		t.Fatal("relay_logs.stop_reason 落库为空 —— 终止原因写在了落库之后（v0.61.0 时序 bug 复现）")
+	}
+	if !strings.Contains(row.StopReason, stopReasonAllRejected) {
+		t.Errorf("落库的 stop_reason = %q, 应含 %q", row.StopReason, stopReasonAllRejected)
+	}
+	// source 必须一起落库：只落 reason 分不清该改请求还是改设置。
+	if !strings.Contains(row.StopReason, "source="+stopSourceUpstream) {
+		t.Errorf("落库的 stop_reason = %q, 应含 source=upstream", row.StopReason)
 	}
 }
