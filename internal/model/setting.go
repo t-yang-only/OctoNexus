@@ -40,6 +40,7 @@ const (
 	SettingKeyRouteAllocateTokens    SettingKey = "route_allocate_estimate_tokens"       // 请求没给出 token 估算时的兜底单次 token 量（把余额折成"还能发多少次"用）; 默认 1000
 	SettingKeyRouteAllocateHealth    SettingKey = "route_allocate_health_weight"         // 健康折扣强度 0..100: 成功率低/耗时长/刚被限流的成员权重打几折; 默认 40, 0 表示不看健康只看余额
 	SettingKeyRouteAllocateSlowMs    SettingKey = "route_allocate_slow_latency_ms"       // 慢成员阈值(毫秒): 最近一次尝试超过它即按超出比例打折; 0 表示不按延迟打折
+	SettingKeyRouteSlowLatencyMs     SettingKey = "route_slow_latency_ms"                // 慢成员分区阈值(毫秒, T-route-003): 超过即排到候选队尾, failover 等全部模式共用; 默认 30000, 0 表示关闭
 	SettingKeyRouteAllocateMinReq    SettingKey = "route_allocate_min_requests"          // 剩余请求数低于该值即剔除(次数已不足一次); 默认 1, 0 表示不按余量剔除
 	SettingKeyRouteMemberRPMLimit    SettingKey = "route_member_rpm_limit"               // 成员级每分钟请求上限(RPM), 达到即让开一轮; 0 表示不限（上游真实限额不可知, 这是"自己先刹车"）
 	SettingKeyRouteMemberTPMLimit    SettingKey = "route_member_tpm_limit"               // 成员级每分钟 token 上限(TPM), 达到即让开一轮; 0 表示不限
@@ -188,6 +189,7 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyRouteAllocateTokens, Value: "1000"},
 		{Key: SettingKeyRouteAllocateHealth, Value: "40"},
 		{Key: SettingKeyRouteAllocateSlowMs, Value: "0"},
+		{Key: SettingKeyRouteSlowLatencyMs, Value: "30000"},
 		{Key: SettingKeyRouteAllocateMinReq, Value: "1"},
 		{Key: SettingKeyRouteMemberRPMLimit, Value: "0"},
 		{Key: SettingKeyRouteMemberTPMLimit, Value: "0"},
@@ -433,7 +435,8 @@ func (s *Setting) Validate() error {
 		SettingKeyRouteAllocateMinReq, SettingKeyRouteMemberRPMLimit, SettingKeyRouteMemberTPMLimit,
 		SettingKeyRouteThrottleCapSecond,
 		SettingKeyRouteSpeedWeight, SettingKeyRouteSpeedSlowTtfb, SettingKeyRouteSpeedSlowTPS,
-		SettingKeyRouteSpeedFeMultiple, SettingKeyRouteSpeedFeFloor:
+		SettingKeyRouteSpeedFeMultiple, SettingKeyRouteSpeedFeFloor,
+		SettingKeyRouteSlowLatencyMs:
 		// 分压/速度设置全部是非负整数: 越界直接报错而不是静默夹紧, 免得用户以为自己改成了别的数。
 		value, err := strconv.Atoi(s.Value)
 		if err != nil || value < 0 {

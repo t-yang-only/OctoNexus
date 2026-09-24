@@ -102,6 +102,12 @@ func setSetting(c *gin.Context) {
 			return
 		}
 		relay.SetRouteBalanceEnabled(enabled)
+	case model.SettingKeyRouteSlowLatencyMs:
+		// 慢成员分区阈值即时生效 (T-route-003): relay 不耦合配置源, 由装配层在此注入。
+		// 解析失败不拦保存 —— 与其它数值设置同口径, 使用侧上次注入的值继续生效。
+		if ms, err := strconv.Atoi(setting.Value); err == nil {
+			relay.SetRouteSlowLatencyMs(int64(ms))
+		}
 	case model.SettingKeyQuotaScanInterval:
 		// 余额扫描周期热更新: 与注册同口径 (0 停用, task.Update 自会摘任务), 解析失败不拦保存。
 		if minutes, err := strconv.Atoi(setting.Value); err == nil {

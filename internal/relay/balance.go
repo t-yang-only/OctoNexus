@@ -22,6 +22,8 @@ import (
 //       另收 zeroBalanceGrantIDs 显式剔除（调用方把阈值事件打中的授权 ID 传进来）。
 //  3. 最低延迟可插拔接口：LatencyProvider 由调用方实现（本包默认 nil=不参与排序），
 //     有值时在同权重分档内按延迟升序（P50 口径由提供方定）；无值时保持 priority 顺序。
+//  4. 慢成员分区（T-route-003，见 splitSlow）：最近一次尝试耗时超过阈值的成员排到
+//     正常成员之后。这是全部模式共用的收口点，failover 也由此获得慢成员保护。
 
 // ErrNoEligibleMember 表示候选全部被剔除。
 var ErrNoEligibleMember = errors.New("no eligible member")
@@ -38,28 +40,37 @@ func rankCandidates(items []model.GroupItem, cooldowns map[int]int64, nowMs int6
 	if err != nil {
 		return nil, err
 	}
+	// 慢成员判定用包内统一数据源, 而不是本函数收到的 latency:
+	// failover 走这条路时 latency 传的就是 nil（它不按延迟排序），若沿用该参数,
+	// 保护在最主要的模式上会静默失效。排序键仍按传入的 latency（见下方 stableLatencySort）。
+	fast, slow := splitSlow(eligible, slowLatencySource, slowLatencyThresholdMs())
 	// priority 升序定权重：首个权重最高。
-	sorted := append([]model.GroupItem(nil), eligible...)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		if sorted[i].Priority != sorted[j].Priority {
-			return sorted[i].Priority < sorted[j].Priority
+	// 全员都慢时 fast 为空：此时没有"正常成员"可轮询, 直接以 slow 打头 ——
+	// 不能进 smoothWeightedOrder, 它对空集会在 current[best] 上越界（best 恒为 -1）。
+	out := make([]model.GroupItem, 0, len(fast)+len(slow)+len(cooling))
+	if len(fast) > 0 {
+		sorted := append([]model.GroupItem(nil), fast...)
+		sort.SliceStable(sorted, func(i, j int) bool {
+			if sorted[i].Priority != sorted[j].Priority {
+				return sorted[i].Priority < sorted[j].Priority
+			}
+			return sorted[i].ID < sorted[j].ID
+		})
+		weights := make([]int, len(sorted))
+		total := 0
+		for i := range sorted {
+			weights[i] = len(sorted) - i
+			total += weights[i]
 		}
-		return sorted[i].ID < sorted[j].ID
-	})
-	weights := make([]int, len(sorted))
-	total := 0
-	for i := range sorted {
-		weights[i] = len(sorted) - i
-		total += weights[i]
-	}
-	order := smoothWeightedOrder(len(sorted), weights, total, round)
-	out := make([]model.GroupItem, 0, len(sorted)+len(cooling))
-	for _, idx := range order {
-		out = append(out, sorted[idx])
+		order := smoothWeightedOrder(len(sorted), weights, total, round)
+		for _, idx := range order {
+			out = append(out, sorted[idx])
+		}
 	}
 	if latency != nil {
 		stableLatencySort(out, latency)
 	}
+	out = append(out, slow...)
 	return append(out, cooling...), nil
 }
 
@@ -88,6 +99,38 @@ func partitionCandidates(items []model.GroupItem, cooldowns map[int]int64, nowMs
 	return eligible, cooling, nil
 }
 
+// splitSlow 把可尝试成员分成"正常"与"慢"两段（T-route-003）。
+//
+// 为什么需要它：冷却只惩罚**失败**的成员，而"成功但极慢"的成员永远不会被冷却——
+// 实测一个首字节 71~140 秒的上游在 failover 分组里按 priority 长期占据队首，
+// 每次请求都要先等它把首事件超时耗完才换人（一次 163 秒）。慢不是故障，
+// 所以既不能把它塞进冷却（那会让探测/等待链路接管一个其实能用的成员），
+// 也不能剔除（成员少的分组还要靠它兜底）。它只是不该排在别人前面。
+//
+// 三条判据：
+//   - 阈值 <=0 或没有延迟数据源时整体关闭，返回原序（failover 的既有语义逐字不变）；
+//   - 只认"有样本且超过阈值"，无样本的新成员保持乐观先验，不会被压到队尾。
+//     变异检查结论：`ok` 判断在当前数据源下功能冗余 —— memberLatencyMs 对无样本返回
+//     的是 0，而阈值必须为正才走到这里，0 永远超不过正阈值，所以删掉 `ok &&` 没有任何
+//     用例变红。保留它是把"无样本 != 慢"的意图写在代码里，并在将来出现"以零值表示未知"
+//     的数据源时仍然正确；
+//   - fast 全空时 slow 仍是返回值的一部分，调用方拼成 fast+slow+cooling 后
+//     首个候选依然是可用成员——"全是慢成员"不等于"无可用成员"。
+func splitSlow(eligible []model.GroupItem, latency LatencyProvider, thresholdMs int64) (fast, slow []model.GroupItem) {
+	if thresholdMs <= 0 || latency == nil || len(eligible) == 0 {
+		return eligible, nil
+	}
+	fast = make([]model.GroupItem, 0, len(eligible))
+	for _, item := range eligible {
+		if ms, ok := latency(item.ID); ok && ms > thresholdMs {
+			slow = append(slow, item)
+			continue
+		}
+		fast = append(fast, item)
+	}
+	return fast, slow
+}
+
 // smoothWeightedOrder 返回平滑加权轮询在给定 round 下的当选者优先的下标序列：
 // 经典算法 current[i]+=w[i]，选最大者 current-=total；为纯函数可测。
 // 平滑加权轮询以 total 步为一个周期（每步累加器总增 total、总减 total，
@@ -95,6 +138,10 @@ func partitionCandidates(items []model.GroupItem, cooldowns map[int]int64, nowMs
 // 调用方按请求计数自增 round，长期运行会涨到上亿，直接重放就是一次 O(round)
 // 的挂死。取模后语义与全量重放完全一致。
 func smoothWeightedOrder(n int, weights []int, total int, round uint64) []int {
+	// 空集是合法输入（全员都慢时调用方根本不进来, 但纯函数不该对空输入 panic）。
+	if n <= 0 || len(weights) < n {
+		return nil
+	}
 	if total > 0 {
 		round = round % uint64(total)
 	}

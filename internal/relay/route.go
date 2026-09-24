@@ -41,6 +41,37 @@ const routeStreamBuffer = 16 // 单个路由流连接的非阻塞消息缓冲容
 // 由装配层 (server 启动 / 设置变更) 经 SetRouteBalanceEnabled 注入, relay 自身不耦合配置源。
 var routeBalanceEnabled atomic.Bool
 
+// T-route-003 慢成员阈值（毫秒）的进程内值, 口径与 routeBalanceEnabled 同款:
+// 同样由装配层经 SetRouteSlowLatencyMs 注入, relay 自身不读配置源。
+// 负值表示"尚未注入", 此时 slowLatencyThresholdMs 返回默认值而不是 0 —— 否则
+// "没接线"会与"用户明确关闭"撞成同一个值, 默认保护就悄悄失效了。
+const (
+	routeSlowLatencyUnset     int64 = -1
+	defaultRouteSlowLatencyMs int64 = 30_000
+)
+
+var routeSlowLatencyMs = func() *atomic.Int64 {
+	v := &atomic.Int64{}
+	v.Store(routeSlowLatencyUnset)
+	return v
+}()
+
+// SetRouteSlowLatencyMs 注入慢成员阈值（毫秒）。0 = 明确关闭该保护; 负值按未设置处理。
+func SetRouteSlowLatencyMs(ms int64) {
+	if ms < 0 {
+		ms = routeSlowLatencyUnset
+	}
+	routeSlowLatencyMs.Store(ms)
+}
+
+// slowLatencyThresholdMs 返回当前生效的慢成员阈值（毫秒, 0 = 关闭）。
+func slowLatencyThresholdMs() int64 {
+	if v := routeSlowLatencyMs.Load(); v >= 0 {
+		return v
+	}
+	return defaultRouteSlowLatencyMs
+}
+
 var (
 	routeMu      sync.Mutex                           // routeMu 保护全部分组路由状态。
 	routes       = make(map[int]*RouteState)          // routes 按分组 ID 保存路由状态。

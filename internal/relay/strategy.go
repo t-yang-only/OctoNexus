@@ -85,7 +85,8 @@ func rankByLowestCost(items []model.GroupItem, cooldowns map[int]int64, nowMs in
 	if err != nil {
 		return nil, err
 	}
-	ranked := append([]model.GroupItem(nil), eligible...)
+	fast, slow := splitSlow(eligible, slowLatencySource, slowLatencyThresholdMs())
+	ranked := append([]model.GroupItem(nil), fast...)
 	sort.SliceStable(ranked, func(i, j int) bool {
 		pi, oki := providerUnitPrice(cost, ranked[i])
 		pj, okj := providerUnitPrice(cost, ranked[j])
@@ -100,7 +101,7 @@ func rankByLowestCost(items []model.GroupItem, cooldowns map[int]int64, nowMs in
 		}
 		return ranked[i].ID < ranked[j].ID
 	})
-	return append(ranked, cooling...), nil
+	return append(append(ranked, slow...), cooling...), nil
 }
 
 // providerUnitPrice 容错 nil provider（未接线或单测不关心价格时按"无数据"处理，自然退回 priority 定序）。
@@ -143,6 +144,14 @@ type routeDeps struct {
 	billing func(item model.GroupItem) (model.ChannelBilling, bool)
 }
 
+// slowLatencySource 是慢成员判定（T-route-003）统一使用的延迟数据源, 默认接生产采样。
+//
+// 为什么与各策略自己的排序 provider 分开: 排序键表达的是"这一策略关心的相对序"（成本/质量/
+// 在途/消耗），而慢成员是一条**横向的绝对判据**（耗时超过阈值就不该排在别人前面）。
+// 同一个分组换模式时这把尺子必须不变, 否则"哪个成员慢"会随模式漂移。
+// 测试可整体替换它, 或配合 SetRouteSlowLatencyMs(0) 把该保护关掉。
+var slowLatencySource LatencyProvider = memberLatencyMs
+
 // NM-DS-004 迭代：质量优先（quality_first）选路定序。
 // 与最低成本共用同一套过滤/冷却口径（partitionCandidates），只换排序键：
 // 最近窗口成功率降序 → priority 升序 → ID 升序。
@@ -158,7 +167,8 @@ func rankByQuality(items []model.GroupItem, cooldowns map[int]int64, nowMs int64
 	if err != nil {
 		return nil, err
 	}
-	ranked := append([]model.GroupItem(nil), eligible...)
+	fast, slow := splitSlow(eligible, slowLatencySource, slowLatencyThresholdMs())
+	ranked := append([]model.GroupItem(nil), fast...)
 	sort.SliceStable(ranked, func(i, j int) bool {
 		si := memberQualityScore(quality, ranked[i])
 		sj := memberQualityScore(quality, ranked[j])
@@ -170,7 +180,7 @@ func rankByQuality(items []model.GroupItem, cooldowns map[int]int64, nowMs int64
 		}
 		return ranked[i].ID < ranked[j].ID
 	})
-	return append(ranked, cooling...), nil
+	return append(append(ranked, slow...), cooling...), nil
 }
 
 // memberQualityScore 取成员成功率；provider 未接线或无样本时返回中性先验。
@@ -216,7 +226,8 @@ func rankByLatency(items []model.GroupItem, cooldowns map[int]int64, nowMs int64
 	if err != nil {
 		return nil, err
 	}
-	ranked := append([]model.GroupItem(nil), eligible...)
+	fast, slow := splitSlow(eligible, slowLatencySource, slowLatencyThresholdMs())
+	ranked := append([]model.GroupItem(nil), fast...)
 	sort.SliceStable(ranked, func(i, j int) bool {
 		li := memberLatencyScore(latency, ranked[i])
 		lj := memberLatencyScore(latency, ranked[j])
@@ -228,7 +239,7 @@ func rankByLatency(items []model.GroupItem, cooldowns map[int]int64, nowMs int64
 		}
 		return ranked[i].ID < ranked[j].ID
 	})
-	return append(ranked, cooling...), nil
+	return append(append(ranked, slow...), cooling...), nil
 }
 
 // memberLatencyScore 取成员最近耗时；provider 未接线或无数据时按 0 参与排序（乐观先验）。
@@ -275,7 +286,8 @@ func rankByBusy(items []model.GroupItem, cooldowns map[int]int64, nowMs int64, z
 	if err != nil {
 		return nil, err
 	}
-	ranked := append([]model.GroupItem(nil), eligible...)
+	fast, slow := splitSlow(eligible, slowLatencySource, slowLatencyThresholdMs())
+	ranked := append([]model.GroupItem(nil), fast...)
 	sort.SliceStable(ranked, func(i, j int) bool {
 		bi := memberBusyScore(busy, ranked[i])
 		bj := memberBusyScore(busy, ranked[j])
@@ -287,7 +299,7 @@ func rankByBusy(items []model.GroupItem, cooldowns map[int]int64, nowMs int64, z
 		}
 		return ranked[i].ID < ranked[j].ID
 	})
-	return append(ranked, cooling...), nil
+	return append(append(ranked, slow...), cooling...), nil
 }
 
 // memberBusyScore 取成员在途数；provider 未接线时按 0（全部平手，退化为 priority 定序）。
@@ -341,7 +353,8 @@ func rankByRecentLoad(items []model.GroupItem, cooldowns map[int]int64, nowMs in
 	if err != nil {
 		return nil, err
 	}
-	ranked := append([]model.GroupItem(nil), eligible...)
+	fast, slow := splitSlow(eligible, slowLatencySource, slowLatencyThresholdMs())
+	ranked := append([]model.GroupItem(nil), fast...)
 	sort.SliceStable(ranked, func(i, j int) bool {
 		ri, ti := memberLoadScore(load, ranked[i])
 		rj, tj := memberLoadScore(load, ranked[j])
@@ -356,7 +369,7 @@ func rankByRecentLoad(items []model.GroupItem, cooldowns map[int]int64, nowMs in
 		}
 		return ranked[i].ID < ranked[j].ID
 	})
-	return append(ranked, cooling...), nil
+	return append(append(ranked, slow...), cooling...), nil
 }
 
 // memberLoadScore 取成员窗口内的消耗（请求数, token 数）；provider 未接线或无记录时都按 0（乐观先验）。

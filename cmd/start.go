@@ -73,6 +73,12 @@ var startCmd = &cobra.Command{
 			relay.SetRouteBalanceEnabled(true)
 		}
 
+		// 慢成员分区阈值按设置注入 relay (T-route-003 装配层): 读不到或为负时 relay 内部
+		// 用默认 30 秒（负值哨兵表示"未注入", 与"明确关闭"区分开）; 运行期变更由 setting 接口热注入。
+		if ms, err := op.SettingGetInt(model.SettingKeyRouteSlowLatencyMs); err == nil {
+			relay.SetRouteSlowLatencyMs(int64(ms))
+		}
+
 		// 上游判定"请求本身非法"时的取向按设置注入 relay (T-retry-003): 读不到/取值异常时
 		// relay 内部回落 failover（与既有行为一致），运行期变更由 setting 接口热注入。
 		if action, err := op.SettingGetString(model.SettingKeyRequestFaultAction); err == nil {
