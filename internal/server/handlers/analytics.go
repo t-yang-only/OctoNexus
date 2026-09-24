@@ -76,6 +76,39 @@ func latencyDistribution(c *gin.Context) {
 	resp.Success(c, stats)
 }
 
+// routingProfile T-insight-007 选路判定与终止原因画像接口。
+//
+// 与 /overview、/latency 的分工：那两个回答"多少量、多少钱、有多慢"，
+// 这里回答"**谁在做主**"与"**怎么停的**"——decision 与 stop_reason 两个字段
+// 从落库那天起就没有任何统计读过它们，日志页只能一行一行看。
+//
+// 三个比例的分母各不相同（reasons/modes 用记录到的行数、tiers 用智能路由行数、
+// stops 用终止原因已记录的行数），所以界面上任何一处都不能拿窗口总数当分母。
+func routingProfile(c *gin.Context) {
+	window := 500
+	if raw := strings.TrimSpace(c.Query("window")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+			return
+		}
+		window = parsed
+	}
+	if window < 1 {
+		window = 1
+	}
+	if window > 20000 {
+		window = 20000
+	}
+
+	stats, err := op.RoutingProfileStats(c.Request.Context(), window)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, stats)
+}
+
 func init() {
 	router.NewGroupRouter("/api/v1/analytics").
 		ServeOn(router.ServerAdmin).
@@ -87,5 +120,9 @@ func init() {
 		AddRoute(
 			router.NewRoute("/latency", http.MethodGet).
 				Handle(latencyDistribution),
+		).
+		AddRoute(
+			router.NewRoute("/routing", http.MethodGet).
+				Handle(routingProfile),
 		)
 }

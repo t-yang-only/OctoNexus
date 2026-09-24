@@ -210,3 +210,90 @@ export function useAnalyticsLatency(window = 500, enabled = true) {
         enabled,
     });
 }
+
+
+// T-insight-007 选路判定与终止原因画像。
+//
+// 与 overview / latency 的分工：
+//   overview 回答"多少量、多少钱"      latency 回答"有多慢"
+//   这里回答"**谁在做主**"与"**怎么停的**"
+//
+// decision 与 stop_reason 这两个字段落库很久了（T-decision-001 / T-trace-003），
+// 日志页看得到、导出有列，但一直没有任何统计读过它们 —— 想知道
+// "亲和是不是把请求全粘在一个成员上""失败是预算耗尽还是上游集体拒绝"，
+// 只能一行一行翻日志。
+//
+// **三个比例的分母各不相同**，界面上任何一处都不能拿 window 当分母：
+//   reasons/modes → decision_recorded
+//   tiers         → smart_count
+//   stops         → stop_recorded
+
+/** 「哪个机制决定了这次选择」。取值来自后端，界面不枚举白名单。 */
+export interface RoutingReasonStat {
+    reason: string;
+    count: number;
+    /** 分母是 decision_recorded，不是 window。 */
+    ratio: number;
+    success: number;
+    canceled: number;
+    failed: number;
+}
+
+export interface RoutingModeStat {
+    mode: string;
+    count: number;
+    ratio: number;
+}
+
+export interface RoutingTierStat {
+    tier: string;
+    count: number;
+    /** 分母是 smart_count（非智能路由的请求结构上没有档位）。 */
+    ratio: number;
+}
+
+export interface RoutingSlotStat {
+    /** 组内顶层序号（1 起）。 */
+    slot: number;
+    count: number;
+    ratio: number;
+}
+
+export interface RoutingStopStat {
+    reason: string;
+    /** 与 reason 成对才有意义：同一个 reason 来自不同 source 时处置动作不同。 */
+    source: string;
+    count: number;
+    /** 分母是 stop_recorded。 */
+    ratio: number;
+    success: number;
+    canceled: number;
+    failed: number;
+}
+
+export interface RoutingProfile {
+    window: number;
+    decision_recorded: number;
+    decision_unrecorded: number;
+    decision_malformed: number;
+    reasons: RoutingReasonStat[];
+    modes: RoutingModeStat[];
+    smart_count: number;
+    tiers: RoutingTierStat[];
+    /** 有顶层序号的行数（序号算不出时为 0，那种行不进样本）。 */
+    slot_samples: number;
+    slot_avg: number;
+    slot_distribution: RoutingSlotStat[];
+    stop_recorded: number;
+    stop_unrecorded: number;
+    stops: RoutingStopStat[];
+}
+
+/** 取选路判定与终止原因画像。 */
+export function useAnalyticsRouting(window = 500, enabled = true) {
+    return useQuery({
+        queryKey: ['analytics', 'routing', window],
+        queryFn: () => apiRequest<RoutingProfile>(`/api/v1/analytics/routing?window=${window}`),
+        enabled,
+    });
+}
