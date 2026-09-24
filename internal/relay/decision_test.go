@@ -121,50 +121,39 @@ func TestRequestFaultActionOnlyTwoValues(t *testing.T) {
 	}
 }
 
-// TestSystemOneDecisionHasNoGroupMode 守 T-decision-002：不经分组选路的独立入口
-// 报告的必须是「没有选路」，而不是借用某个分组模式。
+// TestSystemOneDecisionReportsRealRoute 守 T-decision-002：自定义协议评估请求
+// （/v1/systemone）与其它协议**走同一套分组选路**，判定文本必须报告真实信息。
 //
-// 历史形态是字面量 "mode=systemone;reason=direct" —— mode 的值既不在 model.GroupMode
-// 的枚举内（IsValid 与三处 binding oneof 都不认），也不对应任何真实分组，
-// 下游只能把它当成一个未知模式原样显示。
-func TestSystemOneDecisionHasNoGroupMode(t *testing.T) {
-	text := SystemOneDecision().Text()
-	if text != "reason=direct" {
-		t.Fatalf("独立入口的判定文本 = %q, want %q", text, "reason=direct")
-	}
-	// 没有分组就没有模式、档位、序号与轮次：这些字段一个都不该出现（不编造）。
-	for _, banned := range []string{"mode=", "tier=", "slot=", "attempt="} {
-		if strings.Contains(text, banned) {
-			t.Fatalf("独立入口没有分组可依据，不该出现 %q: %q", banned, text)
-		}
-	}
-	// direct 描述的是「没有选路」这件事本身，它不是分组模式。这里锁住这一点：
-	// 将来若有人为了让 systemone 能进「按模式分布」而把它加进 GroupMode 枚举，
-	// 会让统计把它算成一个分组模式（并且前端模式下拉里会多出一个不能选的值）。
-	if model.GroupMode(decisionReasonDirect).IsValid() {
-		t.Fatal("direct 是判定理由，不是分组模式；把它写进 mode 段会让统计把它算成一个分组模式")
-	}
-}
+// 历史形态是字面量 "mode=systemone;reason=direct"，两个值都是假的：systemone 不在
+// model.GroupMode 的枚举里（IsValid 与三处 binding oneof 都不认），direct 也不在
+// decisionReason* 里 —— 而这次请求明明有分组、明明按某个机制选了人。
+// T-decision-001 要回答的「为什么走了这个成员」，那行文本恰好把答案抹掉了。
+func TestSystemOneDecisionReportsRealRoute(t *testing.T) {
+	group := model.Group{ID: 9301, Mode: model.GroupModeAllocate}
+	t.Cleanup(func() { ResetRouteState(group.ID) })
+	// 展平成员表 + 各顶层成员贡献的条数：两个顶层成员各一条，所以第 2 条对应序号 2。
+	flat := []model.GroupItem{{ID: 71}, {ID: 72}}
+	topCounts := []int{1, 1}
 
-// TestDescribeDecisionNeverReportsDirect 是上一条的反向对照：
-// direct 只属于「没有选路」的路径，选路路径若报出它，说明这个词被当成了第六种机制用 ——
-// 它描述的是「没选路」，出现在选过路的场合是自相矛盾的。
-func TestDescribeDecisionNeverReportsDirect(t *testing.T) {
-	modes := []model.GroupMode{
-		model.GroupModeManual, model.GroupModeFailover, model.GroupModeWeighted,
-		model.GroupModeLowestCost, model.GroupModeQualityFirst, model.GroupModeLowestLatency,
-		model.GroupModeLeastBusy, model.GroupModeLowestTpmRpm, model.GroupModeAllocate,
-		model.GroupModeSmart,
+	got := systemOneDecision(group, flat, topCounts, 72).Text()
+	// allocate（非 smart、非 failover、未开加权轮询之外的排序）→ 按综合维度排序取首位；
+	// 选中第 2 个成员、单次尝试的第 1 轮。
+	if want := "mode=allocate;reason=ranked;slot=2;attempt=1"; got != want {
+		t.Fatalf("评估请求的判定文本 = %q, want %q", got, want)
 	}
-	for index, mode := range modes {
-		group := model.Group{ID: 9200 + index, Mode: mode, Items: []model.GroupItem{{ID: index + 1}}}
-		t.Cleanup(func() { ResetRouteState(group.ID) })
-		got := DescribeDecision(group, index+1, "", 1, 1).Reason
-		if got == decisionReasonDirect {
-			t.Fatalf("模式 %q 的选路判定报出了 direct（那是「没有选路」的说法）", mode)
+	// 反向对照：历史上那两个写死的值一个都不许再出现。
+	for _, banned := range []string{"systemone", "direct"} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("判定文本残留了写死的入口名/机制名 %q: %q", banned, got)
 		}
-		if got == "" {
-			t.Fatalf("模式 %q 没有给出判定理由（三种出口都必须落到某一个机制上）", mode)
-		}
+	}
+
+	// smart 分组下必须给出真实档位：评估请求体是 state + questions，没有消息轮数与工具，
+	// 复杂度评分必然落最低档，因此命中执行引擎档。
+	smart := model.Group{ID: 9302, Mode: model.GroupModeSmart}
+	t.Cleanup(func() { ResetRouteState(smart.ID) })
+	if got, want := systemOneDecision(smart, flat, topCounts, 71).Text(),
+		"mode=smart;tier=execution;reason=ranked;slot=1;attempt=1"; got != want {
+		t.Fatalf("smart 分组的评估请求判定 = %q, want %q", got, want)
 	}
 }

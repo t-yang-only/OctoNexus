@@ -73,7 +73,7 @@ func ForwardSystemOne() gin.HandlerFunc {
 			}
 		}
 
-		flat := op.FlattenGroupItems(group)
+		flat, topCounts := op.FlattenGroupItemsWithTopCounts(group)
 		if len(flat) == 0 {
 			rejectJSON(c, http.StatusBadRequest, "group has no member")
 			return
@@ -83,6 +83,10 @@ func ForwardSystemOne() gin.HandlerFunc {
 			rejectJSON(c, http.StatusServiceUnavailable, "no available member (all cooling or disabled)")
 			return
 		}
+
+		// 判定文本与其它协议同源（T-decision-001）：这条路径有分组、也真的在按机制选人，
+		// 所以必须报告真实的模式/理由/序号，而不是一个写死的入口名。
+		decision := systemOneDecision(group, flat, topCounts, item.ID).Text()
 
 		grant, err := op.ChannelGrantGet(item.GrantRef())
 		if err != nil {
@@ -122,14 +126,14 @@ func ForwardSystemOne() gin.HandlerFunc {
 		client := &http.Client{Timeout: 5 * time.Minute}
 		resp, err := client.Do(req)
 		if err != nil {
-			recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, started, 0, 0, err.Error())
+			recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, decision, started, 0, 0, err.Error())
 			rejectJSON(c, http.StatusBadGateway, "upstream request failed: "+err.Error())
 			return
 		}
 		defer resp.Body.Close()
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024*1024))
 		if readErr != nil {
-			recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, started, 0, 0, readErr.Error())
+			recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, decision, started, 0, 0, readErr.Error())
 			rejectJSON(c, http.StatusBadGateway, "read upstream response: "+readErr.Error())
 			return
 		}
@@ -141,13 +145,13 @@ func ForwardSystemOne() gin.HandlerFunc {
 		if resp.StatusCode >= 400 {
 			// 上游拒绝：把原文透传给客户端（它带明确的错误类型，比网关改写过的更有用），
 			// 同时记进日志 —— 否则"为什么失败"只能靠抓包。
-			recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, started,
+			recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, decision, started,
 				inTokens, outTokens, string(respBody))
 			c.Data(resp.StatusCode, "application/json", respBody)
 			return
 		}
 
-		recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, started, inTokens, outTokens, "")
+		recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, decision, started, inTokens, outTokens, "")
 		c.Data(resp.StatusCode, "application/json", respBody)
 	}
 }
@@ -168,7 +172,7 @@ func systemOneURL(base string) string {
 // recordSystemOneLog 把这次评估落进请求日志，让它在面板的日志页里与其它请求一样可见。
 //
 // 不记的话，System One 的调用在面板上完全不存在 —— 用户会以为请求没发出去。
-func recordSystemOneLog(c *gin.Context, model_, channel, targetModel string, started time.Time,
+func recordSystemOneLog(c *gin.Context, model_, channel, targetModel, decision string, started time.Time,
 	inTokens, outTokens int64, errText string) {
 	status := "success"
 	if errText != "" {
@@ -190,7 +194,7 @@ func recordSystemOneLog(c *gin.Context, model_, channel, targetModel string, sta
 		FirstByteMs:    -1, // 非流式：首字节与总耗时同义，这里只记总耗时
 		DurationMs:     time.Since(started).Milliseconds(),
 		Attempts:       1,
-		Decision:       SystemOneDecision().Text(),
+		Decision:       decision,
 		PromptTokens:   inTokens,
 		CompletionToks: outTokens,
 		Error:          truncateText(errText, 500),
