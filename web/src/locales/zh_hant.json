@@ -242,6 +242,30 @@
         "cost": "費用"
       }
     },
+    "insight": {
+      "title": "請求視窗分析",
+      "subtitle": "最近若干筆請求的真實切片，與上方累計畫像互補",
+      "successRate": "成功率",
+      "channelRate": "通路健康度",
+      "avgRpm": "平均 RPM",
+      "rpmUnit": "次/分",
+      "avgTpm": "平均 TPM",
+      "tpmUnit": "Token/分",
+      "throughput": "吞吐",
+      "tpsUnit": "Token/秒",
+      "timeline": "Token 時間軸",
+      "spanPrefix": "跨度",
+      "faults": "失敗歸因",
+      "faultSuccess": "成功",
+      "faultCanceled": "取消",
+      "faultRequest": "請求非法",
+      "faultMember": "成員故障",
+      "faultTransient": "可恢復",
+      "faultUnclassified": "未分類",
+      "other": "其他",
+      "truncatedHint": "已達視窗上限，僅統計最近若干筆",
+      "completeHint": "已涵蓋全部歷史記錄"
+    },
     "allocation": {
       "filter": {
         "all": "全部",

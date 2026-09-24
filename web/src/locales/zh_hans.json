@@ -242,6 +242,30 @@
         "cost": "费用"
       }
     },
+    "insight": {
+      "title": "请求窗口分析",
+      "subtitle": "最近若干条请求的真实切片，与上方累计画像互补",
+      "successRate": "成功率",
+      "channelRate": "渠道健康度",
+      "avgRpm": "平均 RPM",
+      "rpmUnit": "次/分",
+      "avgTpm": "平均 TPM",
+      "tpmUnit": "Token/分",
+      "throughput": "吞吐",
+      "tpsUnit": "Token/秒",
+      "timeline": "Token 时间线",
+      "spanPrefix": "跨度",
+      "faults": "失败归因",
+      "faultSuccess": "成功",
+      "faultCanceled": "取消",
+      "faultRequest": "请求非法",
+      "faultMember": "成员故障",
+      "faultTransient": "可恢复",
+      "faultUnclassified": "未分类",
+      "other": "其他",
+      "truncatedHint": "已达窗口上限，仅统计最近若干条",
+      "completeHint": "已覆盖全部历史记录"
+    },
     "allocation": {
       "filter": {
         "all": "全部",

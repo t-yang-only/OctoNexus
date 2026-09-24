@@ -13,11 +13,15 @@ import { StatsChart } from './chart';
 import { Rank } from './rank';
 import { ModelMonitor } from './monitor';
 import { AllocationMonitor } from './allocation';
+import { RequestInsight } from './insight';
 import { useHomeViewStore } from './store';
 
 // HomeSections 汇总首页各统计区块, 屏内正文与分享图舞台共用。
 // 模型调用分析（ModelMonitor）挂在榜单之后：约束登记 NM-CUR-025 裁决，
 // 不做 new-api 式三 Tab 看板、不新增导航页，只在首页追加一个监控区块。
+//
+// 请求窗口分析（RequestInsight）随后：它读 relay_logs 明细，专做 ModelMonitor
+// 结构上做不到的三件事（时间线堆叠 / 失败归因 / RPM 与 TPM），因此不是重复区块。
 function HomeSections() {
     return (
         <div className="@container/home space-y-6">
@@ -27,6 +31,7 @@ function HomeSections() {
             <StatsChart />
             <Rank />
             <ModelMonitor />
+            <RequestInsight />
             <AllocationMonitor />
         </div>
     );

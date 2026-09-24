@@ -242,6 +242,30 @@
         "cost": "Cost"
       }
     },
+    "insight": {
+      "title": "Request window analysis",
+      "subtitle": "A slice of the most recent requests, complementing the cumulative view above",
+      "successRate": "Success rate",
+      "channelRate": "Channel health",
+      "avgRpm": "Avg RPM",
+      "rpmUnit": "req/min",
+      "avgTpm": "Avg TPM",
+      "tpmUnit": "tok/min",
+      "throughput": "Throughput",
+      "tpsUnit": "tok/s",
+      "timeline": "Token timeline",
+      "spanPrefix": "Span",
+      "faults": "Failure attribution",
+      "faultSuccess": "Success",
+      "faultCanceled": "Canceled",
+      "faultRequest": "Invalid request",
+      "faultMember": "Member fault",
+      "faultTransient": "Transient",
+      "faultUnclassified": "Unclassified",
+      "other": "Other",
+      "truncatedHint": "Window limit reached - counts cover the most recent records only",
+      "completeHint": "All history covered"
+    },
     "allocation": {
       "filter": {
         "all": "All",
