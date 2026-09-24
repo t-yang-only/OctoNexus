@@ -14,6 +14,11 @@ export interface RelayUsage {
         cached_tokens: number;
         write_cached_tokens?: number;
     } | null;
+    // completion_tokens_details.reasoning_tokens 是上游回报的思考 token 数（T-insight-001）。
+    // 整个对象可能缺失、字段也可能为 0 —— 两者都表示"上游没报"，不是"没有思考"。
+    completion_tokens_details?: {
+        reasoning_tokens?: number;
+    } | null;
 }
 
 // RelayHistoryItem 是历史日志接口返回的单条持久化快照。
@@ -64,6 +69,11 @@ export interface RelayHistoryItem {
     // 而 fault_kind 两者都可能记成 request。只看 error 文本更不行 ——
     // 后端有五个终止出口，都能产生同一句 upstream_error 的 502。
     stop_reason?: string;
+    // reasoning_effort 是客户端指定的思考强度（T-insight-001）；空串表示没指定。
+    // reasoning_tokens 是上游回报的思考 token 数；0 表示上游没报该字段。
+    // 两者一起回答"这条请求为什么这么慢、这么贵"：强度是原因，token 数是结果。
+    reasoning_effort?: string;
+    reasoning_tokens?: number;
     // attempt_detail 是每一轮尝试的明细链（T-trace-001），按轮次顺序。
     //
     // 回答的是既有字段回答不了的问题: Attempts 只说"试了几次"、TargetChannel 只说"最后用了谁"，
@@ -183,6 +193,9 @@ export interface RelayLogOverview {
     fault_kind?: FaultKind;
     // stop_reason 同 RelayHistoryItem：为什么停下来（T-trace-003），随实时流下发。
     stop_reason?: string;
+    // reasoning_effort 同 RelayHistoryItem：客户端指定的思考强度（T-insight-001）。
+    // 实时快照只带它；思考 token 数在嵌套的 usage.completion_tokens_details 里。
+    reasoning_effort?: string;
     // attempt_chain 是已结束轮次的尝试明细（T-trace-001）。
     //
     // 实时快照与历史行都给这个字段，但口径一致: 只含**已结束**的轮次，

@@ -1012,7 +1012,9 @@
       "attemptOk": "已接管",
       "attemptTruncated": "前面还有更多轮次未列出",
       "attemptEmpty": "本次请求只打过一个成员",
-      "responseStreaming": "上游已响应，流式传输正在进行"
+      "responseStreaming": "上游已响应，流式传输正在进行",
+      "reasoningEffortHint": "客户端在请求里指定的思考强度。同一模型在 low/high 档下的输出长度与费用能差好几倍——这一项说明「贵」是上游慢，还是思考强度开高了。",
+      "reasoningTokensHint": "上游在 usage 里回报的思考 token 数。只在确有值时才显示：空着表示上游没报这个字段，不代表这次没有思考。"
     },
 "attemptStats": {
     "title": "尝试链聚合",
@@ -1068,7 +1070,9 @@
       "cacheHitRate": "缓存命中率",
       "prompt": "输入",
       "cached": "缓存",
-      "completion": "输出"
+      "completion": "输出",
+      "reasoningEffort": "思考强度",
+      "reasoningTokens": "思考 Tokens"
     },
     "modelMismatch": "模型不一致",
     "modelMismatchTip": "上游回报它用的是 {reported}，与你请求的模型不同。可能是别名或上游路由改名（正常），也可能是真的换了模型（需要处理）。"

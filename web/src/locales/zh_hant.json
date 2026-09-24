@@ -1012,7 +1012,9 @@
       "attemptOk": "已接管",
       "attemptTruncated": "前面還有更多輪次未列出",
       "attemptEmpty": "本次請求只打過一個成員",
-      "responseStreaming": "上游已回應，串流傳輸正在進行"
+      "responseStreaming": "上游已回應，串流傳輸正在進行",
+      "reasoningEffortHint": "用戶端在請求裡指定的思考強度。同一模型在 low/high 檔下的輸出長度與費用好幾倍差距——這一項說明「貴」是上游慢，還是思考強度開高了。",
+      "reasoningTokensHint": "上游在 usage 裡回報的思考 token 數。只在確有值時才顯示：空著表示上游沒報這個欄位，不代表這次沒有思考。"
     },
 "attemptStats": {
     "title": "嘗試鏈聚合",
@@ -1068,7 +1070,9 @@
       "cacheHitRate": "快取命中率",
       "prompt": "輸入",
       "cached": "快取",
-      "completion": "輸出"
+      "completion": "輸出",
+      "reasoningEffort": "思考強度",
+      "reasoningTokens": "思考 Tokens"
     },
     "modelMismatch": "模型不一致",
     "modelMismatchTip": "上游回報它用的是 {reported}，與你請求的模型不同。可能是別名或上游路由改名（正常），也可能是真的換了模型（需要處理）。"

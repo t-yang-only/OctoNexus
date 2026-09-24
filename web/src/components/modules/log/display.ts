@@ -71,6 +71,23 @@ export interface LogDisplayFields {
     // stopReason 是**为什么停下来**的结构化记录（T-trace-003），形如
     // "action=stop;reason=X;source=Y"；空串表示正常结束或升级前的存量行。
     stopReason: string;
+    // reasoningEffort 是客户端指定的思考强度（T-insight-001），空串表示没指定。
+    // 它与 reasoningTokens 配对：强度是原因，token 数是结果。
+    reasoningEffort: string;
+    // reasoningTokens 是上游在 usage 里回报的思考 token 数。
+    //
+    // 0 表示**上游没报该字段**（非推理模型、未实现该字段的站点都很常见），
+    // 不能读作"这次没有思考"—— 界面据此显示占位而不是 0。
+    reasoningTokens: number;
+    // tps 是输出速度（token/秒）。分母取整段耗时（含首字等待），与卡片上的"总耗时"
+    // 同一口径：若只除以生成时间，会把等待上游排队的时间从速度里悄悄抹掉。
+    tps: number;
+    // cacheHitRate 是缓存命中率（命中缓存 ÷ 输入总量）。
+    // 无缓存数据时为 null 而不是 0 —— 0% 会被读成"缓存完全没命中"，那是另一回事。
+    cacheHitRate: number | null;
+    // realInputTokens 是**真正新算的**输入量（输入 − 命中缓存）。
+    // 缓存命中的部分通常按 0.1 倍计价，两者混着看会让"输入 3.7 万"显得远比实际严重。
+    realInputTokens: number;
     source: 'live' | 'history';
 }
 
@@ -120,6 +137,14 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
     const cacheWriteTokens = nested?.prompt_tokens_details?.write_cached_tokens ?? 0;
     const reportedTotal = nested?.total_tokens ?? 0;
     const totalTokens = reportedTotal > 0 ? reportedTotal : promptTokens + completionTokens;
+
+    // 思考强度：两个来源同名字段（实时快照来自 RequestState，历史行来自落库列）。
+    const reasoningEffort = source.reasoning_effort ?? '';
+    // 思考 token：实时快照在嵌套 usage 的 completion_tokens_details 里，
+    // 历史行是落库的扁平列（口径见 model.RelayLog.ReasoningTokens）。
+    const reasoningTokens = live
+        ? (source.usage.completion_tokens_details?.reasoning_tokens ?? 0)
+        : (source.reasoning_tokens ?? 0);
 
     const targetModel = source.target_model || '';
     // 上游回报的模型名：实时快照与历史行同名字段，故两条路径共用一次读取。
@@ -171,7 +196,14 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
         // 两者同义同口径，这里收敛成一套；缺字段时给空数组而不是 undefined，调用方不必到处判空。
         attemptChain: (live ? source.attempt_chain : source.attempt_detail) ?? [],
         attemptChainTruncated: source.attempts_truncated === true,
-    stopReason: source.stop_reason ?? '',
+        stopReason: source.stop_reason ?? '',
+        reasoningEffort,
+        reasoningTokens,
+        // TPS 与缓存命中率是纯派生量，在解析层算一次，避免各卡片各写一份除法
+        // （分母口径稍有出入，同一个请求在两处就会显示成两个数）。
+        tps: durationMs > 0 ? completionTokens / (durationMs / 1000) : 0,
+        cacheHitRate: cachedTokens > 0 && promptTokens > 0 ? cachedTokens / promptTokens : null,
+        realInputTokens: Math.max(0, promptTokens - cachedTokens),
         source: live ? 'live' : 'history',
     };
 }

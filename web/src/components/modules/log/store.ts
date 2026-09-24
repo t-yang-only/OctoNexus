@@ -14,11 +14,17 @@ export type LogFieldName =
     | 'cacheHitRate'
     | 'prompt'
     | 'cached'
-    | 'completion';
+    | 'completion'
+    | 'reasoningEffort'
+    | 'reasoningTokens';
 
 export type LogFieldVisibility = Record<LogFieldName, boolean>;
 
 // DEFAULT_LOG_FIELD_VISIBILITY 是字段可见性的出厂默认值: 全部可见。
+//
+// 注意（新增字段时必须知道）：老浏览器里持久化的 visibility 对象**没有新键**，
+// 直接读会是 undefined。因此组件判定"是否隐藏"一律用 `!== false`（只有显式关掉才隐藏），
+// 不能用真值判断 —— 否则老用户升级后新字段静默不显示，看起来像功能没生效。
 export const DEFAULT_LOG_FIELD_VISIBILITY: LogFieldVisibility = {
     time: true,
     apiKey: true,
@@ -32,6 +38,8 @@ export const DEFAULT_LOG_FIELD_VISIBILITY: LogFieldVisibility = {
     prompt: true,
     cached: true,
     completion: true,
+    reasoningEffort: true,
+    reasoningTokens: true,
 };
 
 interface LogFieldVisibilityState {

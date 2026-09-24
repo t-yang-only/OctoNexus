@@ -54,12 +54,23 @@ type RelayLog struct {
 	// 回答"为什么走了这个成员"——模式、命中的档位、决定这次选择的机制（亲和保持/冷却恢复探测/
 	// 成员顺序/综合排序/人工指定）、成员在分组里的顶层序号与轮次。不含渠道名与凭据。
 	// 未发起上游请求就结束的请求为空串。
-	Decision       string  `json:"decision"`
-	PromptTokens   int64   `json:"prompt_tokens"`
-	CachedTokens   int64   `json:"cached_tokens"`
-	CompletionToks int64   `json:"completion_tokens"`
-	Cost           float64 `json:"cost"`
-	Error          string  `json:"error"`
+	Decision       string `json:"decision"`
+	PromptTokens   int64  `json:"prompt_tokens"`
+	CachedTokens   int64  `json:"cached_tokens"`
+	CompletionToks int64  `json:"completion_tokens"`
+	// ReasoningEffort 是这次请求实际发出去的思考强度（effective），
+	// 取自客户端请求的 reasoning_effort 参数。空串表示客户端没提这个参数。
+	//
+	// 为什么值得单独占一列：同一个模型在 low 与 high 档下的输出长度与费用能差好几倍，
+	// 事后看到一条"又慢又贵"的请求，没有这一列就分不清是上游慢、还是把思考强度开高了。
+	// 它与 TPS/缓存命中率一样属于"同一条日志里的成本上下文"，缺了就只能靠猜。
+	ReasoningEffort string `json:"reasoning_effort"`
+	// ReasoningTokens 是上游在 usage 里回报的思考 token 数（确定性值，直接采信）。
+	// 0 表示上游没报该字段 —— 非推理模型、以及不实现该字段的站点都很常见，
+	// 因此 0 不能读作"没有思考"，界面按"未提供"展示。
+	ReasoningTokens int64   `json:"reasoning_tokens"`
+	Cost            float64 `json:"cost"`
+	Error           string  `json:"error"`
 	// FaultKind 是这次失败的**归因分类**（T-usability-007），空串表示非失败或未分类。
 	//
 	// 取值与 relay 的失败处置口径一一对应（internal/relay/retry.go 的 classifyUpstreamFailure）：

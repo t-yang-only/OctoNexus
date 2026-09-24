@@ -42,20 +42,24 @@ function countFaultKinds(logs: RelayLogOverview[]): Record<LogFaultFilter, numbe
     return counts;
 }
 
-// LOG_FIELD_LABEL_KEYS 是十个可见性开关的文案键, 顺序即弹窗内排列顺序。
+// LOG_FIELD_LABEL_KEYS 是可见性开关的文案键, 顺序即弹窗内排列顺序。
 const LOG_FIELD_LABEL_KEYS: Array<{ field: LogFieldName; labelKey: string }> = [
     { field: 'time', labelKey: 'time' },
     { field: 'apiKey', labelKey: 'apiKey' },
     { field: 'duration', labelKey: 'duration' },
     { field: 'firstByte', labelKey: 'firstByte' },
-        { field: 'attempts', labelKey: 'attempts' },
-        { field: 'decision', labelKey: 'decision' },
+    { field: 'attempts', labelKey: 'attempts' },
+    { field: 'decision', labelKey: 'decision' },
     { field: 'cost', labelKey: 'cost' },
     { field: 'tps', labelKey: 'tps' },
     { field: 'cacheHitRate', labelKey: 'cacheHitRate' },
     { field: 'prompt', labelKey: 'prompt' },
     { field: 'cached', labelKey: 'cached' },
     { field: 'completion', labelKey: 'completion' },
+    // 思考强度与思考 token（T-insight-001）排在 token 组之后。开关默认开着，
+    // 但它们在卡片上仍常常看不见 —— 没指定强度、上游不回报思考 token 时不渲染。
+    { field: 'reasoningEffort', labelKey: 'reasoningEffort' },
+    { field: 'reasoningTokens', labelKey: 'reasoningTokens' },
 ];
 
 interface LogToolbarProps {

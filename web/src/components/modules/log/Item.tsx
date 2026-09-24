@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, Clock, Cpu, Database, DollarSign, Gauge, KeyRound, Loader2, Percent, Repeat2, Route, Square, Zap } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, Brain, BrainCircuit, Clock, Cpu, Database, DollarSign, Gauge, KeyRound, Loader2, Percent, Repeat2, Route, Square, Zap } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
@@ -74,6 +74,7 @@ const PROTOCOL_LABELS: Record<number, string> = {
 // 首字时间/TPS/缓存命中率三项按字段可见性开关渲染, 公式见 @/lib/log-metrics（语义借鉴 fork 卡片, 实现重写）。
 function LogMetrics({ log, now, brandColor, variant }: { log: RelayLogOverview; now: number; brandColor: string; variant: 'card' | 'footer' }) {
     const visibility = useLogFieldVisibility();
+    const t = useTranslations('log.card');
     // 字段解析（含缺字段回退链）统一走 display.ts: 实时快照与持久化历史行都能渲染, 中途缺字段也不影响展示。
     const display = resolveLogDisplay(log, now);
     const cachedTokens = display.cachedTokens;
@@ -99,12 +100,19 @@ function LogMetrics({ log, now, brandColor, variant }: { log: RelayLogOverview; 
         { key: 'cached', Icon: Database, iconClassName: 'size-3.5 shrink-0 text-cyan-500', value: cachedTokens.toLocaleString(), cellClassName: 'col-span-3 md:col-span-1', visible: visibility.cached },
         { key: 'completion', Icon: ArrowUpFromLine, iconClassName: 'size-3.5 shrink-0 text-purple-500', value: display.completionTokens.toLocaleString(), cellClassName: 'col-span-3 md:col-span-1', visible: visibility.completion },
         { key: 'cacheWrite', Icon: Database, iconClassName: 'size-3.5 shrink-0 text-orange-500', value: display.cacheWriteTokens.toLocaleString(), cellClassName: 'col-span-3 md:col-span-1', visible: false },
+        // 思考强度与思考 token（T-insight-001）：回答"这条请求为什么这么慢、这么贵"。
+        // 两者都只在**确有值**时出现 —— 没指定强度、上游不回报思考 token 都是常态，
+        // 硬占一格显示占位只会让卡片变长而没有任何信息。
+        // 可见性判定用 `!== false`：老浏览器里持久化的偏好没有这两个键（undefined），
+        // 用真值判断会让新字段对老用户静默隐藏，看起来像功能没生效。
+        { key: 'reasoningEffort', Icon: Brain, iconClassName: 'size-3.5 shrink-0 text-violet-500', value: display.reasoningEffort, title: t('reasoningEffortHint'), cellClassName: 'col-span-4 md:col-span-1', visible: visibility.reasoningEffort !== false && display.reasoningEffort !== '' },
+        { key: 'reasoningTokens', Icon: BrainCircuit, iconClassName: 'size-3.5 shrink-0 text-violet-500', value: display.reasoningTokens.toLocaleString(), title: t('reasoningTokensHint'), cellClassName: 'col-span-3 md:col-span-1', visible: visibility.reasoningTokens !== false && display.reasoningTokens > 0 },
     ];
 
     return metrics.filter((metric) => metric.visible).map((metric) => (
         <div
             key={metric.key}
-            title={metric.key === 'apiKey' ? display.apiKeyName : undefined}
+            title={metric.title ?? (metric.key === 'apiKey' ? display.apiKeyName : undefined)}
             className={cn('flex min-w-0 items-center gap-1.5', variant === 'card' && metric.cellClassName)}
         >
             <metric.Icon className={metric.iconClassName} style={metric.iconStyle} />

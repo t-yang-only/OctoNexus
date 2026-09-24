@@ -1012,7 +1012,9 @@
       "attemptOk": "took over",
       "attemptTruncated": "earlier rounds omitted",
       "attemptEmpty": "This request hit a single member",
-      "responseStreaming": "Upstream responded; streaming is in progress"
+      "responseStreaming": "Upstream responded; streaming is in progress",
+      "reasoningEffortHint": "The reasoning effort the client asked for. The same model at low vs high can differ several times over in output length and cost — this tells you whether an expensive request was upstream slowness or a high effort setting.",
+      "reasoningTokensHint": "Reasoning tokens the upstream reported in usage. Shown only when a value exists: blank means the upstream does not report this field, not that no reasoning happened."
     },
 "attemptStats": {
     "title": "Attempt chain summary",
@@ -1068,7 +1070,9 @@
       "cacheHitRate": "Cache hit rate",
       "prompt": "Input",
       "cached": "Cached",
-      "completion": "Output"
+      "completion": "Output",
+      "reasoningEffort": "Reasoning effort",
+      "reasoningTokens": "Reasoning tokens"
     },
     "modelMismatch": "model mismatch",
     "modelMismatchTip": "The upstream reported it used {reported}, which differs from the model you requested. This may be an alias or upstream routing (normal), or the model was actually swapped (needs attention)."

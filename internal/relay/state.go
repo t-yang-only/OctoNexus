@@ -34,8 +34,14 @@ type RequestState struct {
 	Protocol   model.Protocol `json:"protocol"`     // 客户端请求使用的协议, 由入站格式定出, 单个协议位而非掩码组合。
 	GroupID    int            `json:"group_id"`     // 承载本请求的分组 ID, 供界面按主键直接定位分组而不必按名称回查。
 	APIKeyName string         `json:"api_key_name"` // 发起请求时的 API Key 名称。
-	Usage      llm.Usage      `json:"usage"`        // 请求结束时写入的展示用量。
-	Cost       float64        `json:"cost"`         // 请求结束时写入的累计费用。
+	// ReasoningEffort 是客户端在请求里指定的思考强度（T-insight-001），空串表示没指定。
+	//
+	// 它是**请求侧**的属性，与 Usage 里的推理 token 数（结果侧）配对回答
+	// "这条请求为什么这么慢、这么贵"：强度是原因，token 数是结果。
+	// 绝大多数请求不带这个参数，因此它不参与选路，只做记录与展示。
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
+	Usage           llm.Usage `json:"usage"` // 请求结束时写入的展示用量。
+	Cost            float64   `json:"cost"`  // 请求结束时写入的累计费用。
 
 	Round          int            `json:"round"`            // 最新一轮循环的递增序号, 人工中止按此匹配以免误杀下一轮。
 	RoundStartedAt time.Time      `json:"round_started_at"` // 最新一轮上游请求的开始时间。
@@ -101,19 +107,20 @@ var (
 
 // newRequestState 分配请求 ID 并登记初始运行状态; 返回的记录是本请求后续全部状态写入的入口。
 // usageRecorder 由鉴权层经 AttachUsageRecorder 注入, 终态时把实际词元量交给 Key 级 TPM 记账。
-func newRequestState(ctx context.Context, modelName string, groupID int, protocol model.Protocol, body string, apiKeyID int) *RequestState {
+func newRequestState(ctx context.Context, modelName string, groupID int, protocol model.Protocol, body string, reasoningEffort string, apiKeyID int) *RequestState {
 	mu.Lock()
 	defer mu.Unlock()
 
 	request := &RequestState{
-		ID:        idSeq.Add(1),
-		Status:    StatusRunning,
-		StartedAt: time.Now(),
-		Model:     modelName,
-		Protocol:  protocol,
-		GroupID:   groupID,
-		body:      body,
-		apiKeyID:  apiKeyID,
+		ID:              idSeq.Add(1),
+		Status:          StatusRunning,
+		StartedAt:       time.Now(),
+		Model:           modelName,
+		Protocol:        protocol,
+		GroupID:         groupID,
+		ReasoningEffort: reasoningEffort,
+		body:            body,
+		apiKeyID:        apiKeyID,
 	}
 	// 登记时保存名称快照, 查询失败时留空。
 	if apiKey, err := op.APIKeyGet(apiKeyID, ctx); err == nil {
@@ -509,6 +516,13 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 	if r.Usage.PromptTokensDetails != nil {
 		cachedTokens = r.Usage.PromptTokensDetails.CachedTokens
 	}
+	// 思考 token 只采信上游在 usage 里的回报（确定性值）。0 即"上游没报"，
+	// 不做估算：用"输出长度减可见文本"之类的反推会把非推理模型的正常输出
+	// 也算成思考，凭空造出一批看起来很像真的假数据。
+	reasoningTokens := int64(0)
+	if r.Usage.CompletionTokensDetails != nil {
+		reasoningTokens = r.Usage.CompletionTokensDetails.ReasoningTokens
+	}
 	// 归档最后一轮（T-trace-001）: 中间轮在各自的 startRound 里已归档, 这里补上当前轮,
 	// 使 AttemptChain 覆盖 1..Round 的全部轮次。从未打过上游时（Round==0）内部会直接跳过。
 	r.archiveRoundLocked()
@@ -531,10 +545,14 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 		PromptTokens:   r.Usage.PromptTokens,
 		CachedTokens:   cachedTokens,
 		CompletionToks: r.Usage.CompletionTokens,
-		Cost:           r.Cost,
-		Error:          r.Error,
-		FaultKind:      r.FaultKind,
-		StopReason:     r.StopReason,
+		// 思考强度与思考 token（T-insight-001）：前者是请求侧参数、后者是上游回报，
+		// 两者一起说明"这条请求为什么慢/贵"，因此与 token 数落在一起。
+		ReasoningEffort: r.ReasoningEffort,
+		ReasoningTokens: reasoningTokens,
+		Cost:            r.Cost,
+		Error:           r.Error,
+		FaultKind:       r.FaultKind,
+		StopReason:      r.StopReason,
 		// 尝试链: 回答"中途换过谁、各自为何失败"。单轮成功时长度为 1（只有它自己），
 		// 与 Attempts 一致; 有重试时是完整链路。
 		AttemptDetail:     r.AttemptChain,

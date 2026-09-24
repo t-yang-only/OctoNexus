@@ -104,6 +104,10 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 		var metadata struct {
 			Model     string `json:"model"`  // 客户端请求的分组名称。
 			Streaming bool   `json:"stream"` // 客户端是否请求流式响应。
+			// ReasoningEffort 是客户端指定的思考强度（T-insight-001），用于日志画像。
+			// **原样记录、不做校验**：它只是转发参数，白名单会挡掉上游将来新增的档位
+			// （各家取值并不统一：low/medium/high、xhigh、none……）。
+			ReasoningEffort string `json:"reasoning_effort"`
 		}
 		if err := json.Unmarshal(raw.Body, &metadata); err != nil {
 			rejectRequest(c, inbound, err)
@@ -140,7 +144,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 		}
 
 		// 登记进程内请求状态, 返回的记录是后续全部状态写入和前端可视化推送的入口。
-		request := newRequestState(c.Request.Context(), metadata.Model, group.ID, requestProtocol, string(raw.Body), c.GetInt("api_key_id"))
+		request := newRequestState(c.Request.Context(), metadata.Model, group.ID, requestProtocol, string(raw.Body), metadata.ReasoningEffort, c.GetInt("api_key_id"))
 		// Key 级 TPM 记账: 终态时把实际词元量交给鉴权层注册的回调 (未限流 key 回调缺省, 跳过)。
 		AttachUsageRecorder(c.Request.Context(), request.ID, func(promptTokens, completionTokens int64) {
 			if recorderAny, ok := c.Get("key_usage_recorder"); ok {
