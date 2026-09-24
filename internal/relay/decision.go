@@ -35,6 +35,11 @@ const (
 	decisionReasonProbe    = "probe"
 	decisionReasonPriority = "priority"
 	decisionReasonRanked   = "ranked"
+	// direct 与上面五个不是一类：那五个回答"是哪个机制选出了这个成员"，
+	// 而 direct 回答"这一次根本没有选路" —— 请求走的是不隶属任何分组的独立入口
+	// （自定义协议 /v1/systemone），目标由配置直接指定，没有成员可选、也就没有
+	// 档位/序号/轮次。把它写成 priority 之类的词会让人以为选过路。
+	decisionReasonDirect = "direct"
 )
 
 // smart 模式的两档档位名。
@@ -97,6 +102,19 @@ func DescribeDecision(group model.Group, itemID int, tier string, attempt, slot 
 		decision.Reason = decisionReasonRanked
 	}
 	return decision
+}
+
+// SystemOneDecision 报告一次**不经分组选路**的请求（自定义协议入口 /v1/systemone）。
+//
+// 它刻意不写 mode 段：Mode 的类型是 model.GroupMode，其取值被 IsValid 与三处 binding
+// oneof 约束在十个真正的分组模式上，而这条路径根本不隶属任何分组。此前这里写的是字面量
+// "mode=systemone"（见下方断言测试）：那是把"入口身份"塞进了"分组模式"字段，值既不在
+// 枚举内、也过不了任何校验，下游只能当作未知值原样显示。
+//
+// 不写 mode 之后，这类请求在"按模式分布"里落进 (模式缺失) 桶 —— 那正是它的事实：
+// 没有分组模式可选。它不是"漏填"，而是结构上不存在。
+func SystemOneDecision() Decision {
+	return Decision{Reason: decisionReasonDirect}
 }
 
 // TopSlot 报告成员在分组里的顶层序号（1 起，子分组整条链归它引用的那个顶层成员）。

@@ -190,7 +190,7 @@ func recordSystemOneLog(c *gin.Context, model_, channel, targetModel string, sta
 		FirstByteMs:    -1, // 非流式：首字节与总耗时同义，这里只记总耗时
 		DurationMs:     time.Since(started).Milliseconds(),
 		Attempts:       1,
-		Decision:       "mode=systemone;reason=direct",
+		Decision:       SystemOneDecision().Text(),
 		PromptTokens:   inTokens,
 		CompletionToks: outTokens,
 		Error:          truncateText(errText, 500),
