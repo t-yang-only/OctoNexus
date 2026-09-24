@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { buttonVariants } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { matchLogMemoryFilter, type LogFaultFilter, type LogMemoryFilter } from './filter';
+import { matchLogMemoryFilter, type LogFaultFilter, type LogMemoryFilter, type LogTestFilter } from './filter';
 export type { LogMemoryFilter };
 import {
     LOG_AUTO_REFRESH_OPTIONS,
@@ -25,6 +25,29 @@ const FAULT_FILTERS: Array<{ value: LogFaultFilter; labelKey: string }> = [
     { value: 'transient', labelKey: 'faultTransient' },
     { value: 'none', labelKey: 'faultNone' },
 ];
+
+// TEST_FILTERS 是测试请求的三态筛选档位（T-trace-006），顺序即弹窗内排列顺序。
+// 它不是可有可无的装饰：画像默认剔除测试请求，所以日志里看得见的请求**本来就不该**都在统计里 ——
+// 这个筛选是"把两种流量分开看"的入口，也是确认标记真的生效的手段。
+const TEST_FILTERS: Array<{ value: LogTestFilter; labelKey: string }> = [
+    { value: 'all', labelKey: 'testAll' },
+    { value: 'real', labelKey: 'testReal' },
+    { value: 'test', labelKey: 'testOnly' },
+];
+
+// countTestStates 统计测试/真实各多少条。
+//
+// 与归因计数不同，这一维**不限于 failed**：归因分的是"失败算谁的账"，
+// 而这一维分的是"流量从哪来"，成功与失败都要算 —— 否则"只看测试"这个入口
+// 会在用户想确认"我刚发的测试请求到底有没有被标记"时给出 0。
+function countTestStates(logs: RelayLogOverview[]): Record<LogTestFilter, number> {
+    const counts: Record<LogTestFilter, number> = { all: logs.length, test: 0, real: 0 };
+    for (const log of logs) {
+        if (log.is_test === true) counts.test += 1;
+        else counts.real += 1;
+    }
+    return counts;
+}
 
 // countFaultKinds 统计各归因档位的当前条数。
 // 只统计 **failed** 的记录: 归因回答的是"这次失败算谁的账", 取消/成功/进行中根本没有账可算。
@@ -73,7 +96,7 @@ interface LogToolbarProps {
 // 三个维度全为默认值时直接返回原数组 —— 新增维度必须同步这个短路条件, 否则会出现"筛选生效了但列表没变"。
 export function useFilteredLogs(logs: RelayLogOverview[], filter: LogMemoryFilter): RelayLogOverview[] {
     return useMemo(() => {
-        if (filter.status === 'all' && filter.faultKind === 'all' && !filter.query.trim()) return logs;
+        if (filter.status === 'all' && filter.faultKind === 'all' && filter.isTest === 'all' && !filter.query.trim()) return logs;
         return logs.filter((log) => matchLogMemoryFilter(log, filter));
     }, [logs, filter]);
 }
@@ -84,6 +107,7 @@ export function LogToolbar({ filter, onFilterChange, logs }: LogToolbarProps) {
     const t = useTranslations('log.list');
     const tf = useTranslations('log.filter');
     const faultCounts = useMemo(() => countFaultKinds(logs), [logs]);
+    const testCounts = useMemo(() => countTestStates(logs), [logs]);
     const visibility = useLogFieldVisibilityStore((s) => s.visibility);
     const toggleField = useLogFieldVisibilityStore((s) => s.toggleField);
     const resetFields = useLogFieldVisibilityStore((s) => s.resetFields);
@@ -99,6 +123,10 @@ export function LogToolbar({ filter, onFilterChange, logs }: LogToolbarProps) {
         exportRelayLogs({
             status: filter.status === 'all' ? undefined : filter.status,
             q: filter.query.trim() || undefined,
+            // 导出的"测试/真实"必须与屏幕上筛出来的一致：后端已支持 is_test 三态，
+            // 不传会让导出的文件比眼前多一批（或少一批）请求 —— 这是最容易被忽略的偏差，
+            // 因为它不会报错，只会让对不上账的人怀疑自己。
+            is_test: filter.isTest === 'all' ? undefined : filter.isTest === 'test' ? 'true' : 'false',
         })
             .then((size) => {
                 if (size === 0) toast.info(t('exportEmpty'));
@@ -232,6 +260,30 @@ export function LogToolbar({ filter, onFilterChange, logs }: LogToolbarProps) {
                                 ))}
                             </div>
                             <p className="text-[10px] leading-snug text-muted-foreground/70">{tf('faultKindHint')}</p>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <p className="text-xs font-medium text-muted-foreground">{tf('testKind')}</p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {TEST_FILTERS.map((item) => (
+                                    <button
+                                        key={item.value}
+                                        type="button"
+                                        aria-pressed={filter.isTest === item.value}
+                                        onClick={() => onFilterChange({ ...filter, isTest: item.value })}
+                                        className={cn(
+                                            'flex h-8 items-center justify-center gap-1 rounded-lg border px-2 text-xs font-medium transition-colors',
+                                            filter.isTest === item.value
+                                                ? 'border-primary/30 bg-primary text-primary-foreground'
+                                                : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
+                                        )}
+                                    >
+                                        <span className="truncate">{tf(item.labelKey)}</span>
+                                        <span className="shrink-0 tabular-nums opacity-70">{testCounts[item.value]}</span>
+                                    </button>
+                                ))}
+                            </div>
+                            <p className="text-[10px] leading-snug text-muted-foreground/70">{tf('testHint')}</p>
                         </div>
 
                         <div className="grid gap-2">

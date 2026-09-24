@@ -39,9 +39,15 @@ type RequestState struct {
 	// 它是**请求侧**的属性，与 Usage 里的推理 token 数（结果侧）配对回答
 	// "这条请求为什么这么慢、这么贵"：强度是原因，token 数是结果。
 	// 绝大多数请求不带这个参数，因此它不参与选路，只做记录与展示。
-	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
-	Usage           llm.Usage `json:"usage"` // 请求结束时写入的展示用量。
-	Cost            float64   `json:"cost"`  // 请求结束时写入的累计费用。
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// IsTest 标记本请求由客户端声明为验证/测试（T-trace-006），取自请求头 X-Octopus-Test。
+	//
+	// 与 ReasoningEffort 同类：都是**请求侧**属性、都只做记录与展示、都不参与选路。
+	// 区别在于它还会被画像用来决定"这条算不算样本"—— 因此漏标会让统计被人为扰动，
+	// 而多标会让人误以为流量比实际少。
+	IsTest bool      `json:"is_test,omitempty"`
+	Usage  llm.Usage `json:"usage"` // 请求结束时写入的展示用量。
+	Cost   float64   `json:"cost"`  // 请求结束时写入的累计费用。
 
 	Round          int            `json:"round"`            // 最新一轮循环的递增序号, 人工中止按此匹配以免误杀下一轮。
 	RoundStartedAt time.Time      `json:"round_started_at"` // 最新一轮上游请求的开始时间。
@@ -107,7 +113,10 @@ var (
 
 // newRequestState 分配请求 ID 并登记初始运行状态; 返回的记录是本请求后续全部状态写入的入口。
 // usageRecorder 由鉴权层经 AttachUsageRecorder 注入, 终态时把实际词元量交给 Key 级 TPM 记账。
-func newRequestState(ctx context.Context, modelName string, groupID int, protocol model.Protocol, body string, reasoningEffort string, apiKeyID int) *RequestState {
+//
+// isTest 由客户端请求头声明（T-trace-006）: 它只随请求一起落库与展示, **不参与任何路由判定** ——
+// 带标记的请求必须与真实流量走完全相同的选路/冷却/重试路径, 否则它就不再能代表真实流量。
+func newRequestState(ctx context.Context, modelName string, groupID int, protocol model.Protocol, body string, reasoningEffort string, apiKeyID int, isTest bool) *RequestState {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -119,6 +128,7 @@ func newRequestState(ctx context.Context, modelName string, groupID int, protoco
 		Protocol:        protocol,
 		GroupID:         groupID,
 		ReasoningEffort: reasoningEffort,
+		IsTest:          isTest,
 		body:            body,
 		apiKeyID:        apiKeyID,
 	}
@@ -546,16 +556,19 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 		// 客户端入站协议（T-trace-004）：与 TargetProtocol 并排落库，"转换过没有"才答得上来。
 		// 它是请求一进来就定下的（由入站格式推出），不随哪一轮选择而变化。
 		RequestProtocol: int(r.Protocol),
-		ReportedModel:   r.ReportedModel,
-		ModelMismatch:   r.ModelMismatch,
-		StartedAt:       r.StartedAt,
-		FirstByteMs:     firstByteMs,
-		DurationMs:      r.Duration.Milliseconds(),
-		Attempts:        r.Round,
-		Decision:        r.Decision,
-		PromptTokens:    r.Usage.PromptTokens,
-		CachedTokens:    cachedTokens,
-		CompletionToks:  r.Usage.CompletionTokens,
+		// 测试请求标记（T-trace-006）：客户端在请求头 X-Octopus-Test 上声明。
+		// 随行落库并被画像用来决定样本取舍，但**从不参与选路**（见 model.RelayLog.IsTest）。
+		IsTest:         r.IsTest,
+		ReportedModel:  r.ReportedModel,
+		ModelMismatch:  r.ModelMismatch,
+		StartedAt:      r.StartedAt,
+		FirstByteMs:    firstByteMs,
+		DurationMs:     r.Duration.Milliseconds(),
+		Attempts:       r.Round,
+		Decision:       r.Decision,
+		PromptTokens:   r.Usage.PromptTokens,
+		CachedTokens:   cachedTokens,
+		CompletionToks: r.Usage.CompletionTokens,
 		// 思考强度与思考 token（T-insight-001）：前者是请求侧参数、后者是上游回报，
 		// 两者一起说明"这条请求为什么慢/贵"，因此与 token 数落在一起。
 		ReasoningEffort: r.ReasoningEffort,

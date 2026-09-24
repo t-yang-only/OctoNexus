@@ -14,7 +14,7 @@ export function Log() {
     const t = useTranslations('log');
     const { logs, isLoading, error, refresh } = useLogs();
     const interval = useLogAutoRefreshStore((s) => s.interval);
-    const [filter, setFilter] = useState<LogMemoryFilter>({ status: 'all', faultKind: 'all', query: '' });
+    const [filter, setFilter] = useState<LogMemoryFilter>({ status: 'all', faultKind: 'all', isTest: 'all', query: '' });
     const filtered = useFilteredLogs(logs, filter);
     const shownIsFiltered = filtered.length !== logs.length;
 

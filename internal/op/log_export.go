@@ -30,7 +30,7 @@ const RelayLogExportMaxRows = 200000
 // 只有行主键能唯一定位一行, 下游做去重/回查时不必再猜。
 var relayLogExportHeader = []string{
 	"日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "上游自称模型", "模型一致", "目标渠道", "入站协议", "上游协议", "协议转换", "首字节(ms)", "耗时(ms)", "上游轮次", "判定理由",
-	"输入tokens", "缓存命中tokens", "输出tokens", "思考强度", "思考tokens", "思考字数", "费用", "API Key", "错误", "失败归因", "终止原因", "尝试明细",
+	"输入tokens", "缓存命中tokens", "输出tokens", "思考强度", "思考tokens", "思考字数", "费用", "API Key", "错误", "失败归因", "终止原因", "尝试明细", "测试请求",
 }
 
 // RelayLogExportCSV 按筛选条件把请求级明细写成 CSV, 返回写出的行数(不含表头)。
@@ -129,7 +129,21 @@ func relayLogExportRow(entry model.RelayLog) []string {
 		entry.FaultKind,
 		entry.StopReason,
 		attemptDetailLabel(entry),
+		// 测试请求（T-trace-006）：附在**最后一列**而不是插在中间 ——
+		// 下游可能已有按列号解析这份 CSV 的脚本，中间插列会让那些解析静默错位。
+		testRequestLabel(entry.IsTest),
 	}
+}
+
+// testRequestLabel 把测试请求标记铺成导出的可读文本（T-trace-006）。
+//
+// 两态而非三态：这一列回答"这条日志算不算验证流量"，没声明过的行（含升级前的存量行）
+// 就是非测试流量，答案确定 —— 与「模型一致」那种"上游没回报所以未知"的三态不是一类问题。
+func testRequestLabel(isTest bool) string {
+	if isTest {
+		return "是"
+	}
+	return "否"
 }
 
 // attemptDetailLabel 把尝试链压成一行供表格阅读（T-trace-001）。

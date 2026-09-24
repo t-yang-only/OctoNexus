@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { useAnalyticsRouting } from '@/api/analytics';
 import { formatCount as formatCountRaw } from '@/lib/utils';
+import { SampleNote } from '@/components/sample-note';
 
 // formatCount 返回的是 {raw, formatted:{value,unit}}，直接塞进 JSX 会渲染成
 // [object Object]，而**模板字符串里的误用连类型检查都抓不到**（拼接接受任意类型）。
@@ -159,6 +160,7 @@ export default function RoutingProfilePanel() {
                     ))}
                 </div>
                 <div className="mt-2 text-[11px] text-muted-foreground">{t('coverageHint')}</div>
+                <SampleNote sample={data.sample} className="mt-1 text-[11px] text-muted-foreground" />
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">

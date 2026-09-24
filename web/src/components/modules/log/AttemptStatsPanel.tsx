@@ -1,6 +1,7 @@
 import { useTranslations } from 'use-intl';
 
 import { useAttemptChainStats } from '@/api/log';
+import { SampleNote } from '@/components/sample-note';
 
 // AttemptStatsPanel 展示「谁在被反复试错」——尝试链的聚合视图（T-trace-002）。
 //
@@ -70,6 +71,9 @@ export function AttemptStatsPanel() {
                     {t('truncated', { count: data.truncated })}
                 </p>
             )}
+
+            {/* 样本账：这些聚合值已经把测试请求剔出去了（T-trace-006）。 */}
+            <SampleNote sample={data.sample} />
 
             {problem.length > 0 && (
                 <ul className="space-y-1 text-xs">

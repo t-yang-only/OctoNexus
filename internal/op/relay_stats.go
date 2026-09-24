@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 
-	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 )
 
@@ -66,6 +65,8 @@ type RelayLogFaultsSummary struct {
 	RelayLogFaultCounts
 	// Window 是统计覆盖的条数（等于 Total，单独给出便于前端直接展示）。
 	Window int64 `json:"window"`
+	// Sample 说明这批样本的来源（窗口原始条数、剔除的测试请求数、是否触限）。
+	Sample RelayLogSampleInfo `json:"sample"`
 	// Channels 按总条数倒序。
 	Channels []ChannelFaults `json:"channels"`
 }
@@ -75,18 +76,13 @@ type RelayLogFaultsSummary struct {
 // window 取最近 N 条日志（按 id 倒序）—— 用条数而不是天数：
 // 部署后流量差异极大，按天取会让"最近一天只有 3 条"的渠道得出没有意义的比例。
 func RelayLogFaultsStats(ctx context.Context, window int) (RelayLogFaultsSummary, error) {
-	if window <= 0 {
-		window = 500
-	}
-	conn := db.GetDB()
-	var rows []model.RelayLog
-	if err := conn.WithContext(ctx).
-		Order("id DESC").Limit(window).
-		Find(&rows).Error; err != nil {
+	rows, sample, err := relayLogWindow(ctx, window)
+	if err != nil {
 		return RelayLogFaultsSummary{}, err
 	}
 
 	var summary RelayLogFaultsSummary
+	summary.Sample = sample
 	byChannel := make(map[string]*ChannelFaults)
 	for _, row := range rows {
 		target := &summary.RelayLogFaultCounts

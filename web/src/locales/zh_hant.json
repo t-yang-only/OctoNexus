@@ -155,6 +155,7 @@
     }
   },
   "common": {
+    "sampleNote": "已剔除 {count} 條測試請求（視窗共 {total} 條）",
     "copy": {
       "success": "複製成功",
       "failed": "複製失敗",
@@ -1136,6 +1137,8 @@
       "attemptEmpty": "本次請求只打過一個成員",
       "responseStreaming": "上游已回應，串流傳輸正在進行",
       "reasoningEffortHint": "用戶端在請求裡指定的思考強度。同一模型在 low/high 檔下的輸出長度與費用好幾倍差距——這一項說明「貴」是上游慢，還是思考強度開高了。",
+      "isTest": "測試",
+      "isTestHint": "這條請求由客戶端用 X-Octopus-Test 頭宣告為驗證/測試。總覽與畫像預設將它剔除 —— 它出現在這裡卻不出現在統計裡是設計如此，不是丟資料。",
       "protocolConvertedHint": "客戶端用的協定與上游用的協定不同：這次請求中間做過一次跨協定轉換，請求體與回應體都被改寫了一遍。",
       "reasoningCharsHint": "回應正文裡思考文本的字元數（一個中文算 1 個字）。上游普遍不回報思考 token，這一項是從正文量出來的，因此通常只有它有意義。它是「文本有多長」，與上面的 token 數（「上游說花了多少」）是兩個量，同時有值時都要看。",
       "reasoningTokensHint": "上游在 usage 裡回報的思考 token 數。只在確有值時才顯示：空著表示上游沒報這個欄位，不代表這次沒有思考。"
@@ -1177,6 +1180,11 @@
       "faultTransient": "可恢復",
       "faultNone": "未分類",
       "faultKindHint": "歸因由後端在失敗發生時就地判定，前端只做展示與篩選；計數只統計失敗的請求，「未分類」含升級前的歷史記錄。",
+      "testKind": "請求來源",
+      "testAll": "全部",
+      "testReal": "真實",
+      "testOnly": "測試",
+      "testHint": "「測試」是客戶端用 X-Octopus-Test 頭主動宣告的驗證請求。總覽與畫像預設剔除它們，所以在這裡看得到、統計裡看不到是設計如此。",
       "status": "狀態",
       "all": "全部",
       "fields": "卡片欄位",

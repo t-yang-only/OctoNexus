@@ -60,6 +60,34 @@ func modelNotFoundError(requested string) error {
 // 否则每个用例都要真等 60 秒。
 var memberUnavailableWaitCapSeconds = 60
 
+// RelayTestHeader 是客户端声明「这是一条验证/测试请求」的请求头（T-trace-006）。
+//
+// 导出是有意的：写这个头的人需要知道确切拼写，而"源码里搜常量名"比"文档里抄一遍头名"可靠。
+const RelayTestHeader = "X-Octopus-Test"
+
+// isTestRequest 判定该请求是否由客户端声明为验证/测试请求。
+//
+// 只认 "true" 与 "1" 两种写法（大小写不敏感、去首尾空白），其余一律算未声明。
+// 这个标记决定一条日志算不算画像样本，多认一种写法就多一分"以为没标、其实标上了"
+// （或反过来）的风险，而这类错账不会有人去核对。因此宁可只认明确写法。
+func isTestRequest(c *gin.Context) bool {
+	return isTestHeaderValue(c.GetHeader(RelayTestHeader))
+}
+
+// isTestHeaderValue 是标记的**唯一判定规则**。
+//
+// 抽成纯函数是为了能直接断言它：经由 gin.Context 只能测到"有没有读到这个头"，
+// 测不到"读到的值算不算数" —— 而后者才是决定一条日志命运的地方
+// （多认一种写法，就会有一批请求静默地从画像里消失）。
+func isTestHeaderValue(raw string) bool {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return false
+	}
+	lower := strings.ToLower(value)
+	return lower == "true" || lower == "1"
+}
+
 // memberUnavailableWaitedEnough 判断「连续无可用成员」是否已经等够了。
 //
 // 单独抽出来是为了让它可被直接断言：这段逻辑的失败模式（永远返回 false）
@@ -144,7 +172,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 		}
 
 		// 登记进程内请求状态, 返回的记录是后续全部状态写入和前端可视化推送的入口。
-		request := newRequestState(c.Request.Context(), metadata.Model, group.ID, requestProtocol, string(raw.Body), metadata.ReasoningEffort, c.GetInt("api_key_id"))
+		request := newRequestState(c.Request.Context(), metadata.Model, group.ID, requestProtocol, string(raw.Body), metadata.ReasoningEffort, c.GetInt("api_key_id"), isTestRequest(c))
 		// Key 级 TPM 记账: 终态时把实际词元量交给鉴权层注册的回调 (未限流 key 回调缺省, 跳过)。
 		AttachUsageRecorder(c.Request.Context(), request.ID, func(promptTokens, completionTokens int64) {
 			if recorderAny, ok := c.Get("key_usage_recorder"); ok {

@@ -90,9 +90,28 @@ export interface ModelMismatchSample {
     created_at: string;
 }
 
+/**
+ * RelayLogSample 是画像样本的来源账（T-trace-006）。
+ *
+ * 画像默认把客户端声明的测试请求剔除：否则每次发版验证的那几条请求都会扰动成功率
+ * 与延迟分布，让「这一版到底变好没有」失去可比性。
+ *
+ * 但剔除必须**可见**：只给剩余条数，会让人以为样本凭空少了，白白去查一次丢数据。
+ * window 是窗口内扫过的原始条数，samples 是参与统计的条数，test_skipped 是被剔除的条数。
+ * 剔除在 Go 侧做、不用 SQL WHERE —— 否则窗口会被一路撑到"N 条非测试日志"，
+ * 排除前后的样本范围就不可比了，而那正是这个功能要解决的问题。
+ */
+export interface RelayLogSample {
+    window: number;
+    samples: number;
+    test_skipped: number;
+    truncated: boolean;
+}
+
 export interface AnalyticsOverview {
     /** 实际参与统计的条数（库里不够时会少于请求的 window）。 */
     window: number;
+    sample: RelayLogSample;
     /** 首尾请求的实际时间差，即 RPM/TPM 的分母。 */
     span_seconds: number;
     request_count: number;
@@ -189,6 +208,7 @@ export interface LatencyHistogramBucket {
 export interface LatencyDistribution {
     /** 扫描到的日志条数（含没走到渠道的）。 */
     window: number;
+    sample: RelayLogSample;
     slow_threshold_ms: number;
     /** 只统计真的记到首字节的请求（first_byte_ms >= 0）。 */
     first_byte: LatencyQuantiles;
@@ -273,6 +293,7 @@ export interface RoutingStopStat {
 
 export interface RoutingProfile {
     window: number;
+    sample: RelayLogSample;
     decision_recorded: number;
     decision_unrecorded: number;
     decision_malformed: number;

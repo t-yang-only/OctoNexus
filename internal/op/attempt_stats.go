@@ -3,9 +3,6 @@ package op
 import (
 	"context"
 	"sort"
-
-	"github.com/bestruirui/octopus/internal/db"
-	"github.com/bestruirui/octopus/internal/model"
 )
 
 // T-trace-002 尝试链的聚合视图。
@@ -64,6 +61,8 @@ type AttemptChannelStat struct {
 type AttemptChainSummary struct {
 	// Window 是统计扫过的日志条数。
 	Window int64 `json:"window"`
+	// Sample 说明这批样本的来源（窗口原始条数、剔除的测试请求数、是否触限）。
+	Sample RelayLogSampleInfo `json:"sample"`
 	// Scanned 是其中**带尝试链**的日志条数。
 	// 与 Window 的差是升级前的存量行（没有 attempt_detail），
 	// 单独给出是为了让"统计为空"和"没有数据"能被区分开。
@@ -88,23 +87,13 @@ const lastErrorMaxRunes = 200
 
 // AttemptChainStats 聚合 window 内所有请求的尝试链。
 func AttemptChainStats(ctx context.Context, window int) (AttemptChainSummary, error) {
-	if window <= 0 {
-		window = 500
-	}
-	if window > 20000 {
-		window = 20000
-	}
-	conn := db.GetDB()
-
-	var rows []model.RelayLog
-	if err := conn.WithContext(ctx).
-		Order("id DESC").Limit(window).
-		Find(&rows).Error; err != nil {
+	rows, sample, err := relayLogWindow(ctx, window)
+	if err != nil {
 		return AttemptChainSummary{}, err
 	}
 
 	byChannel := make(map[string]*AttemptChannelStat)
-	summary := AttemptChainSummary{Window: int64(len(rows))}
+	summary := AttemptChainSummary{Window: sample.Samples, Sample: sample}
 
 	// 按 id 升序遍历，让 LastError 稳定落在"最近一次"上
 	// （Find 是 id DESC，这里反转 —— 否则最后一次写入的会是窗口内最早的那条）。

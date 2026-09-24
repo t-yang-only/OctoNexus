@@ -3,9 +3,6 @@ package op
 import (
 	"context"
 	"sort"
-
-	"github.com/bestruirui/octopus/internal/db"
-	"github.com/bestruirui/octopus/internal/model"
 )
 
 // T-perf-001 渠道延迟画像。
@@ -59,6 +56,8 @@ type ChannelLatencySummary struct {
 	SlowThresholdMs int64 `json:"slow_threshold_ms"`
 	// Window 是参与统计的样本总数。
 	Window int64 `json:"window"`
+	// Sample 说明这批样本的来源（窗口原始条数、剔除的测试请求数、是否触限）。
+	Sample RelayLogSampleInfo `json:"sample"`
 	// Channels 按首字节中位数排序：**快的在前** ——
 	// 用户看这个表是为了挑快的用，不是挑慢的。
 	Channels []ChannelLatency `json:"channels"`
@@ -76,18 +75,8 @@ const slowFirstByteMs = 3000
 // 这里不做"样本不足就不返回"的处理 —— 那会让用户以为接口坏了；
 // 把事实（样本 3 条）摆出来，由人判断可信度。
 func ChannelLatencyStats(ctx context.Context, window int) (ChannelLatencySummary, error) {
-	if window <= 0 {
-		window = 500
-	}
-	if window > 20000 {
-		window = 20000
-	}
-	conn := db.GetDB()
-
-	var rows []model.RelayLog
-	if err := conn.WithContext(ctx).
-		Order("id DESC").Limit(window).
-		Find(&rows).Error; err != nil {
+	rows, sample, err := relayLogWindow(ctx, window)
+	if err != nil {
 		return ChannelLatencySummary{}, err
 	}
 
@@ -97,14 +86,12 @@ func ChannelLatencyStats(ctx context.Context, window int) (ChannelLatencySummary
 		slow       int64
 	}
 	byChannel := make(map[string]*bucket)
-	var total int64
 	for _, row := range rows {
 		// Window 统计**扫描到的全部日志**（含无渠道的），不是"参与渠道统计的条数"。
 		//
 		// 这样用户能看出落差：Window=100 而各渠道 Samples 加起来只有 95，
 		// 说明有 5 条请求根本没走到渠道（分组不存在等）。
 		// 若把无渠道的排除在外，这个落差就被藏起来了 —— 而那正是值得注意的信号。
-		total++
 		if row.TargetChannel == "" {
 			continue
 		}
@@ -128,7 +115,8 @@ func ChannelLatencyStats(ctx context.Context, window int) (ChannelLatencySummary
 
 	summary := ChannelLatencySummary{
 		SlowThresholdMs: slowFirstByteMs,
-		Window:          total,
+		Window:          sample.Samples,
+		Sample:          sample,
 		Channels:        make([]ChannelLatency, 0, len(byChannel)),
 	}
 	for name, b := range byChannel {

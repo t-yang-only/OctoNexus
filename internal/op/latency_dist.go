@@ -3,9 +3,6 @@ package op
 import (
 	"context"
 	"sort"
-
-	"github.com/bestruirui/octopus/internal/db"
-	"github.com/bestruirui/octopus/internal/model"
 )
 
 // T-insight-004 全局延迟分布。
@@ -109,6 +106,11 @@ type LatencyDistributionSummary struct {
 	// 必须显式给出：否则"最近 500 条"与"全部 500 条"在界面上长得一样，
 	// 而前者在流量大时只代表几十分钟。
 	Truncated bool `json:"truncated"`
+	// Sample 说明这批样本的来源（窗口原始条数、扣除的测试请求数、是否触限）。
+	//
+	// 与 Truncated 的分工：Truncated 只说"够不够"，Sample 说"从多少条里挑出了多少条"。
+	// 画像默认排除测试请求，不把扣除量摆出来就没法与日志页核对。
+	Sample RelayLogSampleInfo `json:"sample"`
 }
 
 // 延迟"慢"的阈值。
@@ -136,18 +138,8 @@ var latencyHistogramBounds = []int64{500, 1000, 2000, 3000, 5000, 10000, 20000, 
 // window 取最近 N 条日志（按 id 倒序）。与既有画像一致：样本不足不做拦截，
 // 把 Samples 摆出来由人判断可信度。
 func LatencyDistributionStats(ctx context.Context, window int) (LatencyDistributionSummary, error) {
-	if window <= 0 {
-		window = 500
-	}
-	if window > 20000 {
-		window = 20000
-	}
-	conn := db.GetDB()
-
-	var rows []model.RelayLog
-	if err := conn.WithContext(ctx).
-		Order("id DESC").Limit(window).
-		Find(&rows).Error; err != nil {
+	rows, sample, err := relayLogWindow(ctx, window)
+	if err != nil {
 		return LatencyDistributionSummary{}, err
 	}
 
@@ -165,9 +157,10 @@ func LatencyDistributionStats(ctx context.Context, window int) (LatencyDistribut
 	}
 
 	summary := LatencyDistributionSummary{
-		Window:            int64(len(rows)),
+		Window:            sample.Window,
+		Sample:            sample,
 		SlowThresholdMs:   slowFirstByteMs,
-		Truncated:         len(rows) >= window,
+		Truncated:         sample.Truncated,
 		FirstByte:         quantilesOf(firstBytes),
 		Duration:          quantilesOf(durations),
 		FirstByteTail:     tailOf(firstBytes, slowFirstByteMs),

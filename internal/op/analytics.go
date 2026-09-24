@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 )
 
@@ -185,6 +184,8 @@ type AnalyticsOverview struct {
 	Series []AnalyticsBucket `json:"series"`
 	// Truncated 标记统计的条数达到了 window 上限 —— 此时"总数"是最近 N 条而非全部历史。
 	Truncated bool `json:"truncated"`
+	// Sample 说明这批样本的来源（窗口原始条数、剔除的测试请求数、是否触限）。
+	Sample RelayLogSampleInfo `json:"sample"`
 }
 
 // relayAnalyticsTopModels 是堆叠图保留的模型数上限，其余并进 "__other__"。
@@ -257,22 +258,19 @@ const otherModelKey = "__other__"
 
 // AnalyticsOverviewStats 汇总窗口内的模型调用情况。
 func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview, error) {
-	if window <= 0 {
-		window = 500
-	}
-	conn := db.GetDB()
-	var rows []model.RelayLog
-	if err := conn.WithContext(ctx).
-		Order("id DESC").Limit(window).
-		Find(&rows).Error; err != nil {
+	rows, sample, err := relayLogWindow(ctx, window)
+	if err != nil {
 		return AnalyticsOverview{}, err
 	}
 
 	var out AnalyticsOverview
-	out.Window = int64(len(rows))
+	out.Sample = sample
+	// Window 是**参与统计的条数**（不含被剔除的测试请求），与剔除前的既有口径一致；
+	// 窗口原始条数与扣除量在 Sample 里 —— 少了那两项，"怎么比我刚发的请求少了几条"没人解释得清。
+	out.Window = sample.Samples
 	// 取满 window 条说明"最近 N 条"之外可能还有更多 —— 此时总数是切片不是全量，
 	// 界面必须说明，否则用户会把"最近 500 条"读成"历史全部"。
-	out.Truncated = len(rows) >= window
+	out.Truncated = sample.Truncated
 	if len(rows) == 0 {
 		// 空窗口返回空结果而不是错误：新装的实例本来就一条都没有，
 		// 报错会让首页显示成"出问题了"，而事实是"还没有数据"。

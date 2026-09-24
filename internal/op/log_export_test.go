@@ -435,6 +435,7 @@ var relayLogExportColumns = map[string]string{
 	"Error":           "错误",
 	"FaultKind":       "失败归因",
 	"StopReason":      "终止原因",
+	"IsTest":          "测试请求",
 	"AttemptDetail":   "尝试明细",
 	// 截断标记没有独立列，它作为前缀写在同一列里（"...(前段已截断) #1 ..."）：
 	// 单独占一列会让表更宽，而它只在极少数行上有值。

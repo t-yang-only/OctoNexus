@@ -155,6 +155,7 @@
     }
   },
   "common": {
+    "sampleNote": "Excluded {count} test request(s) of {total} in window",
     "copy": {
       "success": "Copied",
       "failed": "Copy failed",
@@ -1136,6 +1137,8 @@
       "attemptEmpty": "This request hit a single member",
       "responseStreaming": "Upstream responded; streaming is in progress",
       "reasoningEffortHint": "The reasoning effort the client asked for. The same model at low vs high can differ several times over in output length and cost — this tells you whether an expensive request was upstream slowness or a high effort setting.",
+      "isTest": "TEST",
+      "isTestHint": "This request was declared a verification/test call by the client via the X-Octopus-Test header. Overviews and profiles exclude it by default — appearing here but not in the stats is by design, not lost data.",
       "protocolConvertedHint": "The client protocol differs from the upstream one: this request was converted across protocols, so both the request and response bodies were rewritten.",
       "reasoningCharsHint": "Characters of reasoning text in the response body (one CJK character counts as 1). Upstreams rarely report reasoning tokens, so this one is measured from the body itself and is usually the only value available. It is how long the text is, a different quantity from the token count above (what the upstream says it spent); read both when both exist.",
       "reasoningTokensHint": "Reasoning tokens the upstream reported in usage. Shown only when a value exists: blank means the upstream does not report this field, not that no reasoning happened."
@@ -1177,6 +1180,11 @@
       "faultTransient": "Transient",
       "faultNone": "Unclassified",
       "faultKindHint": "Attribution is decided by the backend at failure time; the UI only filters it. Counts cover failed requests only; unclassified includes pre-upgrade records.",
+      "testKind": "Source",
+      "testAll": "All",
+      "testReal": "Real",
+      "testOnly": "Test",
+      "testHint": "'Test' means the client declared it via the X-Octopus-Test header. Overviews and profiles exclude these by default, so being visible here and absent from the stats is by design.",
       "status": "Status",
       "all": "All",
       "fields": "Card fields",

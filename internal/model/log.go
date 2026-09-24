@@ -128,8 +128,24 @@ type RelayLog struct {
 	// 设计吸收自同类项目 new-api 的 service.PolicyDecision
 	// （Action/Reason/Source 三字段 + 集中式 DecideRelayRetry），
 	// 本项目此前把决策散在各处 if/else 里，只在 return 前拼错误文本。
-	StopReason string    `json:"stop_reason"`
-	CreatedAt  time.Time `json:"created_at" gorm:"autoCreateTime;index"`
+	StopReason string `json:"stop_reason"`
+	// IsTest 标记这是一条**验证/测试请求**（T-trace-006），由客户端在请求头
+	// X-Octopus-Test 上声明；落库后供画像排除、供日志页过滤。
+	//
+	// 为什么需要它：验证请求走的与真实流量**完全同一条路径**（这正是验证的意义 ——
+	// 证明真实路径通），所以它产生的行与真实流量在结构上无法区分。代价是每验证一次
+	// 就污染一次画像：部署后发一条探活请求，成功率、延迟分布、渠道故障率全部跟着变，
+	// 而人看到数字变了，却没有任何标记能指出"那几条是我自己发的"。
+	// 实测动机：本项目每次发版都要发真实请求做验收，那几条 200 与 502 混在统计里，
+	// 让"改完这一版到底有没有变好"失去可比性。
+	//
+	// 与"标记起来别污染统计"同等重要的另一半：**标记绝不改变转发与选路行为**。
+	// 若带标记的请求走不同的冷却/选路/限流路径，它就不再能代表真实流量，
+	// 这个标记会摧毁它自己的用途。因此本字段只影响两件事：画像样本的取舍、界面上的可见性。
+	//
+	// false 是"未声明"而非"确证真实" —— 存量行与所有不带该头的客户端都落在这里。
+	IsTest    bool      `json:"is_test" gorm:"index"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime;index"`
 }
 
 // RelayAttemptDetail 是单轮尝试的落库快照（T-trace-001）。
@@ -166,8 +182,15 @@ type RelayLogFilter struct {
 	Channel string
 	APIKey  string
 	Q       string
-	Limit   int
-	Offset  int
+	// IsTest 三态过滤测试请求（T-trace-006）：nil=全部、true=仅测试、false=仅非测试。
+	//
+	// 必须是三态而不是 bool：bool 只能表达"要不要只看测试"，无法表达"要不要排除测试"，
+	// 而后者才是日常最需要的（看真实流量）。做成 bool 就得再加一个开关，
+	// 两个开关会出现"都要/都不要"的组合歧义。
+	// 注意 false 分支要连 NULL 一起算非测试 —— 存量行升级时该列可能为 NULL。
+	IsTest *bool
+	Limit  int
+	Offset int
 }
 
 // RelayLogRetentionDays 是历史日志保留天数, 清理任务按 CreatedAt 删除更早的记录。

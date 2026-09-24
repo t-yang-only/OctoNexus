@@ -50,9 +50,11 @@ type GroupLatency struct {
 
 // GroupLatencySummary 是分组延迟画像的整体结果。
 type GroupLatencySummary struct {
-	SlowThresholdMs int64          `json:"slow_threshold_ms"`
-	Window          int64          `json:"window"`
-	Groups          []GroupLatency `json:"groups"`
+	SlowThresholdMs int64 `json:"slow_threshold_ms"`
+	Window          int64 `json:"window"`
+	// Sample 说明这批样本的来源（窗口原始条数、剔除的测试请求数、是否触限）。
+	Sample RelayLogSampleInfo `json:"sample"`
+	Groups []GroupLatency     `json:"groups"`
 }
 
 // GroupLatencyStats 统计各分组的首字节与总耗时分布。
@@ -62,20 +64,12 @@ type GroupLatencySummary struct {
 // 而分组画像的用途是"看我常用的那几个到底多快"，
 // 因此**用得多的排前面**更有用（没数据的自然沉底）。
 func GroupLatencyStats(ctx context.Context, window int) (GroupLatencySummary, error) {
-	if window <= 0 {
-		window = 500
-	}
-	if window > 20000 {
-		window = 20000
-	}
-	conn := db.GetDB()
-
-	var rows []model.RelayLog
-	if err := conn.WithContext(ctx).
-		Order("id DESC").Limit(window).
-		Find(&rows).Error; err != nil {
+	rows, sample, err := relayLogWindow(ctx, window)
+	if err != nil {
 		return GroupLatencySummary{}, err
 	}
+	// 收口函数只负责取样本；下面还要查分组元数据（名称、成员数），仍需要连接。
+	conn := db.GetDB()
 
 	type bucket struct {
 		firstBytes []int64
@@ -83,9 +77,7 @@ func GroupLatencyStats(ctx context.Context, window int) (GroupLatencySummary, er
 		slow       int64
 	}
 	byGroup := make(map[int]*bucket)
-	var total int64
 	for _, row := range rows {
-		total++
 		// 没有 group_id 的请求（分组不存在等）不进任何分组画像 ——
 		// 它们没有"这个分组有多快"可言。
 		if row.GroupID <= 0 {
@@ -127,7 +119,8 @@ func GroupLatencyStats(ctx context.Context, window int) (GroupLatencySummary, er
 
 	summary := GroupLatencySummary{
 		SlowThresholdMs: slowFirstByteMs,
-		Window:          total,
+		Window:          sample.Samples,
+		Sample:          sample,
 		Groups:          make([]GroupLatency, 0, len(byGroup)),
 	}
 	for gid, b := range byGroup {

@@ -90,6 +90,16 @@ func relayLogQuery(conn dbConn, filter model.RelayLogFilter) *gorm.DB {
 		like := "%" + q + "%"
 		query = query.Where("model LIKE ? OR target_channel LIKE ? OR error LIKE ?", like, like, like)
 	}
+	// 测试请求三态过滤（T-trace-006）。false 分支必须把 NULL 一起算进来：
+	// 这一列是升级时才加的，存量行在 SQLite 里就是 NULL，若写成 "is_test = ?"，
+	// 那些行会两个分支都不匹配 —— 表现为"一筛选就凭空少了几百条"，而且不报错。
+	if filter.IsTest != nil {
+		if *filter.IsTest {
+			query = query.Where("is_test = ?", true)
+		} else {
+			query = query.Where("is_test = ? OR is_test IS NULL", false)
+		}
+	}
 	return query
 }
 

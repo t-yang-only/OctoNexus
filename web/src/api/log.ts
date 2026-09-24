@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { apiRequest } from './client';
+import type { RelayLogSample } from './analytics';
 
 // RequestState 表示 Relay 请求的实时状态。
 export type RequestState = 'running' | 'committed' | 'success' | 'failed' | 'canceled';
@@ -81,6 +82,12 @@ export interface RelayHistoryItem {
     reasoning_effort?: string;
     reasoning_tokens?: number;
     reasoning_chars?: number;
+    // is_test 标记这条请求由客户端声明为验证/测试（T-trace-006），取自请求头 X-Octopus-Test。
+    //
+    // 为什么它在日志页可见、却不在画像里：画像默认把测试请求剔除（验证一次不该扰动一次
+    // 成功率与延迟分布），而日志页是"我到底发过什么"的地方 —— 它必须完整保留这些行并
+    // 明确标出来，否则"我刚发的那条怎么没进统计"会变成新的疑问。
+    is_test?: boolean;
     // attempt_detail 是每一轮尝试的明细链（T-trace-001），按轮次顺序。
     //
     // 回答的是既有字段回答不了的问题: Attempts 只说"试了几次"、TargetChannel 只说"最后用了谁"，
@@ -121,6 +128,11 @@ export interface RelayHistoryFilter {
     channel?: string;
     apikey?: string;
     q?: string;
+    // is_test 三态过滤测试请求（T-trace-006）：'' 或省略=全部、'true'=仅测试、'false'=仅非测试。
+    //
+    // 用字符串而不是布尔：布尔只有两种取值，表达不了"不筛"这个状态，硬塞会逼出第二个开关，
+    // 而两个开关会产生"都开/都关"的组合歧义。后端对非法值报 400 而不是静默当"不筛"。
+    is_test?: string;
     limit?: number;
     offset?: number;
 }
@@ -183,6 +195,9 @@ export interface RelayLogOverview {
     group_id: number;
     api_key_name: string;
     usage: RelayUsage;
+    // is_test 同 RelayHistoryItem 的同名字段：客户端以 X-Octopus-Test 声明的验证请求。
+    // 后端 RequestState 用 `is_test,omitempty` 序列化，所以只有 true 才会出现在实时流里。
+    is_test?: boolean;
     cost: number;
     round: number;
     round_started_at: string;
@@ -347,6 +362,8 @@ export interface ChannelFaults extends RelayFaultCounts {
 
 export interface RelayFaultStats extends RelayFaultCounts {
     window: number;
+    /** 样本来源账（T-trace-006）：窗口内剔除掉的测试请求条数也在这里。 */
+    sample: RelayLogSample;
     channels: ChannelFaults[];
 }
 
@@ -399,6 +416,13 @@ export interface AttemptChainStats {
     scanned: number;
     /** 链被截断过的日志条数：这类日志轮次不完整，聚合值会偏低。 */
     truncated: number;
+    /**
+     * 样本来源账（T-trace-006）。
+     *
+     * 与上面那个 truncated 是两回事：那个说的是"链被截断"，这个说的是"窗口内剔除掉
+     * 几条测试请求"。正因为两者重名容易看错，才把窗口账整体嵌进 sample 而不平铺。
+     */
+    sample: RelayLogSample;
     /** 换过人（>1 轮）的请求数。 */
     multi_round_requests: number;
     /**

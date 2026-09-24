@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -94,9 +95,37 @@ func getResponseBody(c *gin.Context) {
 	resp.Success(c, relay.ResponseBody(id))
 }
 
+// parseIsTestQuery 解析 is_test 查询参数（T-trace-006）。
+//
+// 三态：nil = 不筛这个维度；&true = 只看测试请求；&false = 只看非测试请求。
+//
+// 非法值直接报 400，**不静默当成"不筛"**：那会让用户以为筛选生效了、实际看到的是全部，
+// 而这种"看起来对了"的错误最难发现（本项目把这类情况叫做静默降级，是明确的缺陷类别）。
+// 与 status/model 那些自由文本参数不同 —— 它们是"给什么都合法"，布尔参数有明确的非法值。
+func parseIsTestQuery(c *gin.Context) (*bool, bool) {
+	raw := strings.TrimSpace(c.Query("is_test"))
+	if raw == "" {
+		return nil, true
+	}
+	switch strings.ToLower(raw) {
+	case "true", "1":
+		value := true
+		return &value, true
+	case "false", "0":
+		value := false
+		return &value, true
+	}
+	resp.Error(c, http.StatusBadRequest, "invalid is_test (must be 'true' or 'false')")
+	return nil, false
+}
+
 // listHistory 按状态/模型/渠道/Key/关键字倒序分页查询历史日志。
-// 查询参数: status/model/channel/apikey/q/limit/offset, 全部可选。
+// 查询参数: status/model/channel/apikey/q/is_test/limit/offset, 全部可选。
 func listHistory(c *gin.Context) {
+	isTest, ok := parseIsTestQuery(c)
+	if !ok {
+		return
+	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	logs, total := op.RelayLogList(model.RelayLogFilter{
@@ -105,6 +134,7 @@ func listHistory(c *gin.Context) {
 		Channel: c.Query("channel"),
 		APIKey:  c.Query("apikey"),
 		Q:       c.Query("q"),
+		IsTest:  isTest,
 		Limit:   limit,
 		Offset:  offset,
 	})
@@ -115,12 +145,17 @@ func listHistory(c *gin.Context) {
 // 查询参数与 /history 一致 (status/model/channel/apikey/q), 但不分页: 导出就是"把当前筛选的结果全给出去"。
 // 逐行流式写出, 内存不随条数增长; 首行前的 UTF-8 BOM 让 Excel 正确识别中文表头。
 func exportHistory(c *gin.Context) {
+	isTest, ok := parseIsTestQuery(c)
+	if !ok {
+		return
+	}
 	filter := model.RelayLogFilter{
 		Status:  c.Query("status"),
 		Model:   c.Query("model"),
 		Channel: c.Query("channel"),
 		APIKey:  c.Query("apikey"),
 		Q:       c.Query("q"),
+		IsTest:  isTest,
 	}
 	filename := "octopus-relay-logs-" + time.Now().Format("20060102150405") + ".csv"
 	c.Header("Content-Type", "text/csv; charset=utf-8")

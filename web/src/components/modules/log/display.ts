@@ -61,6 +61,12 @@ export interface LogDisplayFields {
     targetProtocol: number;
     // protocolConverted 表示这次请求中间做过跨协议转换（两端协议都已知且不同）。
     protocolConverted: boolean;
+    // isTest 标记这是客户端声明的验证/测试请求（T-trace-006）。
+    //
+    // 它必须一路传到界面：这些请求被画像默认剔除（不污染成功率与延迟分布），
+    // 所以"我在日志里看到它、却在统计里找不到它"是**预期行为**——
+    // 界面不标出来，这个预期就变成了让人反复查的疑点。
+    isTest: boolean;
     apiKeyName: string;
     error: string;
     // attemptChain 是每一轮尝试的明细链（T-trace-001），按轮次升序；老数据为空数组。
@@ -218,6 +224,9 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
             && source.target_protocol !== 0
             && clientProtocol !== source.target_protocol,
         apiKeyName: source.api_key_name || '',
+        // 只有显式 true 才算测试请求：老数据、非测试流量、字段缺失都必须落到 false，
+        // 否则默认把真实流量标成"测试"，比不标更糟（统计与标记会各说一套）。
+        isTest: source.is_test === true,
         error: source.error || '',
         // 尝试链: 实时快照是 attempt_chain（进程内 RequestState），历史行是 attempt_detail（落库字段，
         // 见 model.RelayLog —— 用 AttemptDetail 是为了与 RelayLog.Attempts 计数区分开）。

@@ -3,6 +3,7 @@ import { AlarmClock, Clock, Hourglass, TrendingDown } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import { useAnalyticsLatency, type LatencyQuantiles } from '@/api/analytics';
 import { formatCount } from '@/lib/utils';
+import { SampleNote } from '@/components/sample-note';
 
 // T-insight-004 首页「延迟分布」区块。
 //
@@ -215,6 +216,7 @@ export function LatencyDistributionPanel() {
                     <span className="text-sm font-medium">{t('histogramTitle')}</span>
                     <span className="text-[11px] text-muted-foreground">{t('histogramNote')}</span>
                 </div>
+                <SampleNote sample={data.sample} className="mt-1 text-[11px] text-muted-foreground" />
                 <div className="space-y-1.5">
                     {histogram.buckets.map((bucket, index) => (
                         <div key={`${bucket.upper_ms}-${index}`} className="flex items-center gap-3">

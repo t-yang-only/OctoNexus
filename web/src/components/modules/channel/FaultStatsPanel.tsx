@@ -1,6 +1,7 @@
 import { useTranslations } from 'use-intl';
 
 import { useRelayFaultStats } from '@/api/log';
+import { SampleNote } from '@/components/sample-note';
 
 // FaultStatsPanel 展示真实通过率：把「渠道故障」与「请求问题」分开。
 //
@@ -43,6 +44,8 @@ export function FaultStatsPanel() {
         <div className="mt-2 space-y-2 border-t border-destructive/20 pt-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 <span className="text-muted-foreground">{t('window', { total })}</span>
+                {/* 样本账：这个通过率已经把测试请求剔出去了，不说清楚就会与日志条数对不上。 */}
+                <SampleNote sample={data.sample} />
                 <span>
                     {t('experience')}
                     {' '}

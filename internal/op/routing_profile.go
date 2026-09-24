@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 )
 
@@ -115,6 +114,8 @@ type RoutingStopStat struct {
 //	Σ stops.Count == StopRecorded
 type RoutingProfile struct {
 	Window int64 `json:"window"`
+	// Sample 说明这批样本的来源（窗口原始条数、剔除的测试请求数、是否触限）。
+	Sample RelayLogSampleInfo `json:"sample"`
 
 	// 三态可见性。decision 的空值同时来自三种完全不同的原因，必须分开数：
 	// 这个字段上线之前的历史行、非选路路径（如自定义协议）没写、以及真漏标。
@@ -159,22 +160,14 @@ var knownDecisionFields = []string{"mode", "tier", "reason", "slot", "attempt"}
 // 与 AnalyticsOverviewStats 一样读明细、在 Go 侧聚合（不写 SQL 聚合），
 // 差异只在聚合维度：那边按模型/客户端/渠道切片，这里按"谁决定的""怎么停的"切片。
 func RoutingProfileStats(ctx context.Context, window int) (RoutingProfile, error) {
-	if window <= 0 {
-		window = 500
-	}
-	if window > 20000 {
-		window = 20000
-	}
-	conn := db.GetDB()
-	var rows []model.RelayLog
-	if err := conn.WithContext(ctx).
-		Order("id DESC").Limit(window).
-		Find(&rows).Error; err != nil {
+	rows, sample, err := relayLogWindow(ctx, window)
+	if err != nil {
 		return RoutingProfile{}, err
 	}
 
 	out := RoutingProfile{
-		Window:           int64(len(rows)),
+		Window:           sample.Samples,
+		Sample:           sample,
 		Reasons:          []RoutingReasonStat{},
 		Modes:            []RoutingModeStat{},
 		Tiers:            []RoutingTierStat{},

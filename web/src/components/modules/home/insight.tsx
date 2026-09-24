@@ -19,6 +19,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { AnimatedNumber } from '@/components/common/AnimatedNumber';
 import { formatCount, formatMoney } from '@/lib/utils';
 import { useTheme } from '@/provider/theme';
+import { SampleNote } from '@/components/sample-note';
 
 // 后端把尾部模型并进这个键，前端按它显示本地化的「其他」。
 const OTHER_KEY = '__other__';
@@ -506,6 +507,7 @@ export function RequestInsight() {
                         {data.truncated ? t('truncatedHint') : t('completeHint')}
                     </span>
                 </div>
+                <SampleNote sample={data.sample} className="mt-1 text-[11px] text-muted-foreground" />
                 <div className="mt-2 flex flex-wrap gap-2">
                     {faults.map((fault) => (
                         <span

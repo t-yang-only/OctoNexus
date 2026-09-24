@@ -274,6 +274,17 @@ function LogDetail({ log, now }: { log: RelayLogOverview; now: number }) {
                         {t('log.modelMismatch')}
                     </Badge>
                 )}
+                {logDisplay.isTest && (
+                    // 与卡片同一标记、同一语义（T-trace-006）。弹窗是排查时看得最仔细的地方，
+                    // 也是"为什么这条没进统计"最可能被追问的地方。
+                    <Badge
+                        variant="secondary"
+                        className="text-xs px-1.5 py-0 border border-dashed text-muted-foreground"
+                        title={t('isTestHint')}
+                    >
+                        {t('isTest')}
+                    </Badge>
+                )}
             </MorphingDialogTitle>
 
             <MorphingDialogDescription className="flex-1 min-h-0">
@@ -536,6 +547,17 @@ function LogCardBody({ log }: { log: RelayLogOverview }) {
                                 <span className="shrink-0 inline-flex" title={t('protocolConvertedHint')}>
                                     <ArrowLeftRight aria-hidden="true" className="size-3 text-amber-500" />
                                 </span>
+                            )}
+                            {display.isTest && (
+                                // 测试请求标记（T-trace-006）：默认统计里看不到这些请求，
+                                // 卡片上必须自己说出来，否则"发了一条却没进统计"会被当成丢数据。
+                                <Badge
+                                    variant="secondary"
+                                    className="shrink-0 text-xs px-1.5 py-0 border border-dashed text-muted-foreground"
+                                    title={t('isTestHint')}
+                                >
+                                    {t('isTest')}
+                                </Badge>
                             )}
                             <Badge
                                 variant="secondary"

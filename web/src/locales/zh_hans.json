@@ -155,6 +155,7 @@
     }
   },
   "common": {
+    "sampleNote": "已剔除 {count} 条测试请求（窗口共 {total} 条）",
     "copy": {
       "success": "复制成功",
       "failed": "复制失败",
@@ -1136,6 +1137,8 @@
       "attemptEmpty": "本次请求只打过一个成员",
       "responseStreaming": "上游已响应，流式传输正在进行",
       "reasoningEffortHint": "客户端在请求里指定的思考强度。同一模型在 low/high 档下的输出长度与费用能差好几倍——这一项说明「贵」是上游慢，还是思考强度开高了。",
+      "isTest": "测试",
+      "isTestHint": "这条请求由客户端用 X-Octopus-Test 头声明为验证/测试。总览与画像默认把它剔除 —— 它出现在这里却不出现在统计里是设计如此，不是丢数据。",
       "protocolConvertedHint": "客户端用的协议与上游用的协议不同：这次请求中间做过一次跨协议转换，请求体与响应体都被改写了一遍。",
       "reasoningCharsHint": "响应正文里思考文本的字符数（一个中文算 1 个字）。上游普遍不回报思考 token，这一项是从正文量出来的，因此通常只有它有意义。它是「文本有多长」，与上面的 token 数（「上游说花了多少」）是两个量，同时有值时都要看。",
       "reasoningTokensHint": "上游在 usage 里回报的思考 token 数。只在确有值时才显示：空着表示上游没报这个字段，不代表这次没有思考。"
@@ -1177,6 +1180,11 @@
       "faultTransient": "可恢复",
       "faultNone": "未分类",
       "faultKindHint": "归因由后端在失败发生时就地判定，前端只做展示与筛选；计数只统计失败的请求，「未分类」含升级前的历史记录。",
+      "testKind": "请求来源",
+      "testAll": "全部",
+      "testReal": "真实",
+      "testOnly": "测试",
+      "testHint": "「测试」是客户端用 X-Octopus-Test 头主动声明的验证请求。总览与画像默认剔除它们，所以这里看得到、统计里看不到是设计如此。",
       "status": "状态",
       "all": "全部",
       "fields": "卡片字段",
