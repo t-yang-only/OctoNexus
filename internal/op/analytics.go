@@ -66,6 +66,16 @@ type AnalyticsBucket struct {
 	// 只保留窗口内的前若干模型（见 relayAnalyticsTopModels），其余并进 "__other__"，
 	// 否则一个几百模型的实例会把图例撑爆、每根柱子变成几百个看不见的碎片。
 	ByModel map[string]int64 `json:"by_model"`
+	// ByModelCost 是桶内按模型拆分的花费，与 ByModel 同构。
+	//
+	// 为什么 token 与成本要各拆一份、不能用同一张图：两者回答的问题不同 ——
+	// "谁在吃 token" 看的是量，"钱花在哪" 看的是账。同一个模型可能量很大但因为
+	// 缓存命中而便宜，也可能量很小但单价高。只给 token 拆分，成本就只能看到一个总数，
+	// 而这恰恰是"这钱该不该花"最需要的那一维。
+	//
+	// 与 ByModel 用同一套收敛（尾部并进 "__other__"），否则切到成本口径时
+	// 总量会对不上（图上的柱子加起来不等于 Bucket.Cost）。
+	ByModelCost map[string]float64 `json:"by_model_cost"`
 }
 
 // AnalyticsOverview 是"模型调用分析"的总览。
@@ -198,7 +208,11 @@ func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview,
 		key := hourStart.Unix()
 		bucket, ok := buckets[key]
 		if !ok {
-			bucket = &AnalyticsBucket{BucketAt: key, ByModel: map[string]int64{}}
+			bucket = &AnalyticsBucket{
+				BucketAt:    key,
+				ByModel:     map[string]int64{},
+				ByModelCost: map[string]float64{},
+			}
 			buckets[key] = bucket
 		}
 		bucket.Requests++
@@ -208,6 +222,7 @@ func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview,
 		bucket.Tokens += row.PromptTokens + row.CompletionToks
 		bucket.Cost += row.Cost
 		bucket.ByModel[modelName] += row.PromptTokens + row.CompletionToks
+		bucket.ByModelCost[modelName] += row.Cost
 	}
 
 	finishAnalyticsOverview(&out, byModel, buckets, acc)
@@ -337,7 +352,8 @@ func sortedAnalyticsKeys(buckets map[int64]*AnalyticsBucket) []int64 {
 // rollUpAnalyticsBuckets 把整点桶按自然日合并。
 //
 // 只在整点桶跨度达到 24 小时时调用：此时继续按整点画图，横轴上会连续出现
-// 二十几个同名日期刻度。合并时 by_model 一并累加，保证堆叠图的总量仍对得上。
+// 二十几个同名日期刻度。合并时两个按模型拆分的 map 都要一并累加，
+// 保证堆叠图在任一维度（token / 成本）上的总量都仍对得上。
 func rollUpAnalyticsBuckets(raw map[int64]*AnalyticsBucket, rawKeys []int64) map[int64]*AnalyticsBucket {
 	rolled := make(map[int64]*AnalyticsBucket, len(raw))
 	for _, k := range rawKeys {
@@ -347,7 +363,11 @@ func rollUpAnalyticsBuckets(raw map[int64]*AnalyticsBucket, rawKeys []int64) map
 		dayKey := dayStart.Unix()
 		target, ok := rolled[dayKey]
 		if !ok {
-			target = &AnalyticsBucket{BucketAt: dayKey, ByModel: make(map[string]int64, len(src.ByModel))}
+			target = &AnalyticsBucket{
+				BucketAt:    dayKey,
+				ByModel:     make(map[string]int64, len(src.ByModel)),
+				ByModelCost: make(map[string]float64, len(src.ByModelCost)),
+			}
 			rolled[dayKey] = target
 		}
 		target.Requests += src.Requests
@@ -356,6 +376,9 @@ func rollUpAnalyticsBuckets(raw map[int64]*AnalyticsBucket, rawKeys []int64) map
 		target.Cost += src.Cost
 		for name, tokens := range src.ByModel {
 			target.ByModel[name] += tokens
+		}
+		for name, cost := range src.ByModelCost {
+			target.ByModelCost[name] += cost
 		}
 	}
 	return rolled
@@ -366,6 +389,10 @@ func rollUpAnalyticsBuckets(raw map[int64]*AnalyticsBucket, rawKeys []int64) map
 // 为什么必须收敛：实例里可能有几百个模型（本项目实测 358 个），
 // 允许全部上色会让图例不可读、每根柱子碎成几百条看不见的线，图反而失去信息。
 // 合并而不是丢弃：尾部模型的总量仍然要在图上体现，否则"总量对不上"。
+//
+// **token 与成本两张 map 必须走同一套 keep 集合**：否则切到成本口径时，
+// 被保留的模型集合与 token 口径不一致，同一根柱子在两个口径下的构成会不一样，
+// 而两条口径的合计又都声称等于同一个桶的总量 —— 那是最难查的一类不一致。
 func trimAnalyticsSeries(series []AnalyticsBucket, models []ModelUsageStat) {
 	keep := make(map[string]bool, relayAnalyticsTopModels)
 	for i, stat := range models {
@@ -375,18 +402,32 @@ func trimAnalyticsSeries(series []AnalyticsBucket, models []ModelUsageStat) {
 		keep[stat.Model] = true
 	}
 	for i := range series {
-		merged := make(map[string]int64, len(keep)+1)
-		var other int64
-		for name, tokens := range series[i].ByModel {
+		bucket := &series[i]
+		mergedTokens := make(map[string]int64, len(keep)+1)
+		mergedCost := make(map[string]float64, len(keep)+1)
+		var otherTokens int64
+		var otherCost float64
+		for name, tokens := range bucket.ByModel {
 			if keep[name] {
-				merged[name] = tokens
+				mergedTokens[name] = tokens
 				continue
 			}
-			other += tokens
+			otherTokens += tokens
 		}
-		if other > 0 {
-			merged[otherModelKey] = other
+		for name, cost := range bucket.ByModelCost {
+			if keep[name] {
+				mergedCost[name] = cost
+				continue
+			}
+			otherCost += cost
 		}
-		series[i].ByModel = merged
+		if otherTokens > 0 {
+			mergedTokens[otherModelKey] = otherTokens
+		}
+		if otherCost > 0 {
+			mergedCost[otherModelKey] = otherCost
+		}
+		bucket.ByModel = mergedTokens
+		bucket.ByModelCost = mergedCost
 	}
 }

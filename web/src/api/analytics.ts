@@ -42,6 +42,14 @@ export interface AnalyticsBucket {
     cost: number;
     /** 桶内按模型拆分的 token，堆叠图每个色块一项；尾部模型并进 "__other__"。 */
     by_model: Record<string, number>;
+    /**
+     * 桶内按模型拆分的花费，与 by_model 同构（同一套尾部收敛）。
+     *
+     * 与 token 分开是因为两者回答不同的问题：「谁在吃 token」看的是量，
+     * 「钱花在哪」看的是账 —— 同一个模型可能量很大但因为缓存命中而便宜，
+     * 也可能量很小但单价高。只给 token 拆分的话，成本只能看到一个总数。
+     */
+    by_model_cost: Record<string, number>;
 }
 
 export interface AnalyticsOverview {

@@ -3,6 +3,7 @@ package op
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -488,5 +489,176 @@ func TestAnalyticsRollsUpToDailyBuckets(t *testing.T) {
 	if out.SpanSeconds < wantSpan-1 || out.SpanSeconds > wantSpan+1 {
 		t.Fatalf("跨度应取真实首尾请求时间差（%.0fs），实得 %.0fs（用日桶键会得到 176400s）",
 			wantSpan, out.SpanSeconds)
+	}
+}
+
+// TestAnalyticsByModelCostConservesTotal 桶内按模型拆分的成本合计必须等于该桶的总成本。
+//
+// 守恒是这一维度的生命线：堆叠图把每个色块加起来的和，必须与"这个小时花了多少钱"
+// 是同一个数。少了任何一段（比如尾部模型被丢掉而不是并进 __other__），
+// 图上看不出异常，但"钱花在哪"的答案就永久缺了一块。
+func TestAnalyticsByModelCostConservesTotal(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	costs := []float64{0.5, 1.25, 2.0}
+	for i, cost := range costs {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status:    "success",
+			modelName: fmt.Sprintf("m-%d", i),
+			startedAt: base.Add(time.Duration(i) * time.Minute),
+			prompt:    100,
+			cost:      cost,
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Series) != 1 {
+		t.Fatalf("三条请求在同一小时内，应只有 1 个桶，实得 %d", len(out.Series))
+	}
+	bucket := out.Series[0]
+	if math.Abs(bucket.Cost-3.75) > 1e-9 {
+		t.Fatalf("桶总成本应为 3.75，实得 %v", bucket.Cost)
+	}
+	var sum float64
+	for _, cost := range bucket.ByModelCost {
+		sum += cost
+	}
+	if math.Abs(sum-bucket.Cost) > 1e-9 {
+		t.Fatalf("按模型拆分的成本合计 %v 不等于桶总成本 %v（守恒被破坏）", sum, bucket.Cost)
+	}
+	if math.Abs(out.TotalCost-3.75) > 1e-9 {
+		t.Fatalf("窗口总成本应为 3.75，实得 %v", out.TotalCost)
+	}
+	// 均值跟着总量走：三个请求 3.75，均值必须是 1.25。
+	if math.Abs(out.AvgCostPerRequest-1.25) > 1e-9 {
+		t.Fatalf("平均每请求成本应为 1.25，实得 %v", out.AvgCostPerRequest)
+	}
+}
+
+// TestAnalyticsByModelCostMergesTailModels 尾部模型的成本必须并进 __other__ 而不是丢弃。
+//
+// 与 token 维度的收敛是两个独立的实现点：只给 token 做收敛、成本那边直接丢掉尾部，
+// 会让成本柱子在模型多的时候凭空矮一截 —— 而代码看起来"两边都处理了"。
+func TestAnalyticsByModelCostMergesTailModels(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	const n = 12
+	for i := 0; i < n; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status:    "success",
+			modelName: fmt.Sprintf("model-%02d", i),
+			startedAt: base.Add(time.Duration(i) * time.Second),
+			prompt:    10,
+			cost:      0.1,
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	bucket := out.Series[0]
+	if len(bucket.ByModelCost) > relayAnalyticsTopModels+1 {
+		t.Fatalf("堆叠图成本键应收敛到 %d+1，实得 %d", relayAnalyticsTopModels, len(bucket.ByModelCost))
+	}
+	var sum float64
+	for _, cost := range bucket.ByModelCost {
+		sum += cost
+	}
+	want := float64(n) * 0.1
+	if math.Abs(sum-want) > 1e-9 {
+		t.Fatalf("成本收敛后合计 %v，应为 %v（尾部模型的成本必须并进 %s，不能丢）",
+			sum, want, otherModelKey)
+	}
+	if bucket.ByModelCost[otherModelKey] <= 0 {
+		t.Fatalf("%d 个模型只保留 %d 个，成本里应出现 %s", n, relayAnalyticsTopModels, otherModelKey)
+	}
+}
+
+// TestAnalyticsByModelCostRollsUpDaily 按天聚合时成本拆分同样必须累加。
+//
+// 跨天窗口会走 rollUpAnalyticsBuckets。那里如果只合并 token 不合并成本，
+// 结果是"按天看时成本柱子全空、按小时看时有值"——取决于窗口大小的随机故障。
+func TestAnalyticsByModelCostRollsUpDaily(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	// 两个不同自然日，各两条，全部在同一个模型上。
+	for day := 0; day < 2; day++ {
+		for i := 0; i < 2; i++ {
+			seedAnalyticsLog(t, conn, analyticsLogSeed{
+				status:    "success",
+				modelName: "m-daily",
+				startedAt: base.AddDate(0, 0, day).Add(time.Duration(i) * time.Minute),
+				prompt:    50,
+				cost:      0.25,
+			})
+		}
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Series) != 2 {
+		t.Fatalf("跨两天应聚合出 2 个日桶，实得 %d", len(out.Series))
+	}
+	for _, bucket := range out.Series {
+		if math.Abs(bucket.Cost-0.5) > 1e-9 {
+			t.Fatalf("日桶总成本应为 0.5（两条 0.25），实得 %v", bucket.Cost)
+		}
+		var sum float64
+		for _, cost := range bucket.ByModelCost {
+			sum += cost
+		}
+		if math.Abs(sum-bucket.Cost) > 1e-9 {
+			t.Fatalf("日桶按模型成本合计 %v 不等于总成本 %v（按天聚合时丢了成本）", sum, bucket.Cost)
+		}
+	}
+}
+
+// TestAnalyticsByModelCostSameModelSetAsTokens token 与成本两张拆分表必须覆盖同一批模型。
+//
+// 为什么这条必须单独钉：两张表各有一套 keep 判断时（比如成本那边按成本排序取前 N），
+// 同一根柱子在两个口径下的色块构成会不一样，而两条口径还都声称合计等于桶总量 ——
+// 这种不一致在界面上表现为"切一下口径，图例就变了"，极难定位到根因。
+//
+// __other__ 允许不对称：某个尾部模型 token 为正但成本恰为 0 时，
+// token 那边会合并出 __other__ 而成本那边不会（0 不值得建键）。
+func TestAnalyticsByModelCostSameModelSetAsTokens(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	const n = 12
+	for i := 0; i < n; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status:    "success",
+			modelName: fmt.Sprintf("model-%02d", i),
+			startedAt: base.Add(time.Duration(i) * time.Second),
+			prompt:    10,
+			cost:      float64(i+1) * 0.01,
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	for _, bucket := range out.Series {
+		onlyTokens := map[string]bool{}
+		for name := range bucket.ByModel {
+			if name != otherModelKey {
+				onlyTokens[name] = true
+			}
+		}
+		for name := range bucket.ByModelCost {
+			if name != otherModelKey {
+				delete(onlyTokens, name)
+			}
+		}
+		if len(onlyTokens) > 0 {
+			t.Fatalf("以下模型只在 token 拆分里、不在成本拆分里：%v（两张表用了不同的保留集合）", onlyTokens)
+		}
 	}
 }
