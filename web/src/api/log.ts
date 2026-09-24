@@ -32,6 +32,10 @@ export interface RelayHistoryItem {
     target_channel: string;
     target_model: string;
     target_protocol: number;
+    // request_protocol 是客户端进来时用的协议位（T-trace-004），取值同 model.Protocol。
+    // 与 target_protocol 成对看：相同=原样转发，不同=中间做了跨协议转换。
+    // 升级前的存量行为 0（未记录），此时界面显示"未知"而不是拿上游协议顶上。
+    request_protocol: number;
     // reported_model 是上游响应体里回报的模型名（T-verify-001）。
     // 与 target_model 的区别是关键：后者是「我们请求了什么」，前者是「上游自称用了什么」。
     // 空串表示上游没回报该字段（常见现象），此时不判定。
@@ -184,6 +188,10 @@ export interface RelayLogOverview {
     target_channel: string;
     target_model: string;
     target_protocol: number;
+    // request_protocol 与 RelayHistoryItem 同义（T-trace-004）。
+    // 实时快照用顶层的 protocol 表达同一件事（RequestState.Protocol），落库行才用本字段；
+    // 这里声明成可选正是为了让两种来源同构，取值时由 display.ts 按 live 分支选一个。
+    request_protocol?: number;
     // reported_model / model_mismatch 与 RelayHistoryItem 同义（T-verify-001）：
     // 前者是上游自称用了什么，后者标记它与请求的模型不一致。实时快照同样带这两个字段。
     reported_model?: string;

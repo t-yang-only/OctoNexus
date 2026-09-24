@@ -59,6 +59,8 @@ export interface LogDisplayFields {
     modelMismatch: boolean;
     clientProtocol: number;
     targetProtocol: number;
+    // protocolConverted 表示这次请求中间做过跨协议转换（两端协议都已知且不同）。
+    protocolConverted: boolean;
     apiKeyName: string;
     error: string;
     // attemptChain 是每一轮尝试的明细链（T-trace-001），按轮次升序；老数据为空数组。
@@ -104,6 +106,12 @@ function parseTime(value: string | undefined): number {
 
 export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.now()): LogDisplayFields {
     const live = isLiveOverview(source);
+    // 客户端入站协议（T-trace-004）：实时快照在顶层 protocol，落库历史行在 request_protocol。
+    //
+    // 在落库字段补齐之前这里只能退回 target_protocol —— 等于拿"上游吃什么协议"冒充
+    // "客户端发的是什么协议"，于是每条记录看起来都是原样转发。现在两者分开了：
+    // 存量行取到 0，界面显示未知，而不是给出一个看起来很确凿的错答案。
+    const clientProtocol = live ? source.protocol : (source.request_protocol ?? 0);
     const startedAtMs = parseTime(source.started_at);
     const status = source.status;
     const running = status === 'running' || status === 'committed';
@@ -187,8 +195,15 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
         reportedModel,
         modelMismatch,
         actualModel: reportedModel || targetModel || source.model || '',
-        clientProtocol: live ? source.protocol : source.target_protocol,
+        clientProtocol,
         targetProtocol: source.target_protocol,
+        // 两端协议都已知且不同 → 这次做了跨协议转换（T-trace-004）。
+        // 任一为 0 表示该侧没有信息（升级前的存量行、systemone 这类自定义形态），此时不做判断：
+        // 把"不知道"当成"转换过"会给一批正常请求打上错误标记，比不标更糟。
+        protocolConverted:
+            clientProtocol !== 0
+            && source.target_protocol !== 0
+            && clientProtocol !== source.target_protocol,
         apiKeyName: source.api_key_name || '',
         error: source.error || '',
         // 尝试链: 实时快照是 attempt_chain（进程内 RequestState），历史行是 attempt_detail（落库字段，

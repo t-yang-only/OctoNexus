@@ -1038,6 +1038,7 @@
       "attemptEmpty": "本次请求只打过一个成员",
       "responseStreaming": "上游已响应，流式传输正在进行",
       "reasoningEffortHint": "客户端在请求里指定的思考强度。同一模型在 low/high 档下的输出长度与费用能差好几倍——这一项说明「贵」是上游慢，还是思考强度开高了。",
+      "protocolConvertedHint": "客户端用的协议与上游用的协议不同：这次请求中间做过一次跨协议转换，请求体与响应体都被改写了一遍。",
       "reasoningTokensHint": "上游在 usage 里回报的思考 token 数。只在确有值时才显示：空着表示上游没报这个字段，不代表这次没有思考。"
     },
 "attemptStats": {

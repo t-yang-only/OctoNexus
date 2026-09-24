@@ -14,6 +14,16 @@ type RelayLog struct {
 	TargetChannel  string `json:"target_channel" gorm:"index"`
 	TargetModel    string `json:"target_model"`
 	TargetProtocol int    `json:"target_protocol"`
+	// RequestProtocol 是**客户端进来时用的协议位**（T-trace-004），取值同 model.Protocol。
+	//
+	// 与 TargetProtocol 成对看才有意义：两者相同表示这次请求原样转发，不同则表示中间做了
+	// 跨协议转换（例如客户端发 Anthropic Messages、上游只吃 OpenAI Chat）。
+	//
+	// 在这个字段落库之前，客户端协议只活在进程内 RequestState 里：实时看板能看到入站协议，
+	// 而**历史日志页那一栏永远是空的** —— 于是"这次转换过没有"这个最常被追问的问题，
+	// 事后一条都答不上来（前端 display.ts 当时只能拿 target_protocol 顶上，等于用上游协议
+	// 冒充客户端协议）。0 表示未记录（升级前的存量行）或非标准形态（/v1/systemone）。
+	RequestProtocol int `json:"request_protocol"`
 	// ReportedModel 是**上游响应体里回报的 model 字段**（T-verify-001）。
 	//
 	// 与 TargetModel 的区别是关键：TargetModel 是「我们发出去的名字」，代表不了上游实际用了什么；

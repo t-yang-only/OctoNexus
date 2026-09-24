@@ -194,6 +194,9 @@ func recordSystemOneLog(c *gin.Context, model_, channel, targetModel string, sta
 		PromptTokens:   inTokens,
 		CompletionToks: outTokens,
 		Error:          truncateText(errText, 500),
+		// 两个协议位都留 0（T-trace-004）：systemone 是自定义形态，既不属于三种标准协议，
+		// 也不做协议转换（body 原样透传）。在这里写明是**有意的留空**而不是漏填 ——
+		// 日志页会把「入站协议=上游协议=无」显示成"没有协议信息"，那正是它的事实。
 	})
 }
 

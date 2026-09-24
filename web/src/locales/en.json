@@ -1038,6 +1038,7 @@
       "attemptEmpty": "This request hit a single member",
       "responseStreaming": "Upstream responded; streaming is in progress",
       "reasoningEffortHint": "The reasoning effort the client asked for. The same model at low vs high can differ several times over in output length and cost — this tells you whether an expensive request was upstream slowness or a high effort setting.",
+      "protocolConvertedHint": "The client protocol differs from the upstream one: this request was converted across protocols, so both the request and response bodies were rewritten.",
       "reasoningTokensHint": "Reasoning tokens the upstream reported in usage. Shown only when a value exists: blank means the upstream does not report this field, not that no reasoning happened."
     },
 "attemptStats": {

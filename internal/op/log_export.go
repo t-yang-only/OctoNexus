@@ -29,7 +29,7 @@ const RelayLogExportMaxRows = 200000
 // 第一列给**日志行主键**而不是请求 ID: 一个客户端请求可能留多行(重试/多轮各一行), 请求 ID 会重复,
 // 只有行主键能唯一定位一行, 下游做去重/回查时不必再猜。
 var relayLogExportHeader = []string{
-	"日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "上游自称模型", "模型一致", "目标渠道", "上游协议", "首字节(ms)", "耗时(ms)", "上游轮次", "判定理由",
+	"日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "上游自称模型", "模型一致", "目标渠道", "入站协议", "上游协议", "协议转换", "首字节(ms)", "耗时(ms)", "上游轮次", "判定理由",
 	"输入tokens", "缓存命中tokens", "输出tokens", "费用", "API Key", "错误", "尝试明细",
 }
 
@@ -101,7 +101,9 @@ func relayLogExportRow(entry model.RelayLog) []string {
 		entry.ReportedModel,
 		modelMatchLabel(entry.ReportedModel, entry.ModelMismatch),
 		entry.TargetChannel,
+		protocolLabel(entry.RequestProtocol),
 		protocolLabel(entry.TargetProtocol),
+		protocolConvertLabel(entry.RequestProtocol, entry.TargetProtocol),
 		firstByte,
 		strconv.FormatInt(entry.DurationMs, 10),
 		strconv.Itoa(entry.Attempts),
@@ -141,6 +143,26 @@ func attemptDetailLabel(entry model.RelayLog) string {
 		joined = "…(前段已截断) " + joined
 	}
 	return joined
+}
+
+// protocolConvertLabel 回答导出表格里最常被追问的一句话：这次请求中间做过跨协议转换吗？（T-trace-004）
+//
+// 三种取值各自对应一种事实，不能用同一个字表示：
+//
+//	"是"     两端协议都已知且不同 —— 中间确实做了一次跨协议转换
+//	"否"     两端协议都已知且相同 —— 原样转发
+//	"未知"   任一侧为 0（升级前的存量行、systemone 这类自定义形态）—— 没有信息，不做判断
+//
+// 把"未知"单独写出来而不是留空，是因为空单元格看起来总是良性的：读表的人会把
+// 「不知道」当成「没转换」，而这恰恰是升级前那批数据唯一诚实的表述。
+func protocolConvertLabel(requestProtocol, targetProtocol int) string {
+	if requestProtocol == 0 || targetProtocol == 0 {
+		return "未知"
+	}
+	if requestProtocol == targetProtocol {
+		return "否"
+	}
+	return "是"
 }
 
 // protocolLabel 把协议位掩码写成可读名: 导出给人和表格工具看, 数字位掩码没有意义。

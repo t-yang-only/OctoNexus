@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, Brain, BrainCircuit, Clock, Cpu, Database, DollarSign, Gauge, KeyRound, Loader2, Percent, Repeat2, Route, Square, Zap } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, ArrowLeftRight, ArrowRight, ArrowUpFromLine, Brain, BrainCircuit, Clock, Cpu, Database, DollarSign, Gauge, KeyRound, Loader2, Percent, Repeat2, Route, Square, Zap } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
@@ -244,6 +244,13 @@ function LogDetail({ log, now }: { log: RelayLogOverview; now: number }) {
                     ? <Loader2 className={cn('size-3.5 animate-spin', log.status === 'committed' ? 'text-green-500' : log.round > 1 ? 'text-red-500' : 'text-muted-foreground/50')} />
                     : <ArrowRight className="size-3.5 text-muted-foreground/50" />}
                 <span className="text-xs text-muted-foreground/70">{PROTOCOL_LABELS[log.target_protocol] ?? '-'}</span>
+                {logDisplay.protocolConverted && (
+                    // 与卡片上同一标记、同一语义（T-trace-004）。弹窗是排查时看得最仔细的地方，
+                    // 这里不能只有卡片有标记：两侧协议不同时，用户正是在弹窗里追问"到底转换了没有"。
+                    <span className="shrink-0 inline-flex" title={t('protocolConvertedHint')}>
+                        <ArrowLeftRight aria-hidden="true" className="size-3 text-amber-500" />
+                    </span>
+                )}
                 <Badge
                     variant="secondary"
                     className="text-xs px-1.5 py-0"
@@ -481,7 +488,11 @@ function LogCardBody({ log }: { log: RelayLogOverview }) {
     const t = useTranslations('log.card');
     const { isOpen } = useMorphingDialog();
     const [now, setNow] = useState(() => Date.now());
-    const actualModel = resolveLogDisplay(log).actualModel;
+    const display = resolveLogDisplay(log);
+    const actualModel = display.actualModel;
+    // protocolConverted 为真时，卡片上的「入站协议 → 上游协议」不是一个装饰性的箭头，
+    // 而是真的发生过一次跨协议转换（T-trace-004）。两者相同时不显示任何额外标记。
+    const protocolConverted = display.protocolConverted;
     const { Icon, className: iconClassName, color: brandColor } = getModelIcon(actualModel);
     const requestRunning = log.status === 'running' || log.status === 'committed';
     const requestFailed = log.status === 'failed' || log.status === 'canceled';
@@ -514,6 +525,14 @@ function LogCardBody({ log }: { log: RelayLogOverview }) {
                                 ? <Loader2 className={cn('size-3.5 shrink-0 animate-spin', log.status === 'committed' ? 'text-green-500' : log.round > 1 ? 'text-red-500' : 'text-muted-foreground/50')} />
                                 : <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />}
                             <span className="shrink-0 text-xs text-muted-foreground/70">{PROTOCOL_LABELS[log.target_protocol] ?? '-'}</span>
+                            {protocolConverted && (
+                                // 跨协议转换的可见标记（T-trace-004）：两侧标签不同本身只是"看着不一样"，
+                                // 这个图标把语义说实——中间确实换过一次协议。
+                                // 用 span 承载 title（SVG 元素上的 title 属性不产生浏览器提示，得用宿主元素）。
+                                <span className="shrink-0 inline-flex" title={t('protocolConvertedHint')}>
+                                    <ArrowLeftRight aria-hidden="true" className="size-3 text-amber-500" />
+                                </span>
+                            )}
                             <Badge
                                 variant="secondary"
                                 className="shrink-0 text-xs px-1.5 py-0"

@@ -1038,6 +1038,7 @@
       "attemptEmpty": "本次請求只打過一個成員",
       "responseStreaming": "上游已回應，串流傳輸正在進行",
       "reasoningEffortHint": "用戶端在請求裡指定的思考強度。同一模型在 low/high 檔下的輸出長度與費用好幾倍差距——這一項說明「貴」是上游慢，還是思考強度開高了。",
+      "protocolConvertedHint": "客戶端用的協定與上游用的協定不同：這次請求中間做過一次跨協定轉換，請求體與回應體都被改寫了一遍。",
       "reasoningTokensHint": "上游在 usage 裡回報的思考 token 數。只在確有值時才顯示：空著表示上游沒報這個欄位，不代表這次沒有思考。"
     },
 "attemptStats": {
