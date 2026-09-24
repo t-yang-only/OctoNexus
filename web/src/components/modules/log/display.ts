@@ -81,6 +81,16 @@ export interface LogDisplayFields {
     // 0 表示**上游没报该字段**（非推理模型、未实现该字段的站点都很常见），
     // 不能读作"这次没有思考"—— 界面据此显示占位而不是 0。
     reasoningTokens: number;
+    // reasoningChars 是响应正文里思考文本的字符数（T-insight-005）。
+    //
+    // 存在的理由：上游普遍不报 reasoning_tokens（生产实测 122 行里 0 条有值），
+    // 字符数是从响应正文量出来的、唯一不依赖上游自觉的"思考有多长"。
+    //
+    // 0 表示响应里没有思考文本（非思考模型），或该行是升级前的存量数据。
+    // 两种情形在界面上都不显示这一项（与 reasoningTokens 同款处理），
+    // 因此不必再引入"取不到"的第三态 —— 后端该列是非指针 int，
+    // 存量行的 NULL 读回来也是 0，做了区分也传不到前端。
+    reasoningChars: number;
     // tps 是输出速度（token/秒）。分母取整段耗时（含首字等待），与卡片上的"总耗时"
     // 同一口径：若只除以生成时间，会把等待上游排队的时间从速度里悄悄抹掉。
     tps: number;
@@ -153,6 +163,9 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
     const reasoningTokens = live
         ? (source.usage.completion_tokens_details?.reasoning_tokens ?? 0)
         : (source.reasoning_tokens ?? 0);
+    // 思考字数：历史行才有（实时快照不携带，见 api/log.ts 的说明），
+    // 进行中的请求读到的 0 表示"还没有这个数"。
+    const reasoningChars = live ? 0 : (source.reasoning_chars ?? 0);
 
     const targetModel = source.target_model || '';
     // 上游回报的模型名：实时快照与历史行同名字段，故两条路径共用一次读取。
@@ -214,6 +227,7 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
         stopReason: source.stop_reason ?? '',
         reasoningEffort,
         reasoningTokens,
+        reasoningChars,
         // TPS 与缓存命中率是纯派生量，在解析层算一次，避免各卡片各写一份除法
         // （分母口径稍有出入，同一个请求在两处就会显示成两个数）。
         tps: durationMs > 0 ? completionTokens / (durationMs / 1000) : 0,

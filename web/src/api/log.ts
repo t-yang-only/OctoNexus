@@ -75,9 +75,12 @@ export interface RelayHistoryItem {
     stop_reason?: string;
     // reasoning_effort 是客户端指定的思考强度（T-insight-001）；空串表示没指定。
     // reasoning_tokens 是上游回报的思考 token 数；0 表示上游没报该字段。
-    // 两者一起回答"这条请求为什么这么慢、这么贵"：强度是原因，token 数是结果。
+    // reasoning_chars 是响应正文里思考文本的字符数（T-insight-005）：上游普遍不报
+    // token（生产实测一条都没有），此时字符数是唯一能说明"思考有多长"的量。
+    // 两者各记各的、不互斥，界面按各自有无分别展示。
     reasoning_effort?: string;
     reasoning_tokens?: number;
+    reasoning_chars?: number;
     // attempt_detail 是每一轮尝试的明细链（T-trace-001），按轮次顺序。
     //
     // 回答的是既有字段回答不了的问题: Attempts 只说"试了几次"、TargetChannel 只说"最后用了谁"，
@@ -203,6 +206,10 @@ export interface RelayLogOverview {
     stop_reason?: string;
     // reasoning_effort 同 RelayHistoryItem：客户端指定的思考强度（T-insight-001）。
     // 实时快照只带它；思考 token 数在嵌套的 usage.completion_tokens_details 里。
+    //
+    // **这里刻意没有 reasoning_chars**：字符数要遍历聚合后的响应正文，开销只值得在
+    // 请求终态（落库那一刻）付一次，实时流上不重复算。display.ts 对进行中的请求
+    // 读到 0 就当作"还没有这个数"而不显示 —— 这不是字段缺失，是有意的口径。
     reasoning_effort?: string;
     // attempt_chain 是已结束轮次的尝试明细（T-trace-001）。
     //

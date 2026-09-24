@@ -78,9 +78,23 @@ type RelayLog struct {
 	// ReasoningTokens 是上游在 usage 里回报的思考 token 数（确定性值，直接采信）。
 	// 0 表示上游没报该字段 —— 非推理模型、以及不实现该字段的站点都很常见，
 	// 因此 0 不能读作"没有思考"，界面按"未提供"展示。
-	ReasoningTokens int64   `json:"reasoning_tokens"`
-	Cost            float64 `json:"cost"`
-	Error           string  `json:"error"`
+	ReasoningTokens int64 `json:"reasoning_tokens"`
+	// ReasoningChars 是响应正文里思考文本的字符数（UTF-8 rune，一个中文算 1 个字）（T-insight-005）。
+	//
+	// 为什么与 ReasoningTokens 并存而不是互相顶替：上游**绝大多数不回报**思考 token
+	// （生产实测 122 行里 reasoning_tokens > 0 的一条都没有），此时"思考有多长"只能
+	// 从响应正文里的思考文本量出来 —— 这是唯一不依赖上游自觉的度量。
+	//
+	// 两者各记各的，不做"有官方值就不记字符数"的互斥（参考项目那样做会让这个字段的
+	// 分母随上游是否升级而变化，历史序列突然从有值断成全 0）。它们本就不是同一个量：
+	// 字符数是"文本有多长"（进程内确定），token 是"上游说花了多少"（外部事实）。
+	// 也**不拿字符数 ÷ 系数去冒充 token** —— 那个系数依赖语言与分词器，估出来的值
+	// 混进 token 字段后就再也分不清哪条是上游报的、哪条是我们猜的。
+	//
+	// 0 表示响应里没有思考文本（非思考模型、或思考被上游折叠），界面按"无"展示。
+	ReasoningChars int     `json:"reasoning_chars"`
+	Cost           float64 `json:"cost"`
+	Error          string  `json:"error"`
 	// FaultKind 是这次失败的**归因分类**（T-usability-007），空串表示非失败或未分类。
 	//
 	// 取值与 relay 的失败处置口径一一对应（internal/relay/retry.go 的 classifyUpstreamFailure）：

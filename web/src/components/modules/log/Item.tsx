@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { AlertCircle, ArrowDownToLine, ArrowLeftRight, ArrowRight, ArrowUpFromLine, Brain, BrainCircuit, Clock, Cpu, Database, DollarSign, Gauge, KeyRound, Loader2, Percent, Repeat2, Route, Square, Zap } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, ArrowLeftRight, ArrowRight, ArrowUpFromLine, Brain, BrainCircuit, Clock, Cpu, Database, DollarSign, Gauge, KeyRound, Loader2, Percent, Repeat2, Route, Square, Type, Zap } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
@@ -107,6 +107,10 @@ function LogMetrics({ log, now, brandColor, variant }: { log: RelayLogOverview; 
         // 用真值判断会让新字段对老用户静默隐藏，看起来像功能没生效。
         { key: 'reasoningEffort', Icon: Brain, iconClassName: 'size-3.5 shrink-0 text-violet-500', value: display.reasoningEffort, title: t('reasoningEffortHint'), cellClassName: 'col-span-4 md:col-span-1', visible: visibility.reasoningEffort !== false && display.reasoningEffort !== '' },
         { key: 'reasoningTokens', Icon: BrainCircuit, iconClassName: 'size-3.5 shrink-0 text-violet-500', value: display.reasoningTokens.toLocaleString(), title: t('reasoningTokensHint'), cellClassName: 'col-span-3 md:col-span-1', visible: visibility.reasoningTokens !== false && display.reasoningTokens > 0 },
+        // 思考字数（T-insight-005）：上游普遍不报思考 token（生产实测一条都没有），
+        // 这一格是"思考有多长"唯一总有值的度量 —— 从响应正文的思考文本量出来。
+        // 与上一格**并存而不互斥**：token 是上游说的，字数是文本实际长度，两个量各看各的。
+        { key: 'reasoningChars', Icon: Type, iconClassName: 'size-3.5 shrink-0 text-violet-500', value: display.reasoningChars.toLocaleString(), title: t('reasoningCharsHint'), cellClassName: 'col-span-3 md:col-span-1', visible: visibility.reasoningChars !== false && display.reasoningChars > 0 },
     ];
 
     return metrics.filter((metric) => metric.visible).map((metric) => (

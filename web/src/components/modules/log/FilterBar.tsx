@@ -60,6 +60,7 @@ const LOG_FIELD_LABEL_KEYS: Array<{ field: LogFieldName; labelKey: string }> = [
     // 但它们在卡片上仍常常看不见 —— 没指定强度、上游不回报思考 token 时不渲染。
     { field: 'reasoningEffort', labelKey: 'reasoningEffort' },
     { field: 'reasoningTokens', labelKey: 'reasoningTokens' },
+    { field: 'reasoningChars', labelKey: 'reasoningChars' },
 ];
 
 interface LogToolbarProps {

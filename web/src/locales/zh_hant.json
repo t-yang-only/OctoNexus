@@ -1067,6 +1067,7 @@
       "responseStreaming": "上游已回應，串流傳輸正在進行",
       "reasoningEffortHint": "用戶端在請求裡指定的思考強度。同一模型在 low/high 檔下的輸出長度與費用好幾倍差距——這一項說明「貴」是上游慢，還是思考強度開高了。",
       "protocolConvertedHint": "客戶端用的協定與上游用的協定不同：這次請求中間做過一次跨協定轉換，請求體與回應體都被改寫了一遍。",
+      "reasoningCharsHint": "回應正文裡思考文本的字元數（一個中文算 1 個字）。上游普遍不回報思考 token，這一項是從正文量出來的，因此通常只有它有意義。它是「文本有多長」，與上面的 token 數（「上游說花了多少」）是兩個量，同時有值時都要看。",
       "reasoningTokensHint": "上游在 usage 裡回報的思考 token 數。只在確有值時才顯示：空著表示上游沒報這個欄位，不代表這次沒有思考。"
     },
 "attemptStats": {
@@ -1125,6 +1126,7 @@
       "cached": "快取",
       "completion": "輸出",
       "reasoningEffort": "思考強度",
+      "reasoningChars": "思考字數",
       "reasoningTokens": "思考 Tokens"
     },
     "modelMismatch": "模型不一致",

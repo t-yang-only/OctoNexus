@@ -1067,6 +1067,7 @@
       "responseStreaming": "上游已响应，流式传输正在进行",
       "reasoningEffortHint": "客户端在请求里指定的思考强度。同一模型在 low/high 档下的输出长度与费用能差好几倍——这一项说明「贵」是上游慢，还是思考强度开高了。",
       "protocolConvertedHint": "客户端用的协议与上游用的协议不同：这次请求中间做过一次跨协议转换，请求体与响应体都被改写了一遍。",
+      "reasoningCharsHint": "响应正文里思考文本的字符数（一个中文算 1 个字）。上游普遍不回报思考 token，这一项是从正文量出来的，因此通常只有它有意义。它是「文本有多长」，与上面的 token 数（「上游说花了多少」）是两个量，同时有值时都要看。",
       "reasoningTokensHint": "上游在 usage 里回报的思考 token 数。只在确有值时才显示：空着表示上游没报这个字段，不代表这次没有思考。"
     },
 "attemptStats": {
@@ -1125,6 +1126,7 @@
       "cached": "缓存",
       "completion": "输出",
       "reasoningEffort": "思考强度",
+      "reasoningChars": "思考字数",
       "reasoningTokens": "思考 Tokens"
     },
     "modelMismatch": "模型不一致",

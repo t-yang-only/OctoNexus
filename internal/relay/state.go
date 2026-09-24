@@ -523,6 +523,14 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 	if r.Usage.CompletionTokensDetails != nil {
 		reasoningTokens = r.Usage.CompletionTokensDetails.ReasoningTokens
 	}
+	// 思考文本的字符数（T-insight-005）：与上面的 token 是两个独立的量，都落库。
+	// 上游普遍不回报 reasoning_tokens（生产实测 122 行里 0 条有值），
+	// 而响应正文里的思考文本一直在，从它量出的字符数是唯一不依赖上游自觉的度量。
+	//
+	// 在这里算而不是在 markSucceeded 里算：三条终态路径（成功/失败/取消）都汇到这里，
+	// 而它们拿到的 responseBody 都是聚合后的正文 —— 在一处收口才能保证
+	// "失败但上游已经吐了一段思考"这类行也记得到。
+	reasoningChars := reasoningCharsFromBody(r.responseBody)
 	// 归档最后一轮（T-trace-001）: 中间轮在各自的 startRound 里已归档, 这里补上当前轮,
 	// 使 AttemptChain 覆盖 1..Round 的全部轮次。从未打过上游时（Round==0）内部会直接跳过。
 	r.archiveRoundLocked()
@@ -552,6 +560,7 @@ func (r *RequestState) finishLocked(usage *llm.Usage) {
 		// 两者一起说明"这条请求为什么慢/贵"，因此与 token 数落在一起。
 		ReasoningEffort: r.ReasoningEffort,
 		ReasoningTokens: reasoningTokens,
+		ReasoningChars:  reasoningChars,
 		Cost:            r.Cost,
 		Error:           r.Error,
 		FaultKind:       r.FaultKind,

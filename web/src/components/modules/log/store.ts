@@ -16,7 +16,8 @@ export type LogFieldName =
     | 'cached'
     | 'completion'
     | 'reasoningEffort'
-    | 'reasoningTokens';
+    | 'reasoningTokens'
+    | 'reasoningChars';
 
 export type LogFieldVisibility = Record<LogFieldName, boolean>;
 
@@ -40,6 +41,7 @@ export const DEFAULT_LOG_FIELD_VISIBILITY: LogFieldVisibility = {
     completion: true,
     reasoningEffort: true,
     reasoningTokens: true,
+    reasoningChars: true,
 };
 
 interface LogFieldVisibilityState {
