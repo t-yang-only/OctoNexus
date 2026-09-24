@@ -46,6 +46,36 @@ func analyticsOverview(c *gin.Context) {
 	resp.Success(c, stats)
 }
 
+// latencyDistribution T-insight-004 全局延迟分布接口。
+//
+// 与 /overview 的分工：overview 回答"多少量、多少钱、谁在吃 token"，
+// 这里回答"整体有多慢，慢是普遍的还是被少数拖累的"。
+// 两者都挂在同一个 group 上、共用同一套 window 夹取口径。
+func latencyDistribution(c *gin.Context) {
+	window := 500
+	if raw := strings.TrimSpace(c.Query("window")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+			return
+		}
+		window = parsed
+	}
+	if window < 1 {
+		window = 1
+	}
+	if window > 20000 {
+		window = 20000
+	}
+
+	stats, err := op.LatencyDistributionStats(c.Request.Context(), window)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, stats)
+}
+
 func init() {
 	router.NewGroupRouter("/api/v1/analytics").
 		ServeOn(router.ServerAdmin).
@@ -53,5 +83,9 @@ func init() {
 		AddRoute(
 			router.NewRoute("/overview", http.MethodGet).
 				Handle(analyticsOverview),
+		).
+		AddRoute(
+			router.NewRoute("/latency", http.MethodGet).
+				Handle(latencyDistribution),
 		)
 }

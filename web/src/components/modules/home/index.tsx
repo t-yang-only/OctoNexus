@@ -14,6 +14,7 @@ import { Rank } from './rank';
 import { ModelMonitor } from './monitor';
 import { AllocationMonitor } from './allocation';
 import { RequestInsight } from './insight';
+import { LatencyDistributionPanel } from './latency';
 import { useHomeViewStore } from './store';
 
 // HomeSections 汇总首页各统计区块, 屏内正文与分享图舞台共用。
@@ -22,6 +23,10 @@ import { useHomeViewStore } from './store';
 //
 // 请求窗口分析（RequestInsight）随后：它读 relay_logs 明细，专做 ModelMonitor
 // 结构上做不到的三件事（时间线堆叠 / 失败归因 / RPM 与 TPM），因此不是重复区块。
+//
+// 延迟分布（LatencyDistributionPanel）接在请求窗口分析之后：它回答的是另一类问题
+// ——前一块看「多少量、多少钱、失败都归谁」，这一块看「整体有多慢、慢是普遍的还是
+// 被少数拖累的」。项目既有的耗时画像都按渠道/分组切开，没有一面「整体健康线」的镜子。
 function HomeSections() {
     return (
         <div className="@container/home space-y-6">
@@ -32,6 +37,7 @@ function HomeSections() {
             <Rank />
             <ModelMonitor />
             <RequestInsight />
+            <LatencyDistributionPanel />
             <AllocationMonitor />
         </div>
     );
