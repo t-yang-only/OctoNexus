@@ -3,6 +3,7 @@ package op
 import (
 	"bytes"
 	"encoding/csv"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -223,5 +224,277 @@ func TestRelayLogExportCSVEmpty(t *testing.T) {
 	text := buffer.String()
 	if !strings.Contains(text, "请求ID") || strings.Count(strings.TrimSpace(strings.TrimPrefix(text, "\ufeff")), "\n") != 0 {
 		t.Fatalf("empty export = %q, want only the header line", text)
+	}
+}
+
+// TestRelayLogExportDiagnosticColumns 思考与失败诊断五列必须都在导出里，且值落在自己的列上。
+//
+// ## 为什么要有这条判据
+//
+// 这五列是在界面已经能看到之后才补的（T-insight-005 收尾时对表发现的缺口）：
+// 思考强度/思考 token/思考字数在前端日志卡片上有，失败归因与终止原因在前端有
+// 专门的面板，但导出的 23 列里一格都没有 —— 导出是拿去做分析的，
+// 缺了这些列，"哪些渠道出哪类错""思考强度与成本的关系"就都做不了。
+//
+// ## 取值刻意每列不同，专门钉住"列错位"
+//
+// 加列最容易犯的错不是漏值，而是**值写到了相邻列**（尤其 thinking 三列挤在一起时，
+// 把 tokens 与 chars 写反，值看起来都像数字，肉眼审不出来）。
+// 所以这份 fixture 给每列一个可区分的值，逐个断言。
+func TestRelayLogExportDiagnosticColumns(t *testing.T) {
+	conn := openRelayLogTestDB(t)
+	const (
+		effort    = "xhigh"
+		tokens    = int64(150)
+		chars     = 206
+		faultKind = "transient"
+		stopText  = "action=stop;reason=attempt_budget_exhausted;source=config"
+	)
+	relayLogSaveOn(conn, model.RelayLog{
+		RequestID: 41, Status: "failed", Model: "m-diag", TargetChannel: "c1",
+		ReasoningEffort: effort, ReasoningTokens: tokens, ReasoningChars: chars,
+		FaultKind: faultKind, StopReason: stopText, Error: "upstream_error",
+	})
+
+	var buffer bytes.Buffer
+	if _, err := relayLogExportCSVOn(conn, &buffer, model.RelayLogFilter{}); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	records, err := csv.NewReader(bytes.NewReader(buffer.Bytes()[3:])).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records=%d, want header + 1 row", len(records))
+	}
+	header, row := records[0], records[1]
+
+	// 列数与行长度必须一致：少一列会让 CSV 解析整体错位，
+	// 而 Excel 打开时只会把最后一列吃掉，看起来像"数据缺失"。
+	if len(row) != len(header) {
+		t.Fatalf("row has %d fields but header has %d（加列时漏了行构造）", len(row), len(header))
+	}
+
+	col := func(name string) int {
+		for i, h := range header {
+			if h == name {
+				return i
+			}
+		}
+		t.Fatalf("导出表头缺少 %q：%v", name, header)
+		return -1
+	}
+
+	cases := []struct {
+		column string
+		want   string
+		why    string
+	}{
+		{"思考强度", effort, "请求侧原样记录"},
+		{"思考tokens", "150", "上游回报的 token 数"},
+		{"思考字数", "206", "响应正文里思考文本的字符数"},
+		{"失败归因", faultKind, "失败算谁的账（原文枚举）"},
+		{"终止原因", stopText, "哪条规则终止了请求（原始串）"},
+	}
+	for _, c := range cases {
+		got := row[col(c.column)]
+		if got != c.want {
+			t.Errorf("「%s」列 = %q, want %q（%s）", c.column, got, c.want, c.why)
+		}
+	}
+
+	// 三列挤在一起时最容易互相串位，这里再显式钉一次互不相等。
+	if row[col("思考tokens")] == row[col("思考字数")] {
+		t.Errorf("思考 tokens 与思考字数落成了同一个值，两列可能写反或重复：%q",
+			row[col("思考tokens")])
+	}
+}
+
+// TestRelayLogExportReasoningColumnsCoexist 两个思考字段同时有值时必须都导出。
+//
+// 这是本功能的核心口径：token 是"上游说花了多少"、字数是"文本实际多长"，
+// 两者**各记各的、不互斥**（生产已出现同一行 chars=206 / tokens=150 的实例）。
+// 参考项目那种"有官方 token 就不记字符数"的互斥写法会让这一行的 206 字凭空消失。
+func TestRelayLogExportReasoningColumnsCoexist(t *testing.T) {
+	conn := openRelayLogTestDB(t)
+	relayLogSaveOn(conn, model.RelayLog{
+		RequestID: 51, Status: "success", Model: "m-coexist", TargetChannel: "c1",
+		ReasoningEffort: "high", ReasoningTokens: 150, ReasoningChars: 206,
+	})
+
+	var buffer bytes.Buffer
+	if _, err := relayLogExportCSVOn(conn, &buffer, model.RelayLogFilter{}); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	records, err := csv.NewReader(bytes.NewReader(buffer.Bytes()[3:])).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv: %v", err)
+	}
+	row := records[1]
+	col := func(name string) int {
+		for i, h := range records[0] {
+			if h == name {
+				return i
+			}
+		}
+		t.Fatalf("导出表头缺少 %q", name)
+		return -1
+	}
+	if row[col("思考强度")] != "high" {
+		t.Errorf("思考强度 = %q, want high", row[col("思考强度")])
+	}
+	if row[col("思考tokens")] != "150" {
+		t.Errorf("思考tokens = %q, want 150", row[col("思考tokens")])
+	}
+	// 互斥实现（有 token 就把 chars 清零）会在这里得到 "0"。
+	if row[col("思考字数")] != "206" {
+		t.Errorf("思考字数 = %q, want 206（上游报了 token 也不能把字符数丢掉，两者是独立的量）",
+			row[col("思考字数")])
+	}
+}
+
+// TestRelayLogExportDiagnosticColumnsEmptyForOldRows 升级前落库的行在诊断列上必须是空/零，
+// 不能被写成看似有值的占位。
+//
+// 负向对照的意义：这些列是后加的，库里的存量行（122 行）本来就没有这些信息。
+// 若实现用"unknown"之类的默认串填充，读表的人会以为那是真实的归因结论。
+func TestRelayLogExportDiagnosticColumnsEmptyForOldRows(t *testing.T) {
+	conn := openRelayLogTestDB(t)
+	// 只设存量行必有的字段，诊断列全部留零值（等同升级前的行）。
+	relayLogSaveOn(conn, model.RelayLog{
+		RequestID: 61, Status: "success", Model: "m-old", TargetChannel: "c1",
+	})
+
+	var buffer bytes.Buffer
+	if _, err := relayLogExportCSVOn(conn, &buffer, model.RelayLogFilter{}); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	records, err := csv.NewReader(bytes.NewReader(buffer.Bytes()[3:])).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv: %v", err)
+	}
+	row := records[1]
+	col := func(name string) int {
+		for i, h := range records[0] {
+			if h == name {
+				return i
+			}
+		}
+		t.Fatalf("导出表头缺少 %q", name)
+		return -1
+	}
+	// 字符串类诊断列：空串（不是 "unknown"、"未知" 之类编出来的结论）。
+	for _, name := range []string{"思考强度", "失败归因", "终止原因"} {
+		if row[col(name)] != "" {
+			t.Errorf("存量行的「%s」应为空串，实得 %q（编一个默认值会让人以为那是真实结论）",
+				name, row[col(name)])
+		}
+	}
+	// 数值类诊断列：0（表示上游没报 / 没有思考文本，是确定的事实）。
+	if row[col("思考tokens")] != "0" || row[col("思考字数")] != "0" {
+		t.Errorf("存量行的思考计数应为 0，实得 tokens=%q chars=%q",
+			row[col("思考tokens")], row[col("思考字数")])
+	}
+}
+
+// relayLogExportColumns 记录 RelayLog 的每个字段在导出里的去处。
+//
+// ## 为什么要有这张表 + 下面那条测试
+//
+// v0.61（终止原因）、v0.63（思考强度/思考 token）、v0.65（入站协议）、v0.67（思考字数）
+// **连续四次**在 RelayLog 上加了字段、四次都没同步导出 —— 这不是偶然，而是流程缺口：
+// 加字段时改的是 model/relay 两处，导出在另一个包里，很容易整块忘掉。
+// 后果是界面上看得见、导出拿不到，而导出恰恰是拿去做分析的。
+//
+// 所以把「每个字段必须有个去处」变成一条会红的判据：新增字段时要么给它一列，
+// 要么在这里写明为什么不导出。Skip 理由不能为空 —— 空理由等于没做决定。
+var relayLogExportColumns = map[string]string{
+	"ID":              "日志ID",
+	"RequestID":       "请求ID",
+	"CreatedAt":       "时间",
+	"Status":          "状态",
+	"Model":           "分组(请求模型)",
+	"TargetModel":     "上游模型",
+	"ReportedModel":   "上游自称模型",
+	"ModelMismatch":   "模型一致",
+	"TargetChannel":   "目标渠道",
+	"RequestProtocol": "入站协议",
+	"TargetProtocol":  "上游协议",
+	"FirstByteMs":     "首字节(ms)",
+	"DurationMs":      "耗时(ms)",
+	"Attempts":        "上游轮次",
+	"Decision":        "判定理由",
+	"PromptTokens":    "输入tokens",
+	"CachedTokens":    "缓存命中tokens",
+	"CompletionToks":  "输出tokens",
+	"ReasoningEffort": "思考强度",
+	"ReasoningTokens": "思考tokens",
+	"ReasoningChars":  "思考字数",
+	"Cost":            "费用",
+	"APIKeyName":      "API Key",
+	"Error":           "错误",
+	"FaultKind":       "失败归因",
+	"StopReason":      "终止原因",
+	"AttemptDetail":   "尝试明细",
+	// 截断标记没有独立列，它作为前缀写在同一列里（"...(前段已截断) #1 ..."）：
+	// 单独占一列会让表更宽，而它只在极少数行上有值。
+	"AttemptsTruncated": "尝试明细",
+}
+
+// relayLogExportSkips 是**有意不进导出**的字段，理由必须写清楚。
+var relayLogExportSkips = map[string]string{
+	"GroupID":   "内部分组主键；导出已有「分组(请求模型)」这一列给人看，主键对读表的人没有意义",
+	"StartedAt": "与 CreatedAt 几乎同源（落库时刻）；导出只给一列，避免表里出现两个会打架的时间",
+}
+
+// TestRelayLogExportFieldCoverage 双向守卫：字段必须有去处，去处必须真在表头里。
+//
+// 方向一（字段 → 列）：新增 RelayLog 字段却忘了决定是否导出时变红。
+// 方向二（列 → 表头）：清单里写了列名但表头没实现（打错字、改了名）时变红 ——
+// 只做方向一会让「清单里写了个不存在的列」悄悄通过。
+func TestRelayLogExportFieldCoverage(t *testing.T) {
+	headerSet := make(map[string]bool, len(relayLogExportHeader))
+	for _, column := range relayLogExportHeader {
+		headerSet[column] = true
+	}
+
+	// 方向二：清单指向的列必须真实存在。
+	for field, column := range relayLogExportColumns {
+		if !headerSet[column] {
+			t.Errorf("RelayLog.%s 声称导出到「%s」，但表头里没有这一列", field, column)
+		}
+	}
+
+	// 方向一：每个字段都要有决定。
+	typ := reflect.TypeOf(model.RelayLog{})
+	for i := 0; i < typ.NumField(); i++ {
+		name := typ.Field(i).Name
+		if name == "" || name[0] < 'A' || name[0] > 'Z' {
+			continue // 非导出字段（内部状态）不参与
+		}
+		if _, ok := relayLogExportColumns[name]; ok {
+			continue
+		}
+		reason, ok := relayLogExportSkips[name]
+		if !ok {
+			t.Errorf("RelayLog.%s 既不在 relayLogExportColumns、也不在 relayLogExportSkips —— "+
+				"新增字段时必须二选一（v0.61~v0.67 连续四次漏导出的根因就是没有这道闸）", name)
+			continue
+		}
+		if strings.TrimSpace(reason) == "" {
+			t.Errorf("RelayLog.%s 标记为跳过导出但没写理由（空理由等于没做决定）", name)
+		}
+	}
+
+	// 反向冗余检查：清单里的字段名必须真的存在于结构体上（防改名后清单残留）。
+	for field := range relayLogExportColumns {
+		if _, ok := typ.FieldByName(field); !ok {
+			t.Errorf("relayLogExportColumns 里的 %s 在 RelayLog 上不存在（字段改名后清单没同步）", field)
+		}
+	}
+	for field := range relayLogExportSkips {
+		if _, ok := typ.FieldByName(field); !ok {
+			t.Errorf("relayLogExportSkips 里的 %s 在 RelayLog 上不存在（字段改名后清单没同步）", field)
+		}
 	}
 }

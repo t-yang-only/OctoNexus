@@ -30,7 +30,7 @@ const RelayLogExportMaxRows = 200000
 // 只有行主键能唯一定位一行, 下游做去重/回查时不必再猜。
 var relayLogExportHeader = []string{
 	"日志ID", "请求ID", "时间", "状态", "分组(请求模型)", "上游模型", "上游自称模型", "模型一致", "目标渠道", "入站协议", "上游协议", "协议转换", "首字节(ms)", "耗时(ms)", "上游轮次", "判定理由",
-	"输入tokens", "缓存命中tokens", "输出tokens", "费用", "API Key", "错误", "尝试明细",
+	"输入tokens", "缓存命中tokens", "输出tokens", "思考强度", "思考tokens", "思考字数", "费用", "API Key", "错误", "失败归因", "终止原因", "尝试明细",
 }
 
 // RelayLogExportCSV 按筛选条件把请求级明细写成 CSV, 返回写出的行数(不含表头)。
@@ -111,9 +111,23 @@ func relayLogExportRow(entry model.RelayLog) []string {
 		strconv.FormatInt(entry.PromptTokens, 10),
 		strconv.FormatInt(entry.CachedTokens, 10),
 		strconv.FormatInt(entry.CompletionToks, 10),
+		// 思考三列（T-insight-001/005）：强度是请求侧、token 与字数是输出侧。
+		// 三者**各记各的、不互斥**。0 照写而不留空：它表示"上游没报 token"或
+		// "响应里没有思考文本"，是个确定的事实，抹成空串就看不出这条信息了。
+		entry.ReasoningEffort,
+		strconv.FormatInt(entry.ReasoningTokens, 10),
+		strconv.Itoa(entry.ReasoningChars),
 		strconv.FormatFloat(entry.Cost, 'f', -1, 64),
 		entry.APIKeyName,
 		entry.Error,
+		// 失败诊断两列（T-usability-007 / T-trace-003）：都用**后端原文枚举**，
+		// 与「状态」「判定理由」两列的既有口径一致 —— 导出是表格工具吃的结构化输出，
+		// 换成中文反而让下游脚本无法处理，且要维护一张随时会漂移的映射表。
+		//
+		// 空值就是空值：存量行没有归因，导出必须留空而不是填 "unknown" ——
+		// 编一个默认值会让读表的人以为那是真实的归因结论。
+		entry.FaultKind,
+		entry.StopReason,
 		attemptDetailLabel(entry),
 	}
 }
