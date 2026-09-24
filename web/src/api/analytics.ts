@@ -318,3 +318,84 @@ export function useAnalyticsRouting(window = 500, enabled = true) {
         enabled,
     });
 }
+
+// T-insight-008 分组健康画像。
+//
+// ## 与既有画像的分工
+//
+//   overview / latency / routing 都在回答「多快 / 多少 / 走了谁」
+//   这里回答「**这个分组还能不能用**」
+//
+// 两者看的不是同一件事：分组延迟画像里「样本 3 条、中位 200ms」看着不错，
+// 但那 3 条可能全是失败（失败同样有耗时）；用量分析里「请求 0」既可能是没人用，
+// 也可能是刚坏掉没人敢用。生产动机是验收时反复撞到的
+// `53HK/Auto-Model 无可用成员` —— 这类失败没有 target_channel，
+// 渠道故障统计看不见它，只有在分组维度才现形。
+
+/** 分组当前状态的取值（后端枚举，界面映射文案；认不出的原样显示）。 */
+export type GroupHealthState =
+    | 'failing'
+    | 'no_member'
+    | 'degraded'
+    | 'empty'
+    | 'idle'
+    | 'healthy';
+
+/** 失败落在哪个上游（下钻用）。Channel 可能为空：那类失败没走到渠道。 */
+export interface GroupHealthChannel {
+    channel: string;
+    model: string;
+    failures: number;
+    /** 空串 = 从未失败（RFC3339）。 */
+    last_failure_at: string;
+}
+
+export interface GroupHealthRow {
+    group_id: number;
+    name: string;
+    mode: string;
+    /** 分组已被删除、日志还在保留期内。 */
+    deleted: boolean;
+    member_count: number;
+    /** 当前还能转发的成员数——必须与 member_count 一起看。 */
+    available_count: number;
+    requests: number;
+    success: number;
+    canceled: number;
+    request_fault: number;
+    member_fault: number;
+    transient_fault: number;
+    unclassified: number;
+    /** 分母是 success_samples，不是 requests。 */
+    success_rate: number;
+    /** 与分组服务能力有关的样本数；为 0 时成功率的 0 无意义。 */
+    success_samples: number;
+    last_failure_at: string;
+    state: GroupHealthState | string;
+    /** 失败最多的上游（上限 5 条）。 */
+    failing_channels: GroupHealthChannel[];
+}
+
+export interface GroupHealth {
+    window: number;
+    sample: RelayLogSample;
+    /** 判定线随结果返回——界面上的「故障/退化」必须与它对应。 */
+    failing_threshold: number;
+    degraded_threshold: number;
+    failing_count: number;
+    no_member_count: number;
+    degraded_count: number;
+    empty_count: number;
+    idle_count: number;
+    healthy_count: number;
+    groups: GroupHealthRow[];
+}
+
+/** 取分组健康画像。 */
+export function useAnalyticsGroupHealth(window = 500, enabled = true) {
+    return useQuery({
+        queryKey: ['analytics', 'group-health', window],
+        queryFn: () => apiRequest<GroupHealth>(`/api/v1/analytics/group-health?window=${window}`),
+        enabled,
+    });
+}

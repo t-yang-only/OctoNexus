@@ -365,6 +365,34 @@
       "unrecorded": "未記錄",
       "windowTotal": "窗口請求"
     },
+    "groupHealth": {
+      "title": "分組健康畫像",
+      "subtitle": "按分組看成功率與故障歸因，回答「哪個分組壞了、壞在哪個上游」",
+      "noData": "所選視窗內沒有分組請求記錄",
+      "windowLabel": "樣本視窗",
+      "sampleHint": "樣本 {samples} 筆 · 跳過測試 {skipped} 筆",
+      "thresholds": "判據：成功率低於 {failing}% 記故障、低於 {degraded}% 記退化",
+      "groupsTitle": "分組明細",
+      "groupsCount": "共 {count} 個",
+      "columns": {
+        "group": "分組",
+        "state": "狀態",
+        "members": "可用成員",
+        "requests": "請求",
+        "rate": "成功率",
+        "lastFailure": "最近失敗"
+      },
+      "state": {
+        "healthy": "健康",
+        "degraded": "退化",
+        "failing": "故障",
+        "no_member": "無可用成員",
+        "idle": "空閒",
+        "empty": "空分組"
+      },
+      "noChannel": "未走到渠道",
+      "deleted": "已刪除"
+    },
     "allocation": {
       "filter": {
         "all": "全部",

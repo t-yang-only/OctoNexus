@@ -16,6 +16,7 @@ import { AllocationMonitor } from './allocation';
 import { RequestInsight } from './insight';
 import { LatencyDistributionPanel } from './latency';
 import RoutingProfilePanel from './routing';
+import { GroupHealthPanel } from './group-health';
 import { useHomeViewStore } from './store';
 
 // HomeSections 汇总首页各统计区块, 屏内正文与分享图舞台共用。
@@ -40,6 +41,7 @@ function HomeSections() {
             <RequestInsight />
             <LatencyDistributionPanel />
             <RoutingProfilePanel />
+            <GroupHealthPanel />
             <AllocationMonitor />
         </div>
     );

@@ -365,6 +365,34 @@
       "unrecorded": "未记录",
       "windowTotal": "窗口请求"
     },
+    "groupHealth": {
+      "title": "分组健康画像",
+      "subtitle": "按分组看成功率与故障归因，回答「哪个分组坏了、坏在哪个上游」",
+      "noData": "所选窗口内没有分组请求记录",
+      "windowLabel": "样本窗口",
+      "sampleHint": "样本 {samples} 条 · 跳过测试 {skipped} 条",
+      "thresholds": "判据：成功率低于 {failing}% 记故障、低于 {degraded}% 记退化",
+      "groupsTitle": "分组明细",
+      "groupsCount": "共 {count} 个",
+      "columns": {
+        "group": "分组",
+        "state": "状态",
+        "members": "可用成员",
+        "requests": "请求",
+        "rate": "成功率",
+        "lastFailure": "最近失败"
+      },
+      "state": {
+        "healthy": "健康",
+        "degraded": "退化",
+        "failing": "故障",
+        "no_member": "无可用成员",
+        "idle": "空闲",
+        "empty": "空分组"
+      },
+      "noChannel": "未走到渠道",
+      "deleted": "已删除"
+    },
     "allocation": {
       "filter": {
         "all": "全部",

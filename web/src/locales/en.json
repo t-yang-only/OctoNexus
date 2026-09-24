@@ -365,6 +365,34 @@
       "unrecorded": "Unrecorded",
       "windowTotal": "Requests"
     },
+    "groupHealth": {
+      "title": "Group health",
+      "subtitle": "Success rate and fault attribution by group: which group broke, and on which upstream",
+      "noData": "No group traffic in the selected window",
+      "windowLabel": "Sample window",
+      "sampleHint": "{samples} samples · {skipped} test rows skipped",
+      "thresholds": "Judgement: below {failing}% is failing, below {degraded}% is degraded",
+      "groupsTitle": "Group detail",
+      "groupsCount": "{count} total",
+      "columns": {
+        "group": "Group",
+        "state": "State",
+        "members": "Available",
+        "requests": "Requests",
+        "rate": "Success",
+        "lastFailure": "Last failure"
+      },
+      "state": {
+        "healthy": "Healthy",
+        "degraded": "Degraded",
+        "failing": "Failing",
+        "no_member": "No member",
+        "idle": "Idle",
+        "empty": "Empty"
+      },
+      "noChannel": "no channel",
+      "deleted": "deleted"
+    },
     "allocation": {
       "filter": {
         "all": "All",
