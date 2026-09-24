@@ -32,10 +32,16 @@ import (
 // 得到的数在两种情况下都是错的。因此跨度取**首尾请求的实际时间差**，
 // 并在结果里一并给出（SpanSeconds）—— 让"RPM 0.2"这种看起来离谱的数可以自查。
 
-// ModelUsageStat 是单个模型在窗口内的用量画像。
-type ModelUsageStat struct {
+// DimensionUsageStat 是**某一个维度值**在窗口内的用量画像（按模型 / 按客户端 / 按渠道）。
+//
+// 为什么一个类型服务三个维度而不是各写一个：三者的字段与口径完全一致
+// （都是"这个 key 打了多少请求、花了多少钱、平均多慢"），各写一份只会让
+// 同一个统计逻辑分叉成三处、日后改一处漏两处。维度之间真正的差异只有
+// **空值该显示成什么**（模型未指定的原因与渠道未路由的原因不是一回事），
+// 而那由调用方传入，不体现在类型上。
+type DimensionUsageStat struct {
 	Model string `json:"model"`
-	// Requests 是打向该模型的请求条数（含失败）。
+	// Requests 是打向该维度的请求条数（含失败）。
 	Requests int64 `json:"requests"`
 	Success  int64 `json:"success"`
 	// SuccessRate 成功 / 全部，百分比；分母为 0 时给 0。
@@ -47,7 +53,7 @@ type ModelUsageStat struct {
 	// ReasoningTokens 是上游回报的思考 token 合计（不报的行贡献 0）。
 	ReasoningTokens int64   `json:"reasoning_tokens"`
 	Cost            float64 `json:"cost"`
-	// AvgDurationMs 是该模型请求的平均总耗时（含失败的），便于横向比"谁快谁慢"。
+	// AvgDurationMs 是该维度请求的平均总耗时（含失败的），便于横向比"谁快谁慢"。
 	AvgDurationMs float64 `json:"avg_duration_ms"`
 }
 
@@ -117,7 +123,18 @@ type AnalyticsOverview struct {
 	AvgTpm        float64 `json:"avg_tpm"`
 
 	// Models 按请求数倒序（我常用的排在前面），便于一眼看到主力模型。
-	Models []ModelUsageStat `json:"models"`
+	Models []DimensionUsageStat `json:"models"`
+	// APIKeys 是按客户端 Key 聚合的同一份用量，按请求数倒序。
+	//
+	// 与 Models 并列而不是复用：模型维度回答"哪个模型在吃资源"，
+	// 客户端维度回答"哪个调用方在花我的钱"——同一批请求的两种切法，
+	// 缺任一都答不出对方的问题（一个 Key 可以在很多模型上花钱）。
+	APIKeys []DimensionUsageStat `json:"api_keys"`
+	// Channels 是按实际上游渠道聚合的同一份用量，按请求数倒序。
+	//
+	// 注意它用的是**实际命中的渠道**（target_channel），不是客户端请求的分组名：
+	// 分组是逻辑入口，渠道才是真正花钱的地方，两者在 failover 后并不相同。
+	Channels []DimensionUsageStat `json:"channels"`
 	// Series 按时间升序。
 	Series []AnalyticsBucket `json:"series"`
 	// Truncated 标记统计的条数达到了 window 上限 —— 此时"总数"是最近 N 条而非全部历史。
@@ -133,6 +150,49 @@ const relayAnalyticsTopModels = 8
 // 全部标成同一个 "MM/DD"，横轴出现重复刻度，图上分不清先后（实测踩过）。
 // 24 小时以内按整点则天然唯一 —— 一个整点不会在 24 小时内出现两次。
 const hourBucketMaxSpanSeconds = 24 * 3600
+
+// analyticsDimensions 把三个维度的聚合容器打包。
+//
+// 打成结构而不是三个并列参数：finish 的形参已经在往上涨，
+// 而三个维度是**同一件事的三种切法**，本该作为一个整体传递。
+type analyticsDimensions struct {
+	models   map[string]*DimensionUsageStat
+	apiKeys  map[string]*DimensionUsageStat
+	channels map[string]*DimensionUsageStat
+}
+
+// dimensionKey 归一化维度键：空值给一个该维度专用的显示名。
+//
+// 三个维度传进来的 fallback 刻意不同（见调用处）——"没填模型"是客户端的问题、
+// "没有 Key"是未认证调用、"没有渠道"是请求压根没走到上游。这三种情况
+// 处置动作完全不同，糊成同一个"(未指定)"会让人查不下去。
+func dimensionKey(value string, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+// accumulateDimension 把一行日志累加进它在某个维度上的桶（三个维度共用同一份口径）。
+func accumulateDimension(store map[string]*DimensionUsageStat, key string, row model.RelayLog) {
+	stat, ok := store[key]
+	if !ok {
+		stat = &DimensionUsageStat{Model: key}
+		store[key] = stat
+	}
+	stat.Requests++
+	if row.Status == "success" {
+		stat.Success++
+	}
+	stat.PromptTokens += row.PromptTokens
+	stat.CompletionTokens += row.CompletionToks
+	stat.TotalTokens += row.PromptTokens + row.CompletionToks
+	stat.CachedTokens += row.CachedTokens
+	stat.ReasoningTokens += row.ReasoningTokens
+	stat.Cost += row.Cost
+	// 平均耗时用总量累加、最后再除：逐行算平均会在浮点上反复截断。
+	stat.AvgDurationMs += float64(row.DurationMs)
+}
 
 // analyticsAccumulator 是遍历日志过程中攒下的标量，避免 finish 的形参越拉越长。
 type analyticsAccumulator struct {
@@ -170,12 +230,18 @@ func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview,
 	if len(rows) == 0 {
 		// 空窗口返回空结果而不是错误：新装的实例本来就一条都没有，
 		// 报错会让首页显示成"出问题了"，而事实是"还没有数据"。
-		out.Models = []ModelUsageStat{}
+		out.Models = []DimensionUsageStat{}
+		out.APIKeys = []DimensionUsageStat{}
+		out.Channels = []DimensionUsageStat{}
 		out.Series = []AnalyticsBucket{}
 		return out, nil
 	}
 
-	byModel := make(map[string]*ModelUsageStat)
+	dims := analyticsDimensions{
+		models:   make(map[string]*DimensionUsageStat),
+		apiKeys:  make(map[string]*DimensionUsageStat),
+		channels: make(map[string]*DimensionUsageStat),
+	}
 	buckets := make(map[int64]*AnalyticsBucket)
 	var acc analyticsAccumulator
 
@@ -190,18 +256,17 @@ func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview,
 			acc.lastAt = row.StartedAt
 		}
 
-		// 模型维度：空 model 也要有归属（客户端可能没填），但绝不并进某个真实模型，
-		// 否则"模型 X 的用量"会凭空多出别人的量。
-		modelName := row.Model
-		if modelName == "" {
-			modelName = "(未指定)"
-		}
-		stat, ok := byModel[modelName]
-		if !ok {
-			stat = &ModelUsageStat{Model: modelName}
-			byModel[modelName] = stat
-		}
-		applyModelUsage(stat, row)
+		// 三个维度各自归档。空值都要有归属（绝不并进某个真实值，否则
+		// "模型 X 的用量"会凭空多出别人的量），但**每个维度的空含义不同**，
+		// 所以显示名也不同：没填模型是客户端的问题、没有 Key 是未认证调用、
+		// 没有渠道是请求压根没走到上游。统一叫"(未指定)"会把三种完全不同的
+		// 情况糊成一个，读表的人就查不下去了。
+		modelName := dimensionKey(row.Model, "(未指定)")
+		apiKeyName := dimensionKey(row.APIKeyName, "(未认证)")
+		channelName := dimensionKey(row.TargetChannel, "(未路由)")
+		accumulateDimension(dims.models, modelName, row)
+		accumulateDimension(dims.apiKeys, apiKeyName, row)
+		accumulateDimension(dims.channels, channelName, row)
 
 		// 时间桶：按整点切。
 		hourStart := row.StartedAt.Truncate(time.Hour)
@@ -225,7 +290,7 @@ func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview,
 		bucket.ByModelCost[modelName] += row.Cost
 	}
 
-	finishAnalyticsOverview(&out, byModel, buckets, acc)
+	finishAnalyticsOverview(&out, dims, buckets, acc)
 	return out, nil
 }
 
@@ -248,26 +313,10 @@ func applyAnalyticsRow(out *AnalyticsOverview, row model.RelayLog) {
 	out.TotalCost += row.Cost
 }
 
-// applyModelUsage 把一行日志累计进它的模型桶。
-func applyModelUsage(stat *ModelUsageStat, row model.RelayLog) {
-	stat.Requests++
-	if row.Status == "success" {
-		stat.Success++
-	}
-	stat.PromptTokens += row.PromptTokens
-	stat.CompletionTokens += row.CompletionToks
-	stat.TotalTokens += row.PromptTokens + row.CompletionToks
-	stat.CachedTokens += row.CachedTokens
-	stat.ReasoningTokens += row.ReasoningTokens
-	stat.Cost += row.Cost
-	// 平均耗时用总量累加、最后再除：逐行算平均会在浮点上反复截断。
-	stat.AvgDurationMs += float64(row.DurationMs)
-}
-
 // finishAnalyticsOverview 收尾：算比例、截时间跨度、排序、合并尾部模型。
 func finishAnalyticsOverview(
 	out *AnalyticsOverview,
-	byModel map[string]*ModelUsageStat,
+	dims analyticsDimensions,
 	rawBuckets map[int64]*AnalyticsBucket,
 	acc analyticsAccumulator,
 ) {
@@ -288,20 +337,12 @@ func finishAnalyticsOverview(
 		out.ThroughputTps = float64(acc.completionForThroughput) / (float64(acc.durationSumMs) / 1000)
 	}
 
-	out.Models = make([]ModelUsageStat, 0, len(byModel))
-	for _, stat := range byModel {
-		if stat.Requests > 0 {
-			stat.AvgDurationMs = stat.AvgDurationMs / float64(stat.Requests)
-		}
-		stat.SuccessRate = ratio(stat.Success, stat.Requests)
-		out.Models = append(out.Models, *stat)
-	}
-	sort.Slice(out.Models, func(i, j int) bool {
-		if out.Models[i].Requests != out.Models[j].Requests {
-			return out.Models[i].Requests > out.Models[j].Requests
-		}
-		return out.Models[i].Model < out.Models[j].Model
-	})
+	// 三个维度走**同一套收尾**：先算比率与均值、再按请求数倒序。
+	// 各写一份的话，日后改了口径（比如换了排序键）只会改到其中一两个，
+	// 界面上就会出现在一个视角排得好、换到另一个视角顺序奇怪的情况。
+	out.Models = finishDimension(dims.models)
+	out.APIKeys = finishDimension(dims.apiKeys)
+	out.Channels = finishDimension(dims.channels)
 
 	// 时间线粒度自适应：桶键跨度 24 小时以内按整点（一个整点不会在 24 小时内
 	// 出现两次，标签天然唯一），达到 24 小时就按天聚合 —— 否则同一天的 24 个桶
@@ -393,7 +434,7 @@ func rollUpAnalyticsBuckets(raw map[int64]*AnalyticsBucket, rawKeys []int64) map
 // **token 与成本两张 map 必须走同一套 keep 集合**：否则切到成本口径时，
 // 被保留的模型集合与 token 口径不一致，同一根柱子在两个口径下的构成会不一样，
 // 而两条口径的合计又都声称等于同一个桶的总量 —— 那是最难查的一类不一致。
-func trimAnalyticsSeries(series []AnalyticsBucket, models []ModelUsageStat) {
+func trimAnalyticsSeries(series []AnalyticsBucket, models []DimensionUsageStat) {
 	keep := make(map[string]bool, relayAnalyticsTopModels)
 	for i, stat := range models {
 		if i >= relayAnalyticsTopModels {
@@ -430,4 +471,41 @@ func trimAnalyticsSeries(series []AnalyticsBucket, models []ModelUsageStat) {
 		bucket.ByModel = mergedTokens
 		bucket.ByModelCost = mergedCost
 	}
+}
+
+// finishDimension 把某个维度的桶收尾成可排序的切片。
+//
+// 排序按请求数倒序、同数按名称升序：请求数回答"谁用得最多"，
+// 名称做次序是为了让同数的条目有稳定顺序（否则每次请求返回的顺序都在抖，
+// 界面上的行会无端跳位）。
+func finishDimension(store map[string]*DimensionUsageStat) []DimensionUsageStat {
+	out := make([]DimensionUsageStat, 0, len(store))
+	for _, stat := range store {
+		if stat.Requests > 0 {
+			stat.AvgDurationMs = stat.AvgDurationMs / float64(stat.Requests)
+		}
+		stat.SuccessRate = ratio(stat.Success, stat.Requests)
+		out = append(out, *stat)
+	}
+	sortDimensionStats(out)
+	return out
+}
+
+// sortDimensionStats 把某个维度的条目排成展示顺序：请求数倒序，同数按名称升序。
+//
+// 抽成独立函数而不是内联在 finishDimension 里，是为了让判据能确定性地验证它：
+// 内联时输入来自 map 遍历，而 Go 的 map 遍历顺序随机 —— 一个"只按请求数排序"
+// 的错误实现在同数条目上会**间歇性**排到正确位置，端到端用例时红时绿，
+// 变异检查因此会得出"守卫无效"的错误结论（本轮实测踩过）。
+// 直接喂一个顺序确定的切片，才能把这条性质钉死。
+//
+// 名称做次序不是为了好看：同数条目若没有稳定顺序，每次请求返回的行都可能换位置，
+// 界面上的表格会无端跳动。
+func sortDimensionStats(out []DimensionUsageStat) {
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Requests != out[j].Requests {
+			return out[i].Requests > out[j].Requests
+		}
+		return out[i].Model < out[j].Model
+	})
 }

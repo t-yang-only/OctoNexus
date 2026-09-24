@@ -279,6 +279,12 @@
       "mixReasoning": "其中思考",
       "metricTokens": "按 TOKEN",
       "metricCost": "按成本",
+      "breakdown": "按维度明细",
+      "dimModel": "模型",
+      "dimApiKey": "客户端",
+      "dimChannel": "渠道",
+      "colName": "名称",
+      "emptyDimension": "该维度暂无数据",
       "completeHint": "已覆盖全部历史记录"
     },
     "latency": {

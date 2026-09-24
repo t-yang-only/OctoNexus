@@ -279,6 +279,12 @@
       "mixReasoning": "of which reasoning",
       "metricTokens": "Tokens",
       "metricCost": "Cost",
+      "breakdown": "Breakdown",
+      "dimModel": "Model",
+      "dimApiKey": "Client",
+      "dimChannel": "Channel",
+      "colName": "Name",
+      "emptyDimension": "No data for this dimension",
       "completeHint": "All history covered"
     },
     "latency": {

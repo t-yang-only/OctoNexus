@@ -39,6 +39,23 @@ const WINDOWS = [200, 500, 2000] as const;
 // 请求数拆分会是多一份几乎同形的数据，而量/钱两个问题已经覆盖了看图的动机。
 type TimelineMetric = 'tokens' | 'cost';
 
+// 明细表的维度。
+//
+// 三个视角对应三个不同的问题，缺一不可：
+//   models    哪个模型在吃资源
+//   api_keys  哪个调用方在花我的钱
+//   channels  钱实际落在哪个上游（failover 后与客户端填的分组名并不相同）
+type DimensionKey = 'models' | 'api_keys' | 'channels';
+
+const DIMENSIONS = ['models', 'api_keys', 'channels'] as const;
+
+// 维度 → i18n 键。用映射而不是拼字符串，避免维度名与文案键名耦合。
+const DIM_LABEL: Record<DimensionKey, string> = {
+    models: 'dimModel',
+    api_keys: 'dimApiKey',
+    channels: 'dimChannel',
+};
+
 // 失败归因的配色：与日志页的失败下钻同语义（成功绿 / 取消灰 / 请求非法黄 /
 // 成员与可恢复红橙 / 未分类中性）。
 const FAULT_TONE = {
@@ -90,6 +107,7 @@ export function RequestInsight() {
     useTheme(); // 订阅主题：--chart-* 取值随主题切换重渲染，与趋势图同机制。
     const [window, setWindow] = useState<number>(500);
     const [metric, setMetric] = useState<TimelineMetric>('tokens');
+    const [dimension, setDimension] = useState<DimensionKey>('models');
     const { data } = useAnalyticsOverview(window);
     const series = data?.series ?? [];
     const models = data?.models ?? [];
@@ -259,6 +277,10 @@ export function RequestInsight() {
         { key: 'mixCompletion', value: completion, tone: 'bg-chart-3' },
     ];
 
+    // 明细表当前维度的行（后端已按请求数倒序），以及成本条的基准值。
+    const dimensionRows = (data[dimension] ?? []) as typeof models;
+    const maxCost = dimensionRows.reduce((peak, row) => (row.cost > peak ? row.cost : peak), 0);
+
     const faults = [
         { label: t('faultSuccess'), count: data.success_count, tone: FAULT_TONE.success },
         { label: t('faultCanceled'), count: data.canceled, tone: FAULT_TONE.canceled },
@@ -409,6 +431,69 @@ export function RequestInsight() {
                         ))}
                     </BarChart>
                 </ChartContainer>
+            </div>
+
+            {/* 按维度明细：同一批请求的三种切法，回答"谁在吃资源 / 谁在花钱"。 */}
+            <div className="rounded-2xl border border-border/50 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-sm font-medium">{t('breakdown')}</h4>
+                    <div className="flex gap-1 rounded-lg bg-muted/50 p-0.5">
+                        {DIMENSIONS.map((value) => (
+                            <button
+                                key={value}
+                                type="button"
+                                onClick={() => setDimension(value)}
+                                className={`rounded-md px-2 py-0.5 text-[11px] transition-colors ${dimension === value ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                            >
+                                {t(DIM_LABEL[value])}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                {dimensionRows.length === 0 ? (
+                    <p className="py-2 text-xs text-muted-foreground">{t('emptyDimension')}</p>
+                ) : (
+                    <div className="space-y-0.5">
+                        <div className="grid grid-cols-[1fr_auto_auto] @3xl/home:grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-1 pb-1 text-[11px] text-muted-foreground">
+                            <span>{t('colName')}</span>
+                            <span className="text-right">{t('requests')}</span>
+                            <span className="text-right">{t('successRate')}</span>
+                            <span className="hidden text-right @3xl/home:block">{t('totalTokens')}</span>
+                            <span className="hidden text-right @3xl/home:block">{t('totalCost')}</span>
+                        </div>
+                        {dimensionRows.map((row) => (
+                            <div
+                                key={row.model}
+                                className="grid grid-cols-[1fr_auto_auto] @3xl/home:grid-cols-[1fr_auto_auto_auto_auto] items-center gap-2 rounded-lg px-1 py-1 transition-colors hover:bg-muted/40"
+                            >
+                                <div className="min-w-0">
+                                    <div className="truncate text-xs" title={row.model}>
+                                        {row.model}
+                                    </div>
+                                    {/* 成本占比条：以当前维度里最贵的一项为满格，一眼看出谁在花钱 */}
+                                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+                                        <div
+                                            className="h-full bg-chart-1"
+                                            style={{ width: `${maxCost > 0 ? (row.cost / maxCost) * 100 : 0}%` }}
+                                        />
+                                    </div>
+                                </div>
+                                <span className="text-right text-xs tabular-nums">{row.requests}</span>
+                                <span className={`text-right text-xs tabular-nums ${successTone(row.success_rate)}`}>
+                                    {row.success_rate.toFixed(0)}%
+                                </span>
+                                <span className="hidden text-right text-xs tabular-nums @3xl/home:block">
+                                    {formatCount(row.total_tokens).formatted.value}
+                                    {formatCount(row.total_tokens).formatted.unit}
+                                </span>
+                                <span className="hidden text-right text-xs tabular-nums @3xl/home:block">
+                                    {formatMoney(row.cost).formatted.value}
+                                    {formatMoney(row.cost).formatted.unit}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div>

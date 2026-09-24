@@ -13,7 +13,7 @@ import { apiRequest } from './client';
 // 两者数据源不同，不是同一份数据的两种画法。
 
 /** 单个模型在窗口内的用量画像。 */
-export interface ModelUsageStat {
+export interface DimensionUsageStat {
     model: string;
     /** 打向该模型的请求条数（含失败）。 */
     requests: number;
@@ -80,7 +80,16 @@ export interface AnalyticsOverview {
     throughput_tps: number;
     avg_rpm: number;
     avg_tpm: number;
-    models: ModelUsageStat[];
+    models: DimensionUsageStat[];
+    /**
+     * 按客户端 Key 聚合的同一份用量（回答"哪个调用方在花我的钱"）。
+     *
+     * 与 models 是同一批请求的两种切法，不是两份数据：一个 Key 可以在很多模型上花钱，
+     * 反之亦然。缺任一都答不出对方的问题。
+     */
+    api_keys: DimensionUsageStat[];
+    /** 按实际上游渠道聚合的用量（真正花钱的地方；failover 后与客户端填的分组名并不相同）。 */
+    channels: DimensionUsageStat[];
     /** 按时间升序。 */
     series: AnalyticsBucket[];
     /** 取满 window 条 —— 此时"总数"是最近 N 条而非全部历史，界面必须说明。 */
