@@ -41,6 +41,12 @@ type analyticsLogSeed struct {
 	cached     int64
 	cost       float64
 	faultKind  string
+	// 模型链路三件套：客户端请求名（modelName）、渠道内目标名、上游自称回报名。
+	// 不匹配必须**显式**播种（而不是由 seed 现算）：被测的是"统计有没有如实转述已落库的判定"，
+	// 现算会把被测代码的判定重写一遍，两边一起错就测不出来。
+	targetModel   string
+	reportedModel string
+	mismatch      bool
 }
 
 func seedAnalyticsLog(t *testing.T, conn *gorm.DB, s analyticsLogSeed) {
@@ -57,6 +63,10 @@ func seedAnalyticsLog(t *testing.T, conn *gorm.DB, s analyticsLogSeed) {
 		CachedTokens:   s.cached,
 		Cost:           s.cost,
 		FaultKind:      s.faultKind,
+
+		TargetModel:   s.targetModel,
+		ReportedModel: s.reportedModel,
+		ModelMismatch: s.mismatch,
 	}
 	if err := conn.Create(&row).Error; err != nil {
 		t.Fatalf("seed analytics log: %v", err)

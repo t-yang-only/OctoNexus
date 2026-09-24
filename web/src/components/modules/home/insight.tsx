@@ -280,6 +280,9 @@ export function RequestInsight() {
     // 明细表当前维度的行（后端已按请求数倒序），以及成本条的基准值。
     const dimensionRows = (data[dimension] ?? []) as typeof models;
     const maxCost = dimensionRows.reduce((peak, row) => (row.cost > peak ? row.cost : peak), 0);
+    // 模型链路：只在确实有渠道换过模型时才展示整块（没异常时这块是纯噪声）。
+    const chain = data.model_chain ?? [];
+    const mismatchSamples = data.mismatch_samples ?? [];
 
     const faults = [
         { label: t('faultSuccess'), count: data.success_count, tone: FAULT_TONE.success },
@@ -516,6 +519,89 @@ export function RequestInsight() {
                     ))}
                 </div>
             </div>
+
+            {/*
+              模型链路一致性：把「客户端请求的 → 渠道内目标 → 上游自称回报的」三段名字放在一起看。
+              这三段散落各处时，「正常别名解析」与「上游偷换模型」长得一模一样 ——
+              请求 High-flash 实际跑 glm-5.3-flash 是分组名被解析（正确路由），
+              而上游回报了另一个版本号才是模型被换。前者混进不匹配率就会报假故障。
+            */}
+            {chain.map((row) => row.mismatched > 0).some(Boolean) && (
+                <div>
+                    <div className="flex items-center justify-between gap-2">
+                        <h4 className="text-sm font-medium">{t('modelChain')}</h4>
+                        <span className="text-[11px] text-muted-foreground">{t('modelChainHint')}</span>
+                    </div>
+                    <div className="mt-2 overflow-x-auto">
+                        <table className="w-full min-w-[540px] border-collapse text-xs">
+                            <thead>
+                                <tr className="text-muted-foreground">
+                                    <th className="py-1 pr-3 text-left font-normal">{t('colChannel')}</th>
+                                    <th className="py-1 pr-3 text-right font-normal">{t('chainRequests')}</th>
+                                    <th className="py-1 pr-3 text-right font-normal">
+                                        <span title={t('chainAliasHint')} className="border-b border-dotted border-muted-foreground/50">
+                                            {t('chainAlias')}
+                                        </span>
+                                    </th>
+                                    <th className="py-1 pr-3 text-right font-normal">
+                                        <span title={t('chainReportedHint')} className="border-b border-dotted border-muted-foreground/50">
+                                            {t('chainReported')}
+                                        </span>
+                                    </th>
+                                    <th className="py-1 pr-3 text-right font-normal">{t('chainMatched')}</th>
+                                    <th className="py-1 pr-3 text-right font-normal">{t('chainMismatched')}</th>
+                                    <th className="py-1 pr-3 text-right font-normal">
+                                        <span title={t('chainSilentHint')} className="border-b border-dotted border-muted-foreground/50">
+                                            {t('chainSilent')}
+                                        </span>
+                                    </th>
+                                    <th className="py-1 text-right font-normal">{t('chainRate')}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {chain.map((row) => (
+                                    <tr key={row.channel} className="border-t border-border/40">
+                                        <td className="py-1 pr-3">{row.channel}</td>
+                                        <td className="py-1 pr-3 text-right tabular-nums">{row.requests}</td>
+                                        <td className="py-1 pr-3 text-right tabular-nums text-muted-foreground">
+                                            {row.alias_resolved}
+                                        </td>
+                                        <td className="py-1 pr-3 text-right tabular-nums">{row.reported}</td>
+                                        <td className="py-1 pr-3 text-right tabular-nums">{row.matched}</td>
+                                        <td className={`py-1 pr-3 text-right tabular-nums ${row.mismatched > 0 ? 'font-medium text-red-600' : ''}`}>
+                                            {row.mismatched}
+                                        </td>
+                                        <td className="py-1 pr-3 text-right tabular-nums text-muted-foreground">
+                                            {row.silent}
+                                        </td>
+                                        <td className={`py-1 text-right tabular-nums ${row.mismatch_rate > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                                            {row.reported > 0 ? `${row.mismatch_rate.toFixed(1)}%` : '—'}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    {mismatchSamples.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                            <div className="text-[11px] text-muted-foreground">{t('mismatchSampleTitle')}</div>
+                            {mismatchSamples.map((sample) => (
+                                <div key={sample.id} className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                                    <span className="rounded border border-border/60 px-1.5 py-0.5 text-muted-foreground">
+                                        #{sample.id}
+                                    </span>
+                                    <span>{sample.channel}</span>
+                                    <span className="text-muted-foreground">{sample.requested}</span>
+                                    <span className="text-muted-foreground">→</span>
+                                    <span className="text-muted-foreground">{sample.target_model}</span>
+                                    <span className="text-red-600">≠</span>
+                                    <span className="font-medium text-red-600">{sample.reported_model}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
         </section>
     );
 }

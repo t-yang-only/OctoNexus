@@ -52,6 +52,44 @@ export interface AnalyticsBucket {
     by_model_cost: Record<string, number>;
 }
 
+/**
+ * 一个渠道的「模型链路」一致性：客户端请求的模型名 → 渠道内目标模型名 → 上游自称回报的模型名。
+ *
+ * 为什么单独一档：这三段名字不放在一起看时，**「正常别名解析」和「上游偷换模型」长得一模一样**。
+ * 「请求 High-flash、实际跑 glm-5.3-flash」是分组名被解析成渠道模型名（正确路由）；
+ * 「请求 deepseek-v4.1-flash、上游回报 deepseek-v4-flash-0731」才是版本被换。
+ * 把前者算进不匹配率，界面就会把正常路由报成故障。
+ */
+export interface ModelChainStat {
+    channel: string;
+    requests: number;
+    /** 请求名 ≠ 目标名：分组名/别名被解析成渠道内的真实模型名。**正常路由，不是异常。** */
+    alias_resolved: number;
+    /** 上游**真的回报了**模型名的行数 —— 它是不匹配率的分母（不是 requests）。 */
+    reported: number;
+    /** matched + mismatched === reported。 */
+    matched: number;
+    /** 上游回报的名字与渠道内目标名不一致：模型被换了。 */
+    mismatched: number;
+    /** 上游没回报模型名：**既不算一致也不算不一致**，是"无法判定"。 */
+    silent: number;
+    /** mismatched / reported；分母为 0 时为 0。 */
+    mismatch_rate: number;
+}
+
+/** 一条具体的「上游换了模型」记录，用于从汇总定位到请求。 */
+export interface ModelMismatchSample {
+    id: number;
+    /** 客户端请求的（通常是分组名这类虚拟名）。 */
+    requested: string;
+    /** 渠道内实际要的目标模型名。 */
+    target_model: string;
+    /** 上游在响应里自称的模型名。 */
+    reported_model: string;
+    channel: string;
+    created_at: string;
+}
+
 export interface AnalyticsOverview {
     /** 实际参与统计的条数（库里不够时会少于请求的 window）。 */
     window: number;
@@ -90,6 +128,10 @@ export interface AnalyticsOverview {
     api_keys: DimensionUsageStat[];
     /** 按实际上游渠道聚合的用量（真正花钱的地方；failover 后与客户端填的分组名并不相同）。 */
     channels: DimensionUsageStat[];
+    /** 按渠道的模型链路一致性（不匹配多的渠道排在最前）。 */
+    model_chain: ModelChainStat[];
+    /** 最近的「上游换了模型」记录，按时间倒序，最多 20 条。 */
+    mismatch_samples: ModelMismatchSample[];
     /** 按时间升序。 */
     series: AnalyticsBucket[];
     /** 取满 window 条 —— 此时"总数"是最近 N 条而非全部历史，界面必须说明。 */

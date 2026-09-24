@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
@@ -85,6 +86,47 @@ type AnalyticsBucket struct {
 }
 
 // AnalyticsOverview 是"模型调用分析"的总览。
+// ModelChainStat 按渠道统计一次请求经过的**三段模型名**：
+//
+//	客户端请求的（model，通常是分组名这类虚拟名）→ 渠道内目标模型（target_model）→ 上游自称回报的（reported_model）
+//
+// 存在的理由：三段散落在日志各处时，**「正常别名解析」与「上游偷换模型」长得一模一样**。
+// 「请求 High-flash、实际 glm-5.3-flash」是分组名被解析成渠道模型名，属正确路由；
+// 「请求 deepseek-v4.1-flash、上游回 deepseek-v4-flash-0731」才是版本被换。
+// 两者必须分开计，否则界面会把正常路由显示成故障。
+type ModelChainStat struct {
+	Channel string `json:"channel"`
+	// Requests 是该渠道处理过的全部请求。
+	Requests int64 `json:"requests"`
+	// AliasResolved 是请求名与目标名不同的请求数：分组名/别名被解析成渠道内的真实模型名。
+	// **这是正常路由行为，不是异常**，单独给一个计数就是为了不让它污染不匹配率。
+	AliasResolved int64 `json:"alias_resolved"`
+	// Reported 是上游**真的回报了**模型名的行数 —— 它是不匹配率的分母。
+	// 不能用 Requests 当分母：上游沉默多的渠道会被稀释成"很健康"。
+	Reported int64 `json:"reported"`
+	// Matched 与 Mismatched 把 Reported 一分为二（Matched + Mismatched == Reported）。
+	Matched    int64 `json:"matched"`
+	Mismatched int64 `json:"mismatched"`
+	// Silent 是上游没回报模型名的行：**既不算匹配也不算不匹配**，是"无法判定"。
+	// 把它并进任何一侧都是编造结论。
+	Silent int64 `json:"silent"`
+	// MismatchRate = Mismatched / Reported（分母为 0 时是 0，不是 NaN）。
+	MismatchRate float64 `json:"mismatch_rate"`
+}
+
+// ModelMismatchSample 是一条具体的"上游换了模型"记录，用于从汇总定位到具体请求。
+type ModelMismatchSample struct {
+	ID            uint64 `json:"id"`
+	Requested     string `json:"requested"`
+	TargetModel   string `json:"target_model"`
+	ReportedModel string `json:"reported_model"`
+	Channel       string `json:"channel"`
+	CreatedAt     string `json:"created_at"`
+}
+
+// modelMismatchSampleLimit 是返回给界面的不匹配样本上限（按时间倒序取最新的）。
+const modelMismatchSampleLimit = 20
+
 type AnalyticsOverview struct {
 	// Window 是实际参与统计的条数（可能少于请求的 window，如库里不够）。
 	Window int64 `json:"window"`
@@ -135,6 +177,10 @@ type AnalyticsOverview struct {
 	// 注意它用的是**实际命中的渠道**（target_channel），不是客户端请求的分组名：
 	// 分组是逻辑入口，渠道才是真正花钱的地方，两者在 failover 后并不相同。
 	Channels []DimensionUsageStat `json:"channels"`
+	// ModelChain 按渠道给出三段模型名的对应关系与一致性（见 ModelChainStat）。
+	ModelChain []ModelChainStat `json:"model_chain"`
+	// MismatchSamples 是最近若干条"上游换了模型"的记录，按时间倒序。
+	MismatchSamples []ModelMismatchSample `json:"mismatch_samples"`
 	// Series 按时间升序。
 	Series []AnalyticsBucket `json:"series"`
 	// Truncated 标记统计的条数达到了 window 上限 —— 此时"总数"是最近 N 条而非全部历史。
@@ -233,6 +279,8 @@ func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview,
 		out.Models = []DimensionUsageStat{}
 		out.APIKeys = []DimensionUsageStat{}
 		out.Channels = []DimensionUsageStat{}
+		out.ModelChain = []ModelChainStat{}
+		out.MismatchSamples = []ModelMismatchSample{}
 		out.Series = []AnalyticsBucket{}
 		return out, nil
 	}
@@ -243,6 +291,8 @@ func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview,
 		channels: make(map[string]*DimensionUsageStat),
 	}
 	buckets := make(map[int64]*AnalyticsBucket)
+	chain := make(map[string]*ModelChainStat)
+	var samples []ModelMismatchSample
 	var acc analyticsAccumulator
 
 	for _, row := range rows {
@@ -268,6 +318,22 @@ func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview,
 		accumulateDimension(dims.apiKeys, apiKeyName, row)
 		accumulateDimension(dims.channels, channelName, row)
 
+		// 模型链路：三段模型名的对应关系与一致性。用渠道名分桶（与上面的渠道维度同键），
+		// 因为"哪个渠道在换模型"才是要回答的问题。
+		accumulateModelChain(chain, channelName, row)
+		// 不匹配样本按 id 倒序取最新的若干条：这里 rows 已经是 id DESC，
+		// 所以按遇到顺序收即可，不必再排序（够数就停，避免为一屏明细扫全窗口）。
+		if row.ModelMismatch && len(samples) < modelMismatchSampleLimit {
+			samples = append(samples, ModelMismatchSample{
+				ID:            row.ID,
+				Requested:     row.Model,
+				TargetModel:   row.TargetModel,
+				ReportedModel: row.ReportedModel,
+				Channel:       row.TargetChannel,
+				CreatedAt:     row.StartedAt.Format(time.RFC3339),
+			})
+		}
+
 		// 时间桶：按整点切。
 		hourStart := row.StartedAt.Truncate(time.Hour)
 		key := hourStart.Unix()
@@ -291,7 +357,91 @@ func AnalyticsOverviewStats(ctx context.Context, window int) (AnalyticsOverview,
 	}
 
 	finishAnalyticsOverview(&out, dims, buckets, acc)
+	finishModelChain(&out, chain, samples)
 	return out, nil
+}
+
+// accumulateModelChain 把一行日志归入它所属渠道的模型链路统计。
+//
+// 三态判定是这段的全部要点：上游回报了且一致 / 回报了但不一致 / 没回报（无法判定）。
+// "没回报"绝不能并进任何一侧 —— 那是在没有证据时替上游下结论。
+func accumulateModelChain(store map[string]*ModelChainStat, channel string, row model.RelayLog) {
+	stat, ok := store[channel]
+	if !ok {
+		stat = &ModelChainStat{Channel: channel}
+		store[channel] = stat
+	}
+	stat.Requests++
+	// 请求名与目标名不同 = 分组名/别名被解析成了渠道内的真实模型名，这是**正常路由**。
+	// 单独计数，正是为了不让它落进不匹配率里。
+	if modelsDiffer(row.Model, row.TargetModel) {
+		stat.AliasResolved++
+	}
+	if strings.TrimSpace(row.ReportedModel) == "" {
+		// 上游没回报模型名：判定不了它到底换了没有。
+		stat.Silent++
+		return
+	}
+	stat.Reported++
+	if row.ModelMismatch {
+		stat.Mismatched++
+	} else {
+		stat.Matched++
+	}
+}
+
+// modelsDiffer 判断两个模型名是否不同（用于"别名是否被解析过"）。
+//
+// 归一化规则必须与 relay 包的 modelMismatch 保持一致（裁剪空白 + 大小写不敏感），
+// 否则同一个 "GPT-4o" 在一处算相同、在另一处算不同。relay 依赖 op，op 不能反向 import
+// relay 复用它的实现，所以规则是**两份**：改这里必须同步改 internal/relay/upstream.go 的 modelMismatch。
+// 两处对"任一为空"的取向也一致：不算不同（缺一侧名字时无从比较）。
+func modelsDiffer(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return !strings.EqualFold(a, b)
+}
+
+// finishModelChain 收尾：算不匹配率、排序、落样本。
+//
+// 排序把"有问题的渠道"顶到最前：先按不匹配数倒序，再按请求数倒序，最后按渠道名升序。
+// 末位那个名字序是**确定性**要求的 —— 前两个键都相同时若依赖 map 遍历顺序，
+// 每次请求的列表顺序都会变，界面看着像在跳。
+func finishModelChain(out *AnalyticsOverview, store map[string]*ModelChainStat, samples []ModelMismatchSample) {
+	stats := make([]ModelChainStat, 0, len(store))
+	for _, stat := range store {
+		// 分母是 Reported 而不是 Requests：上游沉默的行没有判定依据，
+		// 放进分母会把"沉默多的渠道"稀释成"很健康"。
+		stat.MismatchRate = ratio(stat.Mismatched, stat.Reported)
+		stats = append(stats, *stat)
+	}
+	sortModelChainStats(stats)
+	out.ModelChain = stats
+	if samples == nil {
+		samples = []ModelMismatchSample{}
+	}
+	out.MismatchSamples = samples
+}
+
+// sortModelChainStats 是排序本体，独立成纯函数。
+//
+// 为什么不能把排序埋在 finishModelChain 里：它的输入来自 map 遍历，而 Go 的 map 遍历
+// 顺序是随机的 —— 一个"少写了末位键"的错误实现在测试数据上会**偶发**排对，
+// 用例时红时绿（本轮变异检查实测踩到：M5 去掉了渠道名次序，用例却仍然通过）。
+// 抽成接切片的纯函数后，用例喂顺序确定的输入就能稳定命中。
+func sortModelChainStats(stats []ModelChainStat) {
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].Mismatched != stats[j].Mismatched {
+			return stats[i].Mismatched > stats[j].Mismatched
+		}
+		if stats[i].Requests != stats[j].Requests {
+			return stats[i].Requests > stats[j].Requests
+		}
+		return stats[i].Channel < stats[j].Channel
+	})
 }
 
 // applyAnalyticsRow 把一行日志累计进全局维度（与 fault-stats 同一套分桶口径）。
