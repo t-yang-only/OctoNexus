@@ -13,6 +13,9 @@ import ZhipuIcon from '@thesvg/react/zhipu';
 import XAIIcon from '@thesvg/react/xai-grok';
 import SiliconFlowIcon from '@thesvg/react/siliconcloud-siliconflow';
 import AzureIcon from '@thesvg/react/azure-azure-openai';
+// Gemini API 与 Antigravity 都有现成图标（后者正是 Google 那条 Cloud Code 路线）。
+import GeminiIcon from '@thesvg/react/ai-studio-google';
+import AntigravityIcon from '@thesvg/react/antigravity-google';
 import type { Dialect } from '@/api/channel';
 
 // ChannelPreset 是服务商的地址, 路径与方言预填模板。
@@ -28,6 +31,9 @@ export type ChannelPreset = {
     openai_chat_completion_path: string;
     openai_response_path: string;
     anthropic_message_path: string;
+    // gemini_project 只有 antigravity 方言需要（Cloud Code PA 用它定位计费项目）。
+    // 不预填：它是使用者自己的 Google Cloud 项目 ID，不是服务商固有属性。
+    gemini_project?: string;
 };
 
 // 默认协议路径, 与后端 DDL 默认值一致。
@@ -112,6 +118,23 @@ export const CHANNEL_PRESETS: ChannelPreset[] = [
         id: 'azure', label: 'Azure OpenAI', Icon: AzureIcon,
         dialect: 'generic',
         base_url: '',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    // Gemini 走**原生协议**（/v1beta/models/{model}:generateContent），不是 OpenAI 兼容端点，
+    // 所以这里给的是服务根：完整路径含模型名，由后端转换器拼，前端没有路径字段可填。
+    {
+        id: 'gemini', label: 'Google Gemini', Icon: GeminiIcon,
+        dialect: 'generic',
+        base_url: 'https://generativelanguage.googleapis.com',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    // Antigravity = Google Cloud Code PA：线协议同样是 Gemini，差别在端点由后端转换器自选
+    // （prod / daily / autopush 三个 sandbox 主机）并要套它自己的信封与报文清理，
+    // 因此方言必须是 antigravity —— 选错了会打到公开的 Gemini 端点上，拿不到 Cloud Code 的能力。
+    {
+        id: 'antigravity', label: 'Antigravity', Icon: AntigravityIcon,
+        dialect: 'antigravity',
+        base_url: 'https://cloudcode-pa.googleapis.com',
         openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
     },
 ];

@@ -1345,6 +1345,8 @@
     },
     "form": {
       "stepPreset": "开始",
+      "geminiProject": "Gemini 项目 ID",
+      "geminiProjectHint": "只有 Antigravity 方言需要：用于定位计费项目，留空则由上游按凭据推断。",
       "stepConnection": "连接",
       "stepKeys": "凭据",
       "stepGrants": "模型",

@@ -97,6 +97,9 @@ function ChannelFormFields({ channel, onBack }: { channel?: ChannelDetail; onBac
             openai_chat_completion_path: preset.openai_chat_completion_path,
             openai_response_path: preset.openai_response_path,
             anthropic_message_path: preset.anthropic_message_path,
+            // 只有 antigravity 预置会带项目 ID（其余预置为 undefined，回落成空串）。
+            // 这里必须显式带过去：切预置后忘了它，antigravity 渠道就会以空项目发请求。
+            gemini_project: preset.gemini_project ?? '',
         });
         setStep('connection');
     };
@@ -203,6 +206,21 @@ function ChannelFormFields({ channel, onBack }: { channel?: ChannelDetail; onBac
                                     />
                                 </div>
                             ))}
+                            {/* 项目 ID 只在 antigravity 方言下出现：generic 的 Gemini 用 API Key 即可,
+                                多显示一个字段会让人以为漏填了必填项。 */}
+                            {state.dialect === 'antigravity' && (
+                                <div className="space-y-2">
+                                    <Label htmlFor={`${idPrefix}-gemini-project`}>{t('geminiProject')}</Label>
+                                    <Input
+                                        id={`${idPrefix}-gemini-project`}
+                                        value={state.gemini_project}
+                                        onChange={(e) => setState({ ...state, gemini_project: e.target.value })}
+                                        className="rounded-xl font-mono text-sm"
+                                        placeholder="my-gcp-project"
+                                    />
+                                    <p className="text-xs text-muted-foreground">{t('geminiProjectHint')}</p>
+                                </div>
+                            )}
                             <div className="flex flex-wrap items-center gap-6">
                                 {([['enabled', t('enabled')], ['proxy', t('proxy')]] as const).map(([field, label]) => (
                                     <label key={field} className="flex items-center gap-2 cursor-pointer">

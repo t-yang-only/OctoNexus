@@ -68,6 +68,7 @@ const PROTOCOL_LABELS: Record<number, string> = {
     [Protocol.OpenAIChatCompletion]: 'Chat',
     [Protocol.OpenAIResponse]: 'Response',
     [Protocol.AnthropicMessage]: 'Message',
+    [Protocol.GeminiContents]: 'Gemini',
 };
 
 // LogMetrics 渲染时间、API Key、耗时、费用和 Token 指标; card 变体用于卡片栅格, footer 变体用于弹窗底部。

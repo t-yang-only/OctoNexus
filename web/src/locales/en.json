@@ -1345,6 +1345,8 @@
     },
     "form": {
       "stepPreset": "Start",
+      "geminiProject": "Gemini project ID",
+      "geminiProjectHint": "Needed only by the Antigravity dialect: identifies the Cloud project to bill. Leave empty to let the upstream infer it.",
       "stepConnection": "Connection",
       "stepKeys": "Credentials",
       "stepGrants": "Models",

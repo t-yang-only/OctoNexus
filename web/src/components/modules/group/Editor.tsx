@@ -49,6 +49,7 @@ const PROTOCOL_TAGS = [
     { bit: Protocol.OpenAIChatCompletion, label: 'Chat' },
     { bit: Protocol.OpenAIResponse, label: 'Response' },
     { bit: Protocol.AnthropicMessage, label: 'Message' },
+    { bit: Protocol.GeminiContents, label: 'Gemini' },
 ];
 
 // FieldHelp 渲染配置字段的简短帮助提示。

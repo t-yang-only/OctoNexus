@@ -12,6 +12,8 @@ export type ChannelFormState = {
     openai_chat_completion_path: string;
     openai_response_path: string;
     anthropic_message_path: string;
+    // gemini_project 是 Google Cloud 项目 ID，只有 antigravity 方言用得到；generic 留空。
+    gemini_project: string;
     keys: { name: string; key: string; enabled: boolean; proxy_node_id: number }[];
     models: string[];
     grants: Map<string, number>; // 键为 grantKey(模型名, 凭据名), 值为 Protocol 位掩码。
@@ -45,6 +47,7 @@ export const emptyFormState: ChannelFormState = {
     openai_chat_completion_path: '/v1/chat/completions',
     openai_response_path: '/v1/responses',
     anthropic_message_path: '/v1/messages',
+    gemini_project: '',
     keys: [],
     models: [],
     grants: new Map(),
@@ -72,6 +75,8 @@ export function fromChannel(channel: ChannelDetail): ChannelFormState {
         openai_chat_completion_path: channel.openai_chat_completion_path,
         openai_response_path: channel.openai_response_path,
         anthropic_message_path: channel.anthropic_message_path,
+        // ?? '' 兜住旧后端不返回该字段的情况（同下面几个计费字段用 ?? 的理由）。
+        gemini_project: channel.gemini_project ?? '',
         keys: channel.keys.map(({ name, key, enabled, proxy_node_id }) => ({ name, key, enabled, proxy_node_id: proxy_node_id ?? 0 })),
         models: [...channel.models],
         grants: new Map(channel.grants.map((g) => [grantKey(g.model_name, g.key_name), g.protocols])),
@@ -100,6 +105,7 @@ export function toChannelConfig(state: ChannelFormState) {
         openai_chat_completion_path: state.openai_chat_completion_path.trim(),
         openai_response_path: state.openai_response_path.trim(),
         anthropic_message_path: state.anthropic_message_path.trim(),
+        gemini_project: state.gemini_project.trim(),
         proxy: state.proxy,
         custom_header: state.custom_header.filter((h) => h.header_key.trim() && h.header_value !== ''),
         channel_proxy: state.channel_proxy.trim(),

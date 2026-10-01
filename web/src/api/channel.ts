@@ -9,11 +9,17 @@ export const Protocol = {
     OpenAIChatCompletion: 1 << 1,
     OpenAIResponse: 1 << 2,
     AnthropicMessage: 1 << 3,
+    // GeminiContents 是 Google 的 Gemini 原生线协议（/v1beta/models/{model}:generateContent，
+    // 报文是 contents/parts）。位值必须与后端 model.ProtocolGeminiContents 一致。
+    GeminiContents: 1 << 4,
 } as const;
 
 // Dialect 是上游在标准协议之上的方言，决定出站转换器的厂商特化配置。
 // 地址与路径不属于方言范畴，由前端按服务商预填到渠道字段上。
-export type Dialect = 'generic';
+//
+// antigravity 是 Gemini 协议下的 Google 特化路线（Antigravity / Cloud Code PA）：
+// 线协议与 generic 相同，差别在端点由后端转换器自选、要套 Cloud Code 信封、报文要过 sanitizer。
+export type Dialect = 'generic' | 'antigravity';
 
 type CustomHeader = {
     header_key: string;
@@ -71,6 +77,13 @@ export type ChannelDetail = {
     openai_chat_completion_path: string;
     openai_response_path: string;
     anthropic_message_path: string;
+    // gemini_project 是 Google Cloud 项目 ID，**只有 antigravity 方言**用得到
+    //（Cloud Code PA 的部分调用要带它定位计费项目）；generic 方言留空即可。
+    //
+    // 注意这里**没有 gemini_contents_path**：上面三个路径字段存的是"完整端点路径"，
+    // 而 Gemini 的完整路径含模型名（/v1beta/models/{model}:generateContent），
+    // 单个固定字段表达不了 —— BaseURL 给出服务根，模型名与动作名由后端转换器拼。
+    gemini_project: string;
     keys: ChannelKey[];
     models: string[]; // 上游模型名称；模型除名称外没有界面用得上的字段。
     grants: ChannelGrant[];

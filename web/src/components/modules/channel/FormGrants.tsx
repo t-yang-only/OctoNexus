@@ -75,6 +75,7 @@ function GrantCells({ state, setState, models, keyNames, remove, icon: Icon, tip
             {cell(Protocol.OpenAIChatCompletion)}
             {cell(Protocol.OpenAIResponse)}
             {cell(Protocol.AnthropicMessage)}
+            {cell(Protocol.GeminiContents)}
             <span className="w-7 flex justify-center">
                 {remove && (
                     <IconButton
