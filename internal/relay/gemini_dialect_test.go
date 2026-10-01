@@ -89,10 +89,15 @@ func TestBuildOutboundGemini(t *testing.T) {
 		}
 	})
 
-	t.Run("路径缺省填 /v1beta/models", func(t *testing.T) {
-		cfg := model.ChannelConfig{}
-		if got := model.EndpointPathOrDefault(cfg.GeminiContentsPath, "/v1beta/models"); got != "/v1beta/models" {
-			t.Errorf("空路径取缺省 = %q, 想 /v1beta/models", got)
+	t.Run("Gemini 不设 EndpointPath", func(t *testing.T) {
+		// 这条守着一个实测踩过的坑：EndpointPath 的语义是"完整路径覆盖"，
+		// 一旦给它传 /v1beta/models 这种前缀，转换器按模型名拼好的
+		// /v1beta/models/{model}:generateContent 就被顶掉 ——
+		// 报文对、路径错（mock 上游实测收到 path=/v1beta/models）。
+		// 所以断言的是"建得出来且 BaseURL 生效"，而不是某个路径字段。
+		cfg := model.ChannelConfig{BaseURL: "https://example.com"}
+		if cfg.GeminiProject != "" {
+			t.Errorf("新渠道的 GeminiProject 应为空, 实际 %q", cfg.GeminiProject)
 		}
 	})
 }

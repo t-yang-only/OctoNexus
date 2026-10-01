@@ -71,9 +71,12 @@ func buildOutbound(channel model.Channel, grant model.ChannelGrant, channelKey m
 			})
 			return outbound, protocol, passthrough, err
 		}
+		// **不设 EndpointPath**：它的语义是"完整路径覆盖"，一设就把转换器自己按模型名
+		// 拼好的 /v1beta/models/{model}:generateContent 顶掉，请求打到 /v1beta/models 上
+		//（实测踩过：mock 上游收到 path=/v1beta/models，报文对、路径不对）。
+		// Gemini 的完整路径含模型名，单个固定路径字段表达不了，交给转换器按 BaseURL 拼。
 		outbound, err := gemini.NewOutboundTransformerWithConfig(gemini.Config{
-			BaseURL:        model.ChannelBaseURL(channel.BaseURL, model.EndpointPathOrDefault(channel.GeminiContentsPath, "/v1beta/models")),
-			EndpointPath:   channel.GeminiContentsPath,
+			BaseURL:        channel.BaseURL,
 			APIKeyProvider: key,
 		})
 		return outbound, protocol, passthrough, err

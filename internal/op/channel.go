@@ -21,7 +21,12 @@ var (
 )
 
 // 已定义的全部协议位, 用于校验提交的协议掩码。
-const definedProtocols = model.ProtocolOpenAIChatCompletion | model.ProtocolOpenAIResponse | model.ProtocolAnthropicMessage
+//
+// **新增协议位时必须同步这里**：这份白名单是保存渠道授权的唯一闸门，
+// 漏了它，前端/导入把该位填进来会被拒成
+// "channel grant protocols N is empty or contains undefined bits"（实测踩过：
+// 只加了 model 里的常量与 relay 的转换器分支，端到端发请求时才被这一步拦下）。
+const definedProtocols = model.ProtocolOpenAIChatCompletion | model.ProtocolOpenAIResponse | model.ProtocolAnthropicMessage | model.ProtocolGeminiContents
 
 // ChannelDetailGet 返回指定渠道的完整配置, 供编辑表单读取。
 func ChannelDetailGet(id int) (model.ChannelDetail, error) {
@@ -112,11 +117,10 @@ func ChannelUpdate(detail *model.ChannelDetail, ctx context.Context) (*model.Cha
 		if err := tx.Model(&model.Channel{}).Where("id = ?", detail.ID).
 			Select("name", "dialect", "enabled", "base_url",
 				"openai_chat_completion_path", "openai_response_path", "anthropic_message_path",
-				// Gemini 原生协议的两个字段同理必须点名（T-gemini-001）:
-				// 漏了 gemini_project，antigravity 方言的请求会不带计费项目，
-				// 漏了 gemini_contents_path，则所有 Gemini 调用都打到默认前缀上——
-				// 两种情况都是"保存返回 200、转发却不对"，且没有任何报错。
-				"gemini_contents_path", "gemini_project",
+				// Gemini 的 gemini_project 同理必须点名（T-gemini-001）:
+				// 漏了它，antigravity 方言的请求会不带计费项目，返回 200 但转发不对。
+				// （Gemini 没有"路径"字段：它的完整路径含模型名，由转换器按 BaseURL 拼。）
+				"gemini_project",
 				"proxy", "channel_proxy", "custom_header", "param_override", "match_regex",
 				// 计费事实（T-weight billing / T-allocate-001）必须在这份点名清单里:
 				// 渠道保存是整体替换语义, 漏一列就等于"面板上填了、库里没写"——缓存里有值,

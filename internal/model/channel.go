@@ -50,10 +50,11 @@ type ChannelConfig struct {
 	OpenAIChatCompletionPath string  `json:"openai_chat_completion_path" gorm:"column:openai_chat_completion_path;default:/v1/chat/completions"` // OpenAI Chat Completions 请求路径; 留空由后端填默认路径。
 	OpenAIResponsePath       string  `json:"openai_response_path" gorm:"column:openai_response_path;default:/v1/responses"`                      // OpenAI Responses 请求路径; 留空由后端填默认路径。
 	AnthropicMessagePath     string  `json:"anthropic_message_path" gorm:"column:anthropic_message_path;default:/v1/messages"`                   // Anthropic Messages 请求路径; 留空由后端填默认路径。
-	// GeminiContentsPath 是 Gemini 原生协议的前缀路径。Gemini 的模型名在**路径里**
-	//（/v1beta/models/{model}:generateContent），所以这里存的是 ":generateContent" 之前的
-	// 那一段前缀，模型名与动作名由转换器按各自协议拼上去。
-	GeminiContentsPath string `json:"gemini_contents_path" gorm:"column:gemini_contents_path;default:/v1beta/models"` // Gemini 原生协议前缀路径; 留空由后端填默认路径。
+	// **刻意没有 gemini_contents_path**：OpenAI 系那三个路径字段存的是"完整端点路径"，
+	// 而 Gemini 的完整路径含模型名（/v1beta/models/{model}:generateContent），
+	// 单个固定字段表达不了。BaseURL 给出服务根即可，模型名与动作名由转换器拼。
+	// （试过用该字段传前缀并塞进 EndpointPath —— 而 EndpointPath 语义是"完整路径覆盖"，
+	// 一设就把转换器拼好的路径顶掉，请求打到 /v1beta/models 上：报文对、路径错。）
 	// GeminiProject 是 Google Cloud 项目 ID，只有 antigravity 方言需要
 	//（Cloud Code PA 的部分调用要带 project 定位计费项目）。generic 方言留空即可。
 	GeminiProject string         `json:"gemini_project" gorm:"column:gemini_project"`                  // Google Cloud 项目 ID; 仅 antigravity 方言使用, 留空表示不指定。
