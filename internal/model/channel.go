@@ -12,6 +12,11 @@ const (
 	ProtocolOpenAIChatCompletion Protocol = 1 << 1 // OpenAI Chat Completions 协议。
 	ProtocolOpenAIResponse       Protocol = 1 << 2 // OpenAI Responses 协议。
 	ProtocolAnthropicMessage     Protocol = 1 << 3 // Anthropic Messages 协议。
+	// ProtocolGeminiContents 是 Google 的 Gemini 原生线协议 (generativelanguage 风格:
+	// POST /v1beta/models/{model}:generateContent, 请求体是 contents/parts)。
+	// 它与上面三种是**平行的线协议**而不是方言: 报文字段名与结构都不同,
+	// 因此必须占一个独立的协议位 (落库, 不可再变更), 不能靠方言表达。
+	ProtocolGeminiContents Protocol = 1 << 4
 )
 
 // 上游在标准协议之上的方言。
@@ -22,6 +27,14 @@ type Dialect string
 
 const (
 	DialectGeneric Dialect = "generic" // 标准协议, 不做任何厂商特化。
+	// DialectAntigravity 是 Gemini 协议下的 Google 特化路线 (Antigravity / Cloud Code PA)。
+	//
+	// 与 generic 的区别**不在线协议** —— 两者的 APIFormat 都是 gemini/contents —— 而在于:
+	//   · 端点由转换器自己选 (prod / daily / autopush 三个 sandbox 主机)，并有健康跟踪与故障转移；
+	//   · 请求要套 Cloud Code 自己的信封、带 X-Goog-Api-Client 等专属请求头；
+	//   · 报文要过一遍 sanitizer (剔除该后端不接受的字段)。
+	// 正是「同一协议下不同服务商的差异」这个方言定义本身，所以用 Dialect 表达而不是再加协议位。
+	DialectAntigravity Dialect = "antigravity"
 )
 
 // 渠道的可编辑配置; 落库时平铺成 channels 的各列, 出入 JSON 时平铺成渠道读写接口的各字段。
@@ -30,19 +43,26 @@ const (
 // 不带 binding 约束: 保存与探测都收这一份配置, 但两者的必填项不同 —— 探测发生在渠道尚未命名时,
 // 故必填校验分别由 normalizeChannelConfig 与 fetchUpstreamModels 按各自的需要给出。
 type ChannelConfig struct {
-	Name                     string         `json:"name" gorm:"unique;not null"`                                                                        // 渠道名称。
-	Dialect                  Dialect        `json:"dialect" gorm:"not null;default:generic"`                                                            // 上游方言, 决定出站转换器的厂商特化配置。
-	Enabled                  bool           `json:"enabled" gorm:"default:true"`                                                                        // 渠道是否可用。
-	BaseURL                  string         `json:"base_url"`                                                                                           // 上游地址, 各协议共用。
-	OpenAIChatCompletionPath string         `json:"openai_chat_completion_path" gorm:"column:openai_chat_completion_path;default:/v1/chat/completions"` // OpenAI Chat Completions 请求路径; 留空由后端填默认路径。
-	OpenAIResponsePath       string         `json:"openai_response_path" gorm:"column:openai_response_path;default:/v1/responses"`                      // OpenAI Responses 请求路径; 留空由后端填默认路径。
-	AnthropicMessagePath     string         `json:"anthropic_message_path" gorm:"column:anthropic_message_path;default:/v1/messages"`                   // Anthropic Messages 请求路径; 留空由后端填默认路径。
-	Proxy                    bool           `json:"proxy" gorm:"default:false"`                                                                         // 是否使用代理。
-	ChannelProxy             string         `json:"channel_proxy"`                                                                                      // 渠道专用代理地址; 留空表示不用渠道专用代理。
-	ProxyNodeID              int            `json:"proxy_node_id" gorm:"column:proxy_node_id;not null;default:0"`                                       // 渠道级出口节点(R-proxy-001); 0=未绑定。绑定后该渠道全部账号默认走这个节点的本地入站, 不看 Proxy 开关。
-	CustomHeader             []CustomHeader `json:"custom_header" gorm:"serializer:json"`                                                               // 追加到上游请求的 Header。
-	ParamOverride            string         `json:"param_override"`                                                                                     // 请求参数覆盖配置; 留空表示不覆盖。
-	MatchRegex               string         `json:"match_regex"`                                                                                        // 拉取模型列表时的过滤表达式; 留空表示不过滤。
+	Name                     string  `json:"name" gorm:"unique;not null"`                                                                        // 渠道名称。
+	Dialect                  Dialect `json:"dialect" gorm:"not null;default:generic"`                                                            // 上游方言, 决定出站转换器的厂商特化配置。
+	Enabled                  bool    `json:"enabled" gorm:"default:true"`                                                                        // 渠道是否可用。
+	BaseURL                  string  `json:"base_url"`                                                                                           // 上游地址, 各协议共用。
+	OpenAIChatCompletionPath string  `json:"openai_chat_completion_path" gorm:"column:openai_chat_completion_path;default:/v1/chat/completions"` // OpenAI Chat Completions 请求路径; 留空由后端填默认路径。
+	OpenAIResponsePath       string  `json:"openai_response_path" gorm:"column:openai_response_path;default:/v1/responses"`                      // OpenAI Responses 请求路径; 留空由后端填默认路径。
+	AnthropicMessagePath     string  `json:"anthropic_message_path" gorm:"column:anthropic_message_path;default:/v1/messages"`                   // Anthropic Messages 请求路径; 留空由后端填默认路径。
+	// GeminiContentsPath 是 Gemini 原生协议的前缀路径。Gemini 的模型名在**路径里**
+	//（/v1beta/models/{model}:generateContent），所以这里存的是 ":generateContent" 之前的
+	// 那一段前缀，模型名与动作名由转换器按各自协议拼上去。
+	GeminiContentsPath string `json:"gemini_contents_path" gorm:"column:gemini_contents_path;default:/v1beta/models"` // Gemini 原生协议前缀路径; 留空由后端填默认路径。
+	// GeminiProject 是 Google Cloud 项目 ID，只有 antigravity 方言需要
+	//（Cloud Code PA 的部分调用要带 project 定位计费项目）。generic 方言留空即可。
+	GeminiProject string         `json:"gemini_project" gorm:"column:gemini_project"`                  // Google Cloud 项目 ID; 仅 antigravity 方言使用, 留空表示不指定。
+	Proxy         bool           `json:"proxy" gorm:"default:false"`                                   // 是否使用代理。
+	ChannelProxy  string         `json:"channel_proxy"`                                                // 渠道专用代理地址; 留空表示不用渠道专用代理。
+	ProxyNodeID   int            `json:"proxy_node_id" gorm:"column:proxy_node_id;not null;default:0"` // 渠道级出口节点(R-proxy-001); 0=未绑定。绑定后该渠道全部账号默认走这个节点的本地入站, 不看 Proxy 开关。
+	CustomHeader  []CustomHeader `json:"custom_header" gorm:"serializer:json"`                         // 追加到上游请求的 Header。
+	ParamOverride string         `json:"param_override"`                                               // 请求参数覆盖配置; 留空表示不覆盖。
+	MatchRegex    string         `json:"match_regex"`                                                  // 拉取模型列表时的过滤表达式; 留空表示不过滤。
 
 	// 计费事实（R-weight-001 第二阶段）: 全部可选, 零值表示「未知」; 未知不做惩罚, 只按乐观先验参与加权。
 	// 这些是站点/渠道的属性, 由用户填写, 用来折算「实际有多贵」——价表只反映模型基准价, 反映不了倍率与按次计费。

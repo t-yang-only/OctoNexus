@@ -112,6 +112,11 @@ func ChannelUpdate(detail *model.ChannelDetail, ctx context.Context) (*model.Cha
 		if err := tx.Model(&model.Channel{}).Where("id = ?", detail.ID).
 			Select("name", "dialect", "enabled", "base_url",
 				"openai_chat_completion_path", "openai_response_path", "anthropic_message_path",
+				// Gemini 原生协议的两个字段同理必须点名（T-gemini-001）:
+				// 漏了 gemini_project，antigravity 方言的请求会不带计费项目，
+				// 漏了 gemini_contents_path，则所有 Gemini 调用都打到默认前缀上——
+				// 两种情况都是"保存返回 200、转发却不对"，且没有任何报错。
+				"gemini_contents_path", "gemini_project",
 				"proxy", "channel_proxy", "custom_header", "param_override", "match_regex",
 				// 计费事实（T-weight billing / T-allocate-001）必须在这份点名清单里:
 				// 渠道保存是整体替换语义, 漏一列就等于"面板上填了、库里没写"——缓存里有值,

@@ -11,6 +11,8 @@ import (
 	"github.com/looplj/axonhub/llm/httpclient"
 	"github.com/looplj/axonhub/llm/transformer"
 	"github.com/looplj/axonhub/llm/transformer/anthropic"
+	"github.com/looplj/axonhub/llm/transformer/antigravity"
+	"github.com/looplj/axonhub/llm/transformer/gemini"
 	"github.com/looplj/axonhub/llm/transformer/openai"
 	"github.com/looplj/axonhub/llm/transformer/openai/responses"
 	"github.com/t-yang-only/OctoNexus/internal/model"
@@ -31,6 +33,10 @@ func buildOutbound(channel model.Channel, grant model.ChannelGrant, channelKey m
 			protocol = model.ProtocolOpenAIResponse
 		case grant.Protocols&model.ProtocolOpenAIChatCompletion != 0:
 			protocol = model.ProtocolOpenAIChatCompletion
+		// Gemini 排在**最后**：它只影响"渠道只支持 Gemini"这一种新情况，
+		// 渠道同时支持 OpenAI 系与 Gemini 时的选择与加它之前逐字一致。
+		case grant.Protocols&model.ProtocolGeminiContents != 0:
+			protocol = model.ProtocolGeminiContents
 		}
 	}
 
@@ -51,6 +57,25 @@ func buildOutbound(channel model.Channel, grant model.ChannelGrant, channelKey m
 		outbound, err := anthropic.NewOutboundTransformerWithConfig(&anthropic.Config{Type: anthropic.PlatformDirect,
 			BaseURL:      model.ChannelBaseURL(channel.BaseURL, model.EndpointPathOrDefault(channel.AnthropicMessagePath, "/v1/messages")),
 			EndpointPath: channel.AnthropicMessagePath, APIKeyProvider: key})
+		return outbound, protocol, passthrough, err
+	case model.ProtocolGeminiContents:
+		// Gemini 有两条上游路线，由**方言**区分（这正是 Dialect 存在的理由：
+		// 同一线协议下不同服务商在报文与端点上的差异，地址与路径表达不了）。
+		//   generic     → Google 官方 Gemini API（BaseURL 缺省即 generativelanguage）；
+		//   antigravity → Antigravity / Cloud Code PA（自家选端点、套信封、过 sanitizer）。
+		if channel.Dialect == model.DialectAntigravity {
+			outbound, err := antigravity.NewTransformer(antigravity.Config{
+				BaseURL: channel.BaseURL,
+				APIKey:  channelKey.Key,
+				Project: channel.GeminiProject,
+			})
+			return outbound, protocol, passthrough, err
+		}
+		outbound, err := gemini.NewOutboundTransformerWithConfig(gemini.Config{
+			BaseURL:        model.ChannelBaseURL(channel.BaseURL, model.EndpointPathOrDefault(channel.GeminiContentsPath, "/v1beta/models")),
+			EndpointPath:   channel.GeminiContentsPath,
+			APIKeyProvider: key,
+		})
 		return outbound, protocol, passthrough, err
 	default:
 		return nil, 0, false, fmt.Errorf("channel grant %d supports no known protocol: %d", grant.ID, grant.Protocols)
