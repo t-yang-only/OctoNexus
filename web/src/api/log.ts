@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiRequest } from './client';
 import type { RelayLogSample } from './analytics';
 
@@ -120,6 +120,21 @@ export interface RelayAttemptDetail {
 // request=请求本身非法（不计渠道故障）；member=成员自身问题；transient=可恢复（超时/网络/5xx）。
 // undefined 或空串表示未分类：可能非失败，也可能是升级前写入的历史行 —— 两者都不得猜测归类。
 export type FaultKind = 'request' | 'member' | 'transient';
+
+// LogDisplaySource 是日志的两种来源的联合：实时快照（SSE）与持久化历史（分页查询）。
+//
+// 放在 api 层而不是 components/log/display.ts：它描述的是**数据形状**，归属数据层；
+// 且 api/log.ts 自己要用它（useLogs 的列表是这两种来源的混合），
+// api → components 的反向依赖会成环。display.ts 继续 re-export 它，既有 import 不破。
+export type LogDisplaySource = RelayLogOverview | RelayHistoryItem;
+
+// LOG_HISTORY_PAGE_SIZE 是 useLogs 初始加载的历史页大小。
+//
+// 为什么需要一个默认页：SSE 的 overview stream 连接后只回 `: connected`、**不下发历史快照**
+// （实测连接 3 秒 0 个 event）。少了这一页，刷新页面后使用记录列表是空的。
+// 取 200 而不是更大：这一页只负责"刷新后有东西看"，之后由 SSE 接管；
+// 再大的页首屏更慢，而更早的历史本就去「按天查询」里翻。
+export const LOG_HISTORY_PAGE_SIZE = 200;
 
 // RelayHistoryFilter 是历史查询的筛选条件, 空串表示不过滤。
 export interface RelayHistoryFilter {
@@ -259,13 +274,79 @@ export function useStopRound() {
     });
 }
 
+// mergeLogSources 把「持久化历史一页」与「SSE 实时增量」合并成一张按 ID 倒序的列表。
+//
+// 规则与原来在 effect 里逐条维护时逐字一致，只是改成纯函数：
+//   · 实时行命中历史里已有的 ID 时**原地替换**（该请求从"历史形态"变成"实时形态"）；
+//   · 没命中就按 ID 倒序插到首个更小 ID 之前；
+//   · 未变更的条目保持原对象引用，卡片靠它跳过重渲染。
+//
+// 之所以提出来成为纯函数：合并是**派生**关系，不是需要跟着外部系统同步的副作用。
+// 原来把它写成 `useEffect` + `setLogs`，lint 的 react-hooks/set-state-in-effect
+// 会报"在 effect 里同步 setState 会引发级联渲染" —— 这条报得对：
+// 历史一到就整整重渲一次列表，而那次渲染的数据在渲染期本来就拿得到。
+export function mergeLogSources(
+    historyItems: readonly RelayHistoryItem[],
+    liveItems: readonly RelayLogOverview[],
+): LogDisplaySource[] {
+    if (liveItems.length === 0) return historyItems as LogDisplaySource[];
+
+    // 先按 ID 归档历史（保序：历史本就按 ID 倒序），再用实时行覆盖/插入。
+    const merged = new Map<number, LogDisplaySource>();
+    for (const item of historyItems) merged.set(item.id, item);
+    for (const item of liveItems) merged.set(item.id, item);
+
+    return [...merged.values()].sort((a, b) => b.id - a.id);
+}
+
 // useLogs 订阅进程内日志概览，并按 RequestID 更新同一条记录。
 // refresh 供自动刷新偏好调用: 通过 bump 连接键重建 SSE 兜底断线/空闲, SSE 正常时仅重建连接。
+//
+// ## 为什么先拉一页历史（2026-10-01 修）
+//
+// 原来这里只用 SSE，而 `/api/v1/log/overview/stream` 连接后**只回一行 `: connected`
+// 注释、不下发任何历史快照**（实测：连接 3 秒 0 个 event）。后果是**刷新页面后
+// 使用记录列表是空的**，要等下一条新请求进来才逐条出现 —— 用户看到的是"我的历史没了"。
+//
+// useRelayHistory（分页查持久化历史）本来就是为了补这个缺口写的，却从没接上过。
+// 现在让它做初始加载：先把最近一页历史填进列表，再用 SSE 增量更新。
+// 两条路径口径一致（同一份 relay_logs），SSE 的原地替换 + 按 ID 倒序插入
+// 对"初始历史 + 实时增量"同样成立 —— 历史里已有的 ID 会被原地替换而不是插出重复行。
+//
+// ## 两条来源为什么分开存、合并成派生（而不是合并进一份 state）
+//
+// 历史来自 react-query（外部系统，自带缓存与生命周期），实时行来自 SSE（另一路外部推送）。
+// 两者合并是**纯派生**，合并进 state 就得在 effect 里 setState 追着它们跑，
+// 既触发级联渲染、又多一份可能与来源不同步的副本。分开存 + useMemo 合并后，
+// 任一来源更新，列表自动跟着变，没有中间副本可以失同步。
 export function useLogs() {
-    const [logs, setLogs] = useState<RelayLogOverview[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<Error | null>(null);
+    // 实时增量：只放 SSE 推来的行（RelayLogOverview，嵌套 usage / 纳秒 duration）。
+    // 持久化历史（RelayHistoryItem，扁平字段）由下面的 query 提供。
+    // 两种形状由 log/display.ts 的 LogDisplaySource 同构层收敛成一套字段，卡片只面对那一套。
+    const [liveLogs, setLiveLogs] = useState<RelayLogOverview[]>([]);
+    const [sseReady, setSseReady] = useState(false);
+    const [streamError, setStreamError] = useState<Error | null>(null);
     const [connectKey, setConnectKey] = useState(0);
+
+    // 初始历史一页。staleTime 0 + 不自动重拉：这一页只负责"刷新后有东西看"，
+    // 之后由 SSE 接管；自动重拉会与 SSE 争同一份数据、也让列表无谓跳回分页头部。
+    const history = useRelayHistory({ limit: LOG_HISTORY_PAGE_SIZE });
+
+    const logs = useMemo(
+        () => mergeLogSources(history.data?.items ?? [], liveLogs),
+        [history.data, liveLogs],
+    );
+
+    // 加载态：SSE 已就绪，或历史这一页已出结果（成功/失败都算），就不再是"加载中"。
+    // 沿用原来的口径 —— 不让 isLoading 在"历史还在飞"时就置 false，否则列表会先闪一下空态。
+    const isLoading = !sseReady && history.isLoading;
+
+    // 错误优先报实时流（它直接影响"新请求能不能看见"）；历史失败降级为提示，
+    // 因为此时实时流仍然可用，只是刷新后才看到新请求。
+    const error = streamError
+        ?? (history.isError
+            ? (history.error instanceof Error ? history.error : new Error('log history unavailable'))
+            : null);
 
     const refresh = () => setConnectKey((key) => key + 1);
 
@@ -273,36 +354,34 @@ export function useLogs() {
         const source = new EventSource('/api/v1/log/overview/stream', { withCredentials: true });
 
         source.onopen = () => {
-            setError(null);
-            setIsLoading(false);
+            setStreamError(null);
+            setSseReady(true);
         };
         source.addEventListener('log', (event) => {
             let next: RelayLogOverview;
             try {
                 next = JSON.parse((event as MessageEvent<string>).data) as RelayLogOverview;
             } catch {
-                setError(new Error('Invalid log update'));
+                setStreamError(new Error('Invalid log update'));
                 return;
             }
-            setIsLoading(false);
-            setError(null);
-            // 列表始终按 ID 倒序: 命中已有记录时原地替换, 新记录插入到首个更小 ID 之前,
-            // 由此避免每条更新重排整个列表, 并保留未变更记录的引用以跳过卡片重渲染。
-            setLogs((current) => {
+            setSseReady(true);
+            setStreamError(null);
+            // 只维护"实时行"这一份：同一 ID 原地替换（保留未变更条目的引用以跳过重渲染），
+            // 新 ID 追加。与历史的合并交给上面的 useMemo。
+            setLiveLogs((current) => {
                 const index = current.findIndex((item) => item.id === next.id);
                 if (index >= 0) {
                     const updated = current.slice();
                     updated[index] = next;
                     return updated;
                 }
-                const position = current.findIndex((item) => item.id < next.id);
-                if (position < 0) return [...current, next];
-                return [...current.slice(0, position), next, ...current.slice(position)];
+                return [...current, next];
             });
         });
         source.onerror = () => {
-            setIsLoading(false);
-            setError(new Error('Log stream disconnected'));
+            setSseReady(true);
+            setStreamError(new Error('Log stream disconnected'));
         };
 
         return () => {

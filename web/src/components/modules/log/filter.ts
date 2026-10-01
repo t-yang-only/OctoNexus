@@ -1,4 +1,5 @@
-import type { FaultKind, RelayLogOverview, RequestState } from '@/api/log';
+import type { FaultKind, LogDisplaySource, RequestState } from '@/api/log';
+import { resolveLogDisplay } from './display';
 
 // LogFaultFilter 是失败归因的筛选值: all 表示不过滤, none 表示只看未分类。
 export type LogFaultFilter = FaultKind | 'all' | 'none';
@@ -39,30 +40,37 @@ function dayStart(value: string): number {
 
 // matchLogMemoryFilter 判断单条日志是否通过内存筛选。
 // 归因筛选只在"失败"这一维上有意义, 但它不强制 status=failed: 用户可能想连成功一起看自己筛出来的样本。
-export function matchLogMemoryFilter(log: RelayLogOverview, filter: LogMemoryFilter): boolean {
+// matchLogMemoryFilter 对一条日志做本地过滤。
+//
+// 入参是联合类型（LogDisplaySource）：列表初始一页持久化历史 + SSE 实时增量。
+// 因此**不能直接读 log.status / log.fault_kind** —— 两种来源形状不同
+// （实时快照的 status 是 RequestState 联合、历史的 status 是 string），
+// 直接比会让「按状态筛选」在历史行上全部落空。统一走同构层 resolveLogDisplay。
+export function matchLogMemoryFilter(log: LogDisplaySource, filter: LogMemoryFilter): boolean {
+  const display = resolveLogDisplay(log);
     // 日期范围（需求4）。半开区间 [from 00:00, to 次日 00:00)：
     // "查 9月24日"不含 9月25日 00:00 之后的数据，相邻两天的边界也不重复计入。
     // 非法日期不过滤也不报错 —— 输入框自身是 type="date"，浏览器已挡住绝大部分错值；
     // 真出现非法值时不过滤比"永远查不到东西"更接近用户意图。
     if (filter.from) {
         const from = dayStart(filter.from);
-        if (!Number.isNaN(from) && new Date(log.started_at).getTime() < from) return false;
+        if (!Number.isNaN(from) && new Date(display.startedAt).getTime() < from) return false;
     }
     if (filter.to) {
         const to = dayStart(filter.to);
         if (!Number.isNaN(to)) {
             const toExclusive = to + 24 * 60 * 60 * 1000;
-            if (new Date(log.started_at).getTime() >= toExclusive) return false;
+            if (new Date(display.startedAt).getTime() >= toExclusive) return false;
         }
     }
     // 按 API Key 精确匹配（需求4）。空串=不过滤；全等而不是包含，
     // 与 query 的四列包含匹配分工（见 LogMemoryFilter.apikey 注释）。
-    if (filter.apikey && log.api_key_name !== filter.apikey) return false;
-    if (filter.status !== 'all' && log.status !== filter.status) return false;
+    if (filter.apikey && display.apiKeyName !== filter.apikey) return false;
+    if (filter.status !== 'all' && display.status !== filter.status) return false;
     if (filter.faultKind !== 'all') {
         // 空串与 undefined 必须归为同一档: 后端对未分类下发空串(omitempty 也可能整个字段缺席),
         // 用 falsy 判断而不是 === undefined, 否则「只看未分类」会漏掉带空串的那批。
-        const kind = log.fault_kind || '';
+        const kind = display.faultKind || '';
         if (filter.faultKind === 'none' ? kind !== '' : kind !== filter.faultKind) return false;
     }
     if (filter.isTest !== 'all') {

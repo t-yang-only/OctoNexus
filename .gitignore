@@ -38,3 +38,4 @@ sites.json
 # 内部协作过程记录（含生产域名/主机名/部署细节），只留本地不进公开库
 docs/agents/
 docs/worklog/
+octopus-linux-*

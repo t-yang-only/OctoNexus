@@ -1,4 +1,4 @@
-import type { RelayAttemptDetail, RelayHistoryItem, RelayLogOverview } from '@/api/log';
+import type { FaultKind, LogDisplaySource, RelayAttemptDetail, RelayLogOverview } from '@/api/log';
 
 // 日志卡片的容错字段解析（NM-DS-008；语义借鉴 fork 的 display.ts，实现按本地数据结构重写）。
 //
@@ -18,7 +18,8 @@ import type { RelayAttemptDetail, RelayHistoryItem, RelayLogOverview } from '@/a
 //   实际模型：target_model → 客户端请求的 model（未选出成员时，界面至少显示请求的模型名）
 //   费用   ：cost（两个来源都直接给；缺失即 0，不在前端凭价格表推算）
 
-export type LogDisplaySource = RelayLogOverview | RelayHistoryItem;
+// LogDisplaySource 与 LogDisplayFields 的权威定义在 api/log.ts（数据形状归属数据层）。
+// 这里经顶部 import 直接使用，不再本地 re-export，避免同一文件里两个同名声明。
 
 export interface LogDisplayFields {
     requestId: number;
@@ -68,6 +69,14 @@ export interface LogDisplayFields {
     // 界面不标出来，这个预期就变成了让人反复查的疑点。
     isTest: boolean;
     apiKeyName: string;
+    // faultKind 是失败的归因分类（request=请求本身非法 / member=成员自身问题 /
+    // transient=可恢复）；空串表示非失败或未分类。
+    //
+    // **按归因筛选必须经这一项取，不能直接读 source.fault_kind**：实时快照与历史行
+    // 都有这个字段但形状不同，而更关键的是"归因筛选"要在两种来源上都成立——
+    // 列表初始一页是持久化历史（2026-10-01 起），直接读会让历史行的归因筛选全部落空。
+    // 与 isTest 同口径：空串与 undefined 归为同一档。
+    faultKind: FaultKind | '';
     error: string;
     // attemptChain 是每一轮尝试的明细链（T-trace-001），按轮次升序；老数据为空数组。
     //
@@ -110,7 +119,16 @@ export interface LogDisplayFields {
 }
 
 // isLiveOverview 判断来源是实时快照（有嵌套 usage）还是持久化历史行。
-function isLiveOverview(source: LogDisplaySource): source is RelayLogOverview {
+//
+// 导出给卡片用：实时快照带 round / sending / round_started_at —— 描述的是**正在发生的这一轮**；
+// 持久化历史行是终态快照，结构上没有"正在进行的轮次"这个概念（字段根本不存在）。
+// 展示层其余字段两者同构（由 resolveLogDisplay 抹平），只有「轮次链累积」与
+// 「停止本轮」这类**作用于在途请求**的逻辑必须限定在实时快照上。
+//
+// 调用方必须用它做**类型谓词**而不是布尔守卫：块内要读 round / sending / round_started_at，
+// 只判布尔的话 TS 仍按联合类型检查 —— 实测加 `logDisplay.source === 'live' &&` 后
+// 17 处报错一处都没少。
+export function isLiveOverview(source: LogDisplaySource): source is RelayLogOverview {
     return 'usage' in source;
 }
 
@@ -227,6 +245,10 @@ export function resolveLogDisplay(source: LogDisplaySource, now: number = Date.n
         // 只有显式 true 才算测试请求：老数据、非测试流量、字段缺失都必须落到 false，
         // 否则默认把真实流量标成"测试"，比不标更糟（统计与标记会各说一套）。
         isTest: source.is_test === true,
+        // 归因两个来源都有且同型（fault_kind?: FaultKind），不必按 live 分流。
+        // 空串归一：undefined / '' / 缺字段都归到"未分类"这一档，
+        // 与 isTest 的 `=== true` 反向对称（那边只有显式 true 才算测试）。
+        faultKind: source.fault_kind || '',
         error: source.error || '',
         // 尝试链: 实时快照是 attempt_chain（进程内 RequestState），历史行是 attempt_detail（落库字段，
         // 见 model.RelayLog —— 用 AttemptDetail 是为了与 RelayLog.Attempts 计数区分开）。
