@@ -1,0 +1,33 @@
+[Unit]
+Description=OctoNexus (octopus) LLM API 聚合中转
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=octonexus
+Group=octonexus
+WorkingDirectory=/opt/octonexus
+ExecStart=/opt/octonexus/octopus start
+Restart=always
+RestartSec=3
+# 部署形态是「单二进制 + 同目录 data/」：数据库、凭据密钥文件、配置都落在 WorkingDirectory 下。
+# 端口在 data/config.json 或用环境变量覆盖（生产建议保持默认 3303/1234）。
+# Environment=OCTOPUS_SERVER_ADMIN_PORT=3303
+# Environment=OCTOPUS_SERVER_RELAY_PORT=1234
+#
+# 渠道凭据的加密密钥来源（二选一，环境变量优先）：
+#   1) 设下面这行并把值存进密码管理器 —— 与官方账号共用同一把密钥；
+#   2) 不设：首次启动会在 /opt/octonexus/data/credential.key 自动生成，**该文件必须随备份保存**。
+# Environment=OCTOPUS_OFFICIAL_KEY=changeme
+
+# 基础加固：服务只需要写自己的工作目录。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+# 端口 <1024 才需要这条；默认端口不需要，保持注释。
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

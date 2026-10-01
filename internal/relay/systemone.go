@@ -1,0 +1,282 @@
+package relay
+
+import (
+	"bytes"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/t-yang-only/OctoNexus/internal/model"
+	"github.com/t-yang-only/OctoNexus/internal/op"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
+)
+
+// T-verify-002 TypeSafe AI「System One」评估接口的兼容转发。
+//
+// ## 为什么需要一个专门的转发器
+//
+// TypeSafe 的 Jev 不是聊天模型，它的接口形态与三家标准协议都不同：
+//
+//	POST /v1/systemone
+//	{"model":"jev-latest","state":<要评估的内容>,"questions":{"q1":{"type":"noul","instructions":"..."}}}
+//	→ {"model":"jev-1.13.0","answers":{"q1":{"type":"noul","noul":0.99}},"usage":{...}}
+//
+// 请求体是 state + typed questions，响应是结构化答案（choice/score/noul），
+// 全程没有 messages/choices 这些概念。因此它**过不了协议转换层**：
+// 塞进 OpenAI 协议会被当成非法请求，反过来也一样。
+//
+// 做法是"复用选路、绕开转换"：分组、成员、冷却、重试这些决定"走哪个渠道"的能力
+// 与协议无关，照常复用；只有 body 的编解码不走 transformer，原样透传。
+//
+// ## 请求里的 model 填什么
+//
+// 填**分组名**（与其他协议一致，如 `TypeSafe/jev-latest`）。
+// 转发时把它改写成渠道下的真实模型名（`jev-latest`）—— 与既有链路同口径：
+// 客户端只认分组名，上游只认模型名，两者之间的翻译由网关完成。
+func ForwardSystemOne() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw, err := readInboundRequest(c.Request)
+		if err != nil {
+			rejectJSON(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		requested := strings.TrimSpace(gjson.GetBytes(raw.Body, "model").String())
+		if requested == "" {
+			rejectJSON(c, http.StatusBadRequest, "model is required")
+			return
+		}
+
+		// API Key 限定模型范围时同样要放行检查（与其它协议一致）。
+		if allowed, ok := c.Get("supported_models"); ok {
+			if names, _ := allowed.([]string); len(names) > 0 && !containsString(names, requested) {
+				// 已通过鉴权 ⇒ 必须留痕（T-reject-001）：这条路径过去只回 400，
+				// 日志页一条记录都没有，用户无从排查。
+				//
+				// 消息带允许清单（与其它协议同口径）：只说"不支持"而不说"支持哪些"，
+				// 客户端不知道该把 model 改成什么。清单过长时截断。
+				message := keyScopeRejectMessage(names)
+				recordSystemOneRejected(c, requested, message, stopReasonKeyScope, stopSourceConfig)
+				rejectJSON(c, http.StatusBadRequest, message)
+				return
+			}
+		}
+
+		group, err := op.GroupGetByName(requested)
+		if err != nil {
+			// 与其它协议同款：先按原名找，找不到再过一层重写规则。
+			rewritten, matched := op.ModelMappingResolveByName(requested)
+			if !matched {
+				message := modelNotFoundError(requested).Error()
+				recordSystemOneRejected(c, requested, message, stopReasonModelNotFound, stopSourceClient)
+				rejectJSON(c, http.StatusBadRequest, message)
+				return
+			}
+			group, err = op.GroupGetByName(rewritten)
+			if err != nil {
+				message := modelNotFoundError(requested).Error()
+				recordSystemOneRejected(c, requested, message, stopReasonModelNotFound, stopSourceClient)
+				rejectJSON(c, http.StatusBadRequest, message)
+				return
+			}
+		}
+
+		flat, topCounts := op.FlattenGroupItemsWithTopCounts(group)
+		if len(flat) == 0 {
+			// 与标准协议的 no_available_member 对称：分组没有成员是配置/授权问题, 必须留痕。
+			message := "group has no member"
+			recordSystemOneRejected(c, requested, message, stopReasonNoMember, stopSourceConfig)
+			rejectJSON(c, http.StatusBadRequest, message)
+			return
+		}
+		item := PickGroupItem(group, flat)
+		if item.ID == 0 {
+			rejectJSON(c, http.StatusServiceUnavailable, "no available member (all cooling or disabled)")
+			return
+		}
+
+		// 判定文本与其它协议同源（T-decision-001）：这条路径有分组、也真的在按机制选人，
+		// 所以必须报告真实的模式/理由/序号，而不是一个写死的入口名。
+		decision := systemOneDecision(group, flat, topCounts, item.ID).Text()
+
+		grant, err := op.ChannelGrantGet(item.GrantRef())
+		if err != nil {
+			rejectJSON(c, http.StatusBadGateway, "grant unavailable: "+err.Error())
+			return
+		}
+		if grant.ChannelKey == nil {
+			rejectJSON(c, http.StatusBadGateway, "member has no credential")
+			return
+		}
+		channel, err := op.ChannelGet(grant.ChannelModel.ChannelID)
+		if err != nil {
+			rejectJSON(c, http.StatusBadGateway, "channel unavailable: "+err.Error())
+			return
+		}
+
+		// 把 model 改写成渠道下的真实模型名；其余字段原样保留（state/questions 是上游的契约）。
+		body, err := sjson.SetBytes(raw.Body, "model", grant.ChannelModel.Name)
+		if err != nil {
+			rejectJSON(c, http.StatusBadRequest, "rewrite model: "+err.Error())
+			return
+		}
+
+		target := systemOneURL(channel.BaseURL)
+		started := time.Now()
+		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, target, bytes.NewReader(body))
+		if err != nil {
+			rejectJSON(c, http.StatusBadGateway, err.Error())
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+grant.ChannelKey.Key)
+		for _, h := range channel.CustomHeader {
+			req.Header.Set(h.HeaderKey, h.HeaderValue)
+		}
+
+		client := &http.Client{Timeout: 5 * time.Minute}
+		resp, err := client.Do(req)
+		if err != nil {
+			recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, decision, started, 0, 0, err.Error())
+			rejectJSON(c, http.StatusBadGateway, "upstream request failed: "+err.Error())
+			return
+		}
+		defer resp.Body.Close()
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024*1024))
+		if readErr != nil {
+			recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, decision, started, 0, 0, readErr.Error())
+			rejectJSON(c, http.StatusBadGateway, "read upstream response: "+readErr.Error())
+			return
+		}
+
+		// 用量口径与上游一致（input_tokens/output_tokens），与 OpenAI 的 prompt/completion 不同名。
+		inTokens := gjson.GetBytes(respBody, "usage.input_tokens").Int()
+		outTokens := gjson.GetBytes(respBody, "usage.output_tokens").Int()
+
+		if resp.StatusCode >= 400 {
+			// 上游拒绝：把原文透传给客户端（它带明确的错误类型，比网关改写过的更有用），
+			// 同时记进日志 —— 否则"为什么失败"只能靠抓包。
+			recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, decision, started,
+				inTokens, outTokens, string(respBody))
+			c.Data(resp.StatusCode, "application/json", respBody)
+			return
+		}
+
+		recordSystemOneLog(c, requested, channel.Name, grant.ChannelModel.Name, decision, started, inTokens, outTokens, "")
+		c.Data(resp.StatusCode, "application/json", respBody)
+	}
+}
+
+// systemOneURL 拼上游的 systemone 端点。
+//
+// base_url 归一化：用户可能填 https://api.typesafe.ai 或 https://api.typesafe.ai/v1，
+// 两种都要拼成同一个地址。少一次归一化就会出现 /v1/v1/systemone 这种 404，
+// 而错误信息只会说 "Not Found"，排查起来要绕一圈。
+func systemOneURL(base string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if strings.HasSuffix(base, "/v1") {
+		return base + "/systemone"
+	}
+	return base + "/v1/systemone"
+}
+
+// recordSystemOneLog 把这次评估落进请求日志，让它在面板的日志页里与其它请求一样可见。
+//
+// 不记的话，System One 的调用在面板上完全不存在 —— 用户会以为请求没发出去。
+func recordSystemOneLog(c *gin.Context, model_, channel, targetModel, decision string, started time.Time,
+	inTokens, outTokens int64, errText string) {
+	status := "success"
+	if errText != "" {
+		status = "failed"
+	}
+	apiKeyName := ""
+	if v, ok := c.Get("api_key_name"); ok {
+		if s, _ := v.(string); s != "" {
+			apiKeyName = s
+		}
+	}
+	op.RelayLogSave(model.RelayLog{
+		Status:         status,
+		Model:          model_,
+		APIKeyName:     apiKeyName,
+		TargetChannel:  channel,
+		TargetModel:    targetModel,
+		StartedAt:      started,
+		FirstByteMs:    -1, // 非流式：首字节与总耗时同义，这里只记总耗时
+		DurationMs:     time.Since(started).Milliseconds(),
+		Attempts:       1,
+		Decision:       decision,
+		PromptTokens:   inTokens,
+		CompletionToks: outTokens,
+		Error:          truncateText(errText, 500),
+		// 测试请求标记（T-trace-006）：与其它协议同源，都从请求头声明，
+		// 这样"评估请求算不算样本"在四条转发路径上是同一个口径。
+		IsTest: isTestRequest(c),
+		// 两个协议位都留 0（T-trace-004）：systemone 是自定义形态，既不属于三种标准协议，
+		// 也不做协议转换（body 原样透传）。在这里写明是**有意的留空**而不是漏填 ——
+		// 日志页会把「入站协议=上游协议=无」显示成"没有协议信息"，那正是它的事实。
+	})
+}
+
+// recordSystemOneRejected 记录一次「还没开始选路就被拒绝」的请求（T-reject-001）。
+//
+// 与 recordSystemOneLog 分开而不是给它加参数：那条路径的调用点都在选路之后，
+// 每个点手里都有渠道/模型/决策文本；而这里的拒绝发生在这些信息产生之前
+// （白名单外、分组不存在），强行复用会让既有调用点都要多传两个恒为空的参数，
+// 反而看不清"哪些行是拒绝、哪些行是转发"。
+//
+// fault_kind 固定 request：这类拒绝是请求本身不成立，不是渠道故障 ——
+// 与服务端自己的判定一致，也不会污染分组通过率（T-insight-008 的分母）。
+func recordSystemOneRejected(c *gin.Context, requestedModel, message, reason, source string) {
+	op.RelayLogSave(model.RelayLog{
+		Status:      "failed",
+		Model:       requestedModel,
+		APIKeyName:  apiKeyNameOf(c),
+		StartedAt:   time.Now(),
+		FirstByteMs: -1, // 没走到上游, 没有首字节
+		Attempts:    0,  // 一次上游尝试都没发生: 拒绝发生在选路之前
+		FaultKind:   "request",
+		StopReason:  stopReasonText(reason, source),
+		Error:       truncateText(message, 500),
+		IsTest:      isTestRequest(c),
+	})
+}
+
+// apiKeyNameOf 取鉴权中间件记下的 Key 名称快照（未鉴权时为空串）。
+func apiKeyNameOf(c *gin.Context) string {
+	if v, ok := c.Get("api_key_name"); ok {
+		if s, _ := v.(string); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// truncateText 截断过长文本（错误原文可能是一大段上游响应）。
+func truncateText(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
+}
+
+// rejectJSON 按统一形状回错误，与其它协议的错误体保持可读性一致。
+func rejectJSON(c *gin.Context, status int, message string) {
+	c.AbortWithStatusJSON(status, gin.H{"error": gin.H{
+		"message": message,
+		"type":    "invalid_request_error",
+	}})
+}
+
+// containsString 小工具：判断切片是否含某值。
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}

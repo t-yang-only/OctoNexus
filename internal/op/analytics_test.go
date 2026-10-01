@@ -1,0 +1,992 @@
+package op
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"testing"
+	"time"
+
+	"github.com/t-yang-only/OctoNexus/internal/db"
+	"github.com/t-yang-only/OctoNexus/internal/model"
+	"gorm.io/gorm"
+)
+
+// T-insight-002「模型调用分析」的判据。
+//
+// ## 这一页与既有统计的关系
+//
+// 故障率按渠道分、耗时按分组分、尝试链按轮次聚合 —— 都是单一维度。
+// 这一页回答的是"整体现在怎么样"：发了多少、花了多少、健康线在哪、时间线上谁在吃 token。
+//
+// ## 每一条判据都对着一个具体的错误写法
+//
+//  1. RPM/TPM 的分母是**窗口跨度**（首尾请求真实时间差），不是固定 1 小时 ——
+//     写死 3600 会让"5 分钟发满 500 条"和"3 天发满 500 条"得到同一个数；
+//  2. 吞吐 TPS 的分母是**耗时之和**，不是窗口跨度 —— 两者在本实现里被刻意分开，
+//     混用会让吞吐被用户不发请求的空档稀释成无意义的低值；
+//  3. 堆叠图尾部模型必须**合并且不丢失**，否则图上总量对不上；
+//  4. 空 model 单独归属，绝不并进某个真实模型（否则"模型 X 的用量"凭空多出别人的量）；
+//  5. 空窗口返回空切片而不是 nil（nil 序列化成 null，前端遍历会崩）。
+
+type analyticsLogSeed struct {
+	status     string
+	modelName  string
+	apiKeyName string
+	channel    string
+	startedAt  time.Time
+	durationMs int64
+	prompt     int64
+	completion int64
+	cached     int64
+	cost       float64
+	faultKind  string
+	// 模型链路三件套：客户端请求名（modelName）、渠道内目标名、上游自称回报名。
+	// 不匹配必须**显式**播种（而不是由 seed 现算）：被测的是"统计有没有如实转述已落库的判定"，
+	// 现算会把被测代码的判定重写一遍，两边一起错就测不出来。
+	targetModel   string
+	reportedModel string
+	mismatch      bool
+}
+
+func seedAnalyticsLog(t *testing.T, conn *gorm.DB, s analyticsLogSeed) {
+	t.Helper()
+	row := model.RelayLog{
+		Status:         s.status,
+		Model:          s.modelName,
+		APIKeyName:     s.apiKeyName,
+		TargetChannel:  s.channel,
+		StartedAt:      s.startedAt,
+		DurationMs:     s.durationMs,
+		PromptTokens:   s.prompt,
+		CompletionToks: s.completion,
+		CachedTokens:   s.cached,
+		Cost:           s.cost,
+		FaultKind:      s.faultKind,
+
+		TargetModel:   s.targetModel,
+		ReportedModel: s.reportedModel,
+		ModelMismatch: s.mismatch,
+	}
+	if err := conn.Create(&row).Error; err != nil {
+		t.Fatalf("seed analytics log: %v", err)
+	}
+}
+
+// withAnalyticsDB 建一份内存库并挂到全局，测试结束自动还原。
+func withAnalyticsDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	conn := openFaultStatsTestDB(t)
+	restore := db.SetDBForTest(conn)
+	t.Cleanup(restore)
+	return conn
+}
+
+// 基准时刻固定在整点前 30 分，便于验证"按整点切桶"。
+func analyticsBase() time.Time {
+	return time.Date(2026, 9, 24, 10, 30, 0, 0, time.Local)
+}
+
+// 判据 1：RPM 的分母是首尾请求的真实时间差，不是写死的 1 小时。
+//
+// 若分母被写成固定 3600s，两条相隔 2 小时的请求会得出 0.0333 RPM，
+// 比真实值大 3 倍 —— 这个偏差足以让"要不要扩容"的结论反过来。
+// analyticsSeriesAt 取第 i 个时间桶，越界时用 t.Fatalf 失败而不是让索引越界 panic。
+//
+// 为什么必须这样：Go 里一个测试 panic 会终止整个测试进程，排在后面的判据
+// **根本不会被执行**。而"没执行"与"守卫没抓到"在变异检查的视角里长得一模一样
+// （都不见红色），会导致把有效的守卫误判成无效。本轮实测踩过：M3 变异下
+// TestAnalyticsByModelCostMergesTailModels 在裸索引上 panic，后面的
+// TestAnalyticsDimensionsAgreeOnTotals 从未运行，于是被误判为"守卫无效"。
+func analyticsSeriesAt(t *testing.T, out AnalyticsOverview, index int) AnalyticsBucket {
+	t.Helper()
+	if index >= len(out.Series) {
+		t.Fatalf("Series 只有 %d 个桶，取不到第 %d 个", len(out.Series), index)
+	}
+	return out.Series[index]
+}
+
+// analyticsDimensionAt 取某个维度里的第 i 条，越界时失败而不是 panic（理由同上）。
+func analyticsDimensionAt(t *testing.T, stats []DimensionUsageStat, index int, name string) DimensionUsageStat {
+	t.Helper()
+	if index >= len(stats) {
+		t.Fatalf("%s 只有 %d 条，取不到第 %d 条", name, len(stats), index)
+	}
+	return stats[index]
+}
+
+func TestAnalyticsRpmUsesActualSpan(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "m", startedAt: base})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "m", startedAt: base.Add(2 * time.Hour)})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	// 跨度 = 首尾时间差(2h) + 最后一小时的兜底 = 3h
+	if out.SpanSeconds < 10790 || out.SpanSeconds > 10810 {
+		t.Fatalf("跨度应为首尾时间差加一小时兜底（10800s），实得 %.0f", out.SpanSeconds)
+	}
+	wantRpm := 2 / (out.SpanSeconds / 60)
+	if out.AvgRpm < wantRpm-0.001 || out.AvgRpm > wantRpm+0.001 {
+		t.Fatalf("RPM 必须与跨度自洽：期望 %.5f，实得 %.5f", wantRpm, out.AvgRpm)
+	}
+	// 负向对照：固定 1 小时分母得到 0.0333，这里必须明显更小。
+	if out.AvgRpm > 0.02 {
+		t.Fatalf("RPM 看起来用了固定分母（%.4f 偏大），真实跨度下应为 %.4f",
+			out.AvgRpm, wantRpm)
+	}
+}
+
+// 判据：PeakRpm/PeakTpm 按**活跃时段**算，不被空档稀释。
+//
+// 线上实测形态：191 个请求里 178 个集中在一天（一次集中测试），其余零星摊在
+// 6.6 天。按首尾跨度算出的 AvgRpm 是 0.02 —— 数学自洽，但看着像系统闲着，
+// 而那天的真实强度完全看不出来。Peak 口径回答"忙起来有多忙"。
+func TestAnalyticsPeakUsesActiveHours(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	// 10 个请求集中在同一个小时内（真实负载的形态：一阵忙，然后长时间空档）。
+	for i := 0; i < 10; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status: "success", modelName: "m", startedAt: base.Add(time.Duration(i) * time.Minute),
+			completion: 100,
+		})
+	}
+	// 一天之后再来 1 个，把首尾跨度拉到 24 小时以上。
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "m", startedAt: base.Add(24 * time.Hour),
+		completion: 100,
+	})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	// 活跃小时 = 2（第一天的那个小时 + 24 小时后那个小时）
+	if out.ActiveHours != 2 {
+		t.Fatalf("活跃小时数应为 2，实得 %d", out.ActiveHours)
+	}
+	// Peak 分母是 2 小时 = 120 分钟，11 个请求 ⇒ 0.0917 rpm
+	wantPeakRpm := 11 / 120.0
+	if out.PeakRpm < wantPeakRpm-0.001 || out.PeakRpm > wantPeakRpm+0.001 {
+		t.Fatalf("PeakRpm 应按活跃小时算：期望 %.5f，实得 %.5f", wantPeakRpm, out.PeakRpm)
+	}
+	// 负向对照：Avg 的分母是约 25 小时跨度，必须明显小于 Peak。
+	wantAvgRpm := 11 / (out.SpanSeconds / 60)
+	if out.AvgRpm > wantAvgRpm+0.001 {
+		t.Fatalf("AvgRpm 应等于请求数÷跨度分钟数（%.5f），实得 %.5f", wantAvgRpm, out.AvgRpm)
+	}
+	if out.PeakRpm <= out.AvgRpm {
+		t.Fatalf("空档被剔除后 Peak 必须大于 Avg：peak=%.5f avg=%.5f", out.PeakRpm, out.AvgRpm)
+	}
+	// TPM 同理：11×100 token ÷ 120 分钟
+	wantPeakTpm := 1100 / 120.0
+	if out.PeakTpm < wantPeakTpm-0.5 || out.PeakTpm > wantPeakTpm+0.5 {
+		t.Fatalf("PeakTpm 期望 %.2f，实得 %.2f", wantPeakTpm, out.PeakTpm)
+	}
+}
+
+// 判据：同一小时内的多个请求只算 1 个活跃小时。
+//
+// 若按分钟去重，"一分钟内打 10 个请求"只算 1 分钟活跃，分母过小、速率虚高。
+func TestAnalyticsActiveHoursCollapsesWithinHour(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	for i := 0; i < 5; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status: "success", modelName: "m", startedAt: base.Add(time.Duration(i) * 5 * time.Minute),
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if out.ActiveHours != 1 {
+		t.Fatalf("同一小时内 5 个请求应只算 1 个活跃小时，实得 %d", out.ActiveHours)
+	}
+	// PeakRpm = 5 ÷ 60 = 0.0833（不是 5 ÷ 25 = 0.2）
+	want := 5 / 60.0
+	if out.PeakRpm < want-0.001 || out.PeakRpm > want+0.001 {
+		t.Fatalf("PeakRpm 期望 %.5f（按小时分母），实得 %.5f", want, out.PeakRpm)
+	}
+}
+
+// 判据：跨天的请求要算不同的活跃小时。
+func TestAnalyticsActiveHoursSpansDays(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "m", startedAt: base})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "m", startedAt: base.Add(24 * time.Hour)})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "m", startedAt: base.Add(48 * time.Hour)})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if out.ActiveHours != 3 {
+		t.Fatalf("三个不同小时应算 3 个活跃小时，实得 %d", out.ActiveHours)
+	}
+}
+
+// 判据 2：吞吐按"耗时之和"算，不按窗口跨度算。
+//
+// 这是本实现里两个分母被刻意分开的地方。用户一天只发两条请求、
+// 每条跑 1 秒输出 100 token，真实吞吐是 100 t/s；若拿 25 小时的窗口跨度当分母，
+// 会得到 0.002 t/s —— 一个会让用户以为服务不可用的数。
+func TestAnalyticsThroughputUsesBusyTimeNotSpan(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "m", startedAt: base,
+		durationMs: 1000, completion: 100,
+	})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "m", startedAt: base.Add(24 * time.Hour),
+		durationMs: 1000, completion: 100,
+	})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	// 耗时之和 = 2 秒 → 200 / 2 = 100 t/s
+	if out.ThroughputTps < 99 || out.ThroughputTps > 101 {
+		t.Fatalf("吞吐应按耗时之和计算（期望 100 t/s），实得 %.2f", out.ThroughputTps)
+	}
+	if out.AvgDurationMs < 999 || out.AvgDurationMs > 1001 {
+		t.Fatalf("平均耗时应为 1000ms，实得 %.0f", out.AvgDurationMs)
+	}
+}
+
+// 判据 3：堆叠图尾部模型合并且不丢失。
+//
+// 本项目实测 358 个模型，允许全部上色会让图例不可读。
+// 但"只保留前 8 个"若写成丢弃，柱状图的总高度会比真实用量矮一截，
+// 用户对不上账 —— 所以尾部必须并进 __other__。
+func TestAnalyticsSeriesMergesTailModels(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	const n = 12
+	for i := 0; i < n; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status:    "success",
+			modelName: fmt.Sprintf("model-%02d", i),
+			startedAt: base.Add(time.Duration(i) * time.Second),
+			prompt:    10,
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Models) != n {
+		t.Fatalf("模型明细不该被截断：期望 %d 项，实得 %d", n, len(out.Models))
+	}
+	if len(out.Series) != 1 {
+		t.Fatalf("12 条都在同一小时，应只有 1 个桶，实得 %d", len(out.Series))
+	}
+	b := analyticsSeriesAt(t, out, 0)
+	if b.Tokens != n*10 {
+		t.Fatalf("桶 token 应为 %d，实得 %d", n*10, b.Tokens)
+	}
+	if len(b.ByModel) > relayAnalyticsTopModels+1 {
+		t.Fatalf("堆叠图的模型数应收敛到 %d+1，实得 %d", relayAnalyticsTopModels, len(b.ByModel))
+	}
+	var sum int64
+	for _, v := range b.ByModel {
+		sum += v
+	}
+	if sum != b.Tokens {
+		t.Fatalf("堆叠图总量必须守恒：by_model 合计 %d ≠ 桶 token %d（尾部模型被丢弃了）", sum, b.Tokens)
+	}
+	if b.ByModel[otherModelKey] == 0 {
+		t.Fatalf("%d 个模型只保留 %d 个，其余应并进 %s", n, relayAnalyticsTopModels, otherModelKey)
+	}
+}
+
+// 判据 4：空模型名单独归属，绝不并进某个真实模型。
+func TestAnalyticsEmptyModelGetsOwnEntry(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "", startedAt: base, prompt: 100})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "X", startedAt: base, prompt: 5})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Models) != 2 {
+		t.Fatalf("空模型名必须单独成一项，实得 %d 项", len(out.Models))
+	}
+	byName := make(map[string]DimensionUsageStat, len(out.Models))
+	for _, stat := range out.Models {
+		if stat.Model == "" {
+			t.Fatalf("空模型名不该原样出现在明细里（会与真实模型混淆）")
+		}
+		byName[stat.Model] = stat
+	}
+	if byName["(未指定)"].PromptTokens != 100 {
+		t.Fatalf("空模型名的输入 token 应全额归入 (未指定)，实得 %d", byName["(未指定)"].PromptTokens)
+	}
+	if byName["X"].PromptTokens != 5 {
+		t.Fatalf("真实模型 X 不该被摊到别人的量，实得 %d", byName["X"].PromptTokens)
+	}
+}
+
+// 判据 5：空窗口返回空切片而不是 nil。
+//
+// 全新实例一条日志都没有时，报错会让首页显示成"出问题了"；
+// 而 nil 切片序列化成 JSON null，前端 .map 会直接崩。
+func TestAnalyticsEmptyWindowReturnsEmptySlices(t *testing.T) {
+	_ = withAnalyticsDB(t)
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("空表不该报错: %v", err)
+	}
+	if out.Models == nil || out.Series == nil {
+		t.Fatalf("空结果必须是空切片而非 nil（nil 会序列化成 null，前端遍历会崩）")
+	}
+	if out.Window != 0 || out.RequestCount != 0 || out.Truncated {
+		t.Fatalf("空表应得到全 0 结果，实得 window=%d requests=%d truncated=%v",
+			out.Window, out.RequestCount, out.Truncated)
+	}
+	if out.SuccessRate != 0 || out.ChannelRate != 0 {
+		t.Fatalf("无数据时通过率必须是 0 而不是 NaN，实得 %.2f/%.2f", out.SuccessRate, out.ChannelRate)
+	}
+}
+
+// 判据 6：Truncated 只在取满 window 条时置位。
+//
+// 取满说明"最近 N 条"之外可能还有更多 —— 此时界面必须说明，
+// 否则用户会把"最近 500 条"读成"历史全部"。
+func TestAnalyticsTruncatedOnlyWhenWindowFilled(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	for i := 0; i < 5; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status: "success", modelName: "m", startedAt: base.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	full, err := AnalyticsOverviewStats(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if !full.Truncated {
+		t.Fatalf("取满 window 条必须标记 truncated（此时总数只是切片不是全量）")
+	}
+
+	roomy, _ := AnalyticsOverviewStats(context.Background(), 10)
+	if roomy.Truncated {
+		t.Fatalf("窗口未取满时不该标记 truncated")
+	}
+}
+
+// 判据 7：窗口取"最近 N 条"，不是"最早 N 条"。
+func TestAnalyticsWindowTakesLatest(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	for i, name := range []string{"A", "B", "C"} {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status: "success", modelName: name,
+			startedAt: base.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Models) != 1 || analyticsDimensionAt(t, out.Models, 0, "Models").Model != "C" {
+		t.Fatalf("window=1 应取最新一条 C，实得 %+v", out.Models)
+	}
+}
+
+// 判据 8：缓存命中率的分母是输入 token，不是总 token。
+//
+// 用总 token 当分母会把输出也算进"本可命中的量"，
+// 得到的命中率系统性偏低（本用例 25% 会变成 16.7%）。
+func TestAnalyticsCacheHitRateUsesPromptTokens(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "m", startedAt: analyticsBase(),
+		prompt: 1000, cached: 250, completion: 500,
+	})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if out.CacheHitRate < 24.9 || out.CacheHitRate > 25.1 {
+		t.Fatalf("命中率应为 cached/prompt = 25%%，实得 %.1f（用 total_tokens 会算成 16.7%%）",
+			out.CacheHitRate)
+	}
+	if out.TotalTokens != 1500 {
+		t.Fatalf("总 token 应为 1500，实得 %d", out.TotalTokens)
+	}
+}
+
+// 判据 9：请求非法只拉低成功率，不拉低渠道健康度（与 fault-stats 同源）。
+//
+// 这条不改写新口径，而是验证这一页复用了既有判断 —— 口径一旦分叉，
+// 用户在两个页面会看到两个互相矛盾的"渠道健康"。
+func TestAnalyticsChannelRateExcludesRequestFault(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "m", startedAt: base})
+	for i := 0; i < 3; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status: "failed", modelName: "m", faultKind: "request",
+			startedAt: base.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if out.SuccessRate < 24.9 || out.SuccessRate > 25.1 {
+		t.Fatalf("成功率应为 25%%，实得 %.1f", out.SuccessRate)
+	}
+	if out.ChannelRate < 99.9 {
+		t.Fatalf("请求非法不该计入渠道健康度：channel_rate 应为 100%%，实得 %.1f", out.ChannelRate)
+	}
+	if out.RequestFault != 3 || out.RequestCount != 4 {
+		t.Fatalf("请求非法应记 3 条、总数 4 条，实得 %d/%d", out.RequestFault, out.RequestCount)
+	}
+	// 均值口径：总花费 / 总数，而不是 / 成功数。
+	if out.TotalCost != 0 {
+		t.Fatalf("未设置花费时应为 0，实得 %v", out.TotalCost)
+	}
+}
+
+// 判据 10：桶标签随跨度切换粒度 —— 同一天用 HH:00，跨天用 MM/DD。
+//
+// 只用一种会让跨天图上出现重复刻度（三个"10:00"），
+// 用户分不清哪个是哪天。
+func TestAnalyticsBucketLabelsSameDayUseHour(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "m", startedAt: base})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "m", startedAt: base.Add(time.Hour),
+	})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Series) != 2 {
+		t.Fatalf("两条相隔 1 小时应产生 2 个桶，实得 %d", len(out.Series))
+	}
+	if analyticsSeriesAt(t, out, 0).Bucket != "10:00" || analyticsSeriesAt(t, out, 1).Bucket != "11:00" {
+		t.Fatalf("同一天的桶标签应为 10:00 / 11:00，实得 %q / %q",
+			analyticsSeriesAt(t, out, 0).Bucket, analyticsSeriesAt(t, out, 1).Bucket)
+	}
+	if analyticsSeriesAt(t, out, 0).BucketAt >= analyticsSeriesAt(t, out, 1).BucketAt {
+		t.Fatalf("桶必须按时间升序，实得 %d >= %d",
+			analyticsSeriesAt(t, out, 0).BucketAt, analyticsSeriesAt(t, out, 1).BucketAt)
+	}
+}
+
+func TestAnalyticsBucketLabelsCrossDayUseDate(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	seedAnalyticsLog(t, conn, analyticsLogSeed{status: "success", modelName: "m", startedAt: base})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "m", startedAt: base.Add(24 * time.Hour),
+	})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Series) != 2 {
+		t.Fatalf("跨天两条应产生 2 个桶，实得 %d", len(out.Series))
+	}
+	if analyticsSeriesAt(t, out, 0).Bucket != "09/24" || analyticsSeriesAt(t, out, 1).Bucket != "09/25" {
+		t.Fatalf("跨天的桶标签应为 09/24 / 09/25，实得 %q / %q",
+			analyticsSeriesAt(t, out, 0).Bucket, analyticsSeriesAt(t, out, 1).Bucket)
+	}
+}
+
+func bucketLabels(series []AnalyticsBucket) []string {
+	labels := make([]string, 0, len(series))
+	for _, bucket := range series {
+		labels = append(labels, bucket.Bucket)
+	}
+	return labels
+}
+
+// 判据 11：桶标签必须互不重复 —— 这是时间轴能读的最低要求。
+//
+// 实测踩过：跨天窗口下按 "MM/DD" 命名，同一天的多个整点桶会**全部同名**，
+// 横轴上连续出现几个 "09/22"，用户分不清先后（本机真实数据上就是这样，
+// 4 个桶里有 2 个叫 09/22）。修法是让粒度随跨度自适应：
+// 24 小时以内按整点（一个整点不会在 24 小时内出现两次，天然唯一）。
+func TestAnalyticsBucketLabelsAreUnique(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase() // 09/24 10:30
+	// 跨天、但总跨度只有 4 小时：整点桶必须仍然唯一。
+	for _, offset := range []time.Duration{12 * time.Hour, 13 * time.Hour, 15 * time.Hour, 16 * time.Hour} {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status: "success", modelName: "m", startedAt: base.Add(offset), prompt: 10,
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Series) != 4 {
+		t.Fatalf("4 条请求落在 4 个整点，应得 4 个桶，实得 %d（标签 %v）",
+			len(out.Series), bucketLabels(out.Series))
+	}
+	seen := make(map[string]bool, len(out.Series))
+	for _, bucket := range out.Series {
+		if seen[bucket.Bucket] {
+			t.Fatalf("桶标签重复 %q —— 横轴上分不清先后（序列 %v）",
+				bucket.Bucket, bucketLabels(out.Series))
+		}
+		seen[bucket.Bucket] = true
+	}
+}
+
+// 判据 12：跨度达到一天后按天聚合，合并后总量必须守恒。
+//
+// 合并而不是只保留每天第一条：堆叠图的总高度要等于真实用量，
+// 否则用户对不上账（同判据 3 的取舍，只是换了个粒度）。
+func TestAnalyticsRollsUpToDailyBuckets(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase() // 09/24 10:30
+	// 09/24 22:30 与 23:30 **同一天两个整点桶**，再加 09/25、09/26 各一条：
+	// 桶键跨度 37 小时。只有真的按天合并才会得到 3 个桶；按整点会得到 4 个。
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "A", startedAt: base.Add(12 * time.Hour), prompt: 10,
+	})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "A", startedAt: base.Add(13 * time.Hour), prompt: 10,
+	})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "B", startedAt: base.Add(24 * time.Hour), prompt: 20,
+	})
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "A", startedAt: base.Add(49 * time.Hour), prompt: 30,
+	})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Series) != 3 {
+		t.Fatalf("4 条请求落在 3 天，应聚合成 3 个日桶（按整点会得 4 个），实得 %d（标签 %v）",
+			len(out.Series), bucketLabels(out.Series))
+	}
+	if analyticsSeriesAt(t, out, 0).Requests != 2 {
+		t.Fatalf("同一天的两个整点桶必须合并：首桶应有 2 条，实得 %d（标签 %v）",
+			analyticsSeriesAt(t, out, 0).Requests, bucketLabels(out.Series))
+	}
+	seen := make(map[string]bool, len(out.Series))
+	var tokens int64
+	for _, bucket := range out.Series {
+		if seen[bucket.Bucket] {
+			t.Fatalf("日桶标签重复 %q（序列 %v）", bucket.Bucket, bucketLabels(out.Series))
+		}
+		seen[bucket.Bucket] = true
+		var bucketSum int64
+		for _, value := range bucket.ByModel {
+			bucketSum += value
+		}
+		if bucketSum != bucket.Tokens {
+			t.Fatalf("日桶 %q 内 by_model 合计 %d ≠ 桶 token %d（合并时必须累加而不是覆盖）",
+				bucket.Bucket, bucketSum, bucket.Tokens)
+		}
+		tokens += bucket.Tokens
+	}
+	if tokens != out.TotalTokens {
+		t.Fatalf("日桶 token 合计 %d ≠ 全局 %d", tokens, out.TotalTokens)
+	}
+
+	// 跨度必须基于**真实首尾请求时间**（22:30 → 11:30 = 37h，加一小时兜底），
+	// 不是聚合后的日桶键（00:00 → 00:00 = 48h）——否则 RPM 会被系统性算小。
+	wantSpan := (37*time.Hour + time.Hour).Seconds()
+	if out.SpanSeconds < wantSpan-1 || out.SpanSeconds > wantSpan+1 {
+		t.Fatalf("跨度应取真实首尾请求时间差（%.0fs），实得 %.0fs（用日桶键会得到 176400s）",
+			wantSpan, out.SpanSeconds)
+	}
+}
+
+// TestAnalyticsByModelCostConservesTotal 桶内按模型拆分的成本合计必须等于该桶的总成本。
+//
+// 守恒是这一维度的生命线：堆叠图把每个色块加起来的和，必须与"这个小时花了多少钱"
+// 是同一个数。少了任何一段（比如尾部模型被丢掉而不是并进 __other__），
+// 图上看不出异常，但"钱花在哪"的答案就永久缺了一块。
+func TestAnalyticsByModelCostConservesTotal(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	costs := []float64{0.5, 1.25, 2.0}
+	for i, cost := range costs {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status:    "success",
+			modelName: fmt.Sprintf("m-%d", i),
+			startedAt: base.Add(time.Duration(i) * time.Minute),
+			prompt:    100,
+			cost:      cost,
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Series) != 1 {
+		t.Fatalf("三条请求在同一小时内，应只有 1 个桶，实得 %d", len(out.Series))
+	}
+	bucket := analyticsSeriesAt(t, out, 0)
+	if math.Abs(bucket.Cost-3.75) > 1e-9 {
+		t.Fatalf("桶总成本应为 3.75，实得 %v", bucket.Cost)
+	}
+	var sum float64
+	for _, cost := range bucket.ByModelCost {
+		sum += cost
+	}
+	if math.Abs(sum-bucket.Cost) > 1e-9 {
+		t.Fatalf("按模型拆分的成本合计 %v 不等于桶总成本 %v（守恒被破坏）", sum, bucket.Cost)
+	}
+	if math.Abs(out.TotalCost-3.75) > 1e-9 {
+		t.Fatalf("窗口总成本应为 3.75，实得 %v", out.TotalCost)
+	}
+	// 均值跟着总量走：三个请求 3.75，均值必须是 1.25。
+	if math.Abs(out.AvgCostPerRequest-1.25) > 1e-9 {
+		t.Fatalf("平均每请求成本应为 1.25，实得 %v", out.AvgCostPerRequest)
+	}
+}
+
+// TestAnalyticsByModelCostMergesTailModels 尾部模型的成本必须并进 __other__ 而不是丢弃。
+//
+// 与 token 维度的收敛是两个独立的实现点：只给 token 做收敛、成本那边直接丢掉尾部，
+// 会让成本柱子在模型多的时候凭空矮一截 —— 而代码看起来"两边都处理了"。
+func TestAnalyticsByModelCostMergesTailModels(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	const n = 12
+	for i := 0; i < n; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status:    "success",
+			modelName: fmt.Sprintf("model-%02d", i),
+			startedAt: base.Add(time.Duration(i) * time.Second),
+			prompt:    10,
+			cost:      0.1,
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	bucket := analyticsSeriesAt(t, out, 0)
+	if len(bucket.ByModelCost) > relayAnalyticsTopModels+1 {
+		t.Fatalf("堆叠图成本键应收敛到 %d+1，实得 %d", relayAnalyticsTopModels, len(bucket.ByModelCost))
+	}
+	var sum float64
+	for _, cost := range bucket.ByModelCost {
+		sum += cost
+	}
+	want := float64(n) * 0.1
+	if math.Abs(sum-want) > 1e-9 {
+		t.Fatalf("成本收敛后合计 %v，应为 %v（尾部模型的成本必须并进 %s，不能丢）",
+			sum, want, otherModelKey)
+	}
+	if bucket.ByModelCost[otherModelKey] <= 0 {
+		t.Fatalf("%d 个模型只保留 %d 个，成本里应出现 %s", n, relayAnalyticsTopModels, otherModelKey)
+	}
+}
+
+// TestAnalyticsByModelCostRollsUpDaily 按天聚合时成本拆分同样必须累加。
+//
+// 跨天窗口会走 rollUpAnalyticsBuckets。那里如果只合并 token 不合并成本，
+// 结果是"按天看时成本柱子全空、按小时看时有值"——取决于窗口大小的随机故障。
+func TestAnalyticsByModelCostRollsUpDaily(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	// 两个不同自然日，各两条，全部在同一个模型上。
+	for day := 0; day < 2; day++ {
+		for i := 0; i < 2; i++ {
+			seedAnalyticsLog(t, conn, analyticsLogSeed{
+				status:    "success",
+				modelName: "m-daily",
+				startedAt: base.AddDate(0, 0, day).Add(time.Duration(i) * time.Minute),
+				prompt:    50,
+				cost:      0.25,
+			})
+		}
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Series) != 2 {
+		t.Fatalf("跨两天应聚合出 2 个日桶，实得 %d", len(out.Series))
+	}
+	for _, bucket := range out.Series {
+		if math.Abs(bucket.Cost-0.5) > 1e-9 {
+			t.Fatalf("日桶总成本应为 0.5（两条 0.25），实得 %v", bucket.Cost)
+		}
+		var sum float64
+		for _, cost := range bucket.ByModelCost {
+			sum += cost
+		}
+		if math.Abs(sum-bucket.Cost) > 1e-9 {
+			t.Fatalf("日桶按模型成本合计 %v 不等于总成本 %v（按天聚合时丢了成本）", sum, bucket.Cost)
+		}
+	}
+}
+
+// TestAnalyticsByModelCostSameModelSetAsTokens token 与成本两张拆分表必须覆盖同一批模型。
+//
+// 为什么这条必须单独钉：两张表各有一套 keep 判断时（比如成本那边按成本排序取前 N），
+// 同一根柱子在两个口径下的色块构成会不一样，而两条口径还都声称合计等于桶总量 ——
+// 这种不一致在界面上表现为"切一下口径，图例就变了"，极难定位到根因。
+//
+// __other__ 允许不对称：某个尾部模型 token 为正但成本恰为 0 时，
+// token 那边会合并出 __other__ 而成本那边不会（0 不值得建键）。
+func TestAnalyticsByModelCostSameModelSetAsTokens(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	const n = 12
+	for i := 0; i < n; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status:    "success",
+			modelName: fmt.Sprintf("model-%02d", i),
+			startedAt: base.Add(time.Duration(i) * time.Second),
+			prompt:    10,
+			cost:      float64(i+1) * 0.01,
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	for _, bucket := range out.Series {
+		onlyTokens := map[string]bool{}
+		for name := range bucket.ByModel {
+			if name != otherModelKey {
+				onlyTokens[name] = true
+			}
+		}
+		for name := range bucket.ByModelCost {
+			if name != otherModelKey {
+				delete(onlyTokens, name)
+			}
+		}
+		if len(onlyTokens) > 0 {
+			t.Fatalf("以下模型只在 token 拆分里、不在成本拆分里：%v（两张表用了不同的保留集合）", onlyTokens)
+		}
+	}
+}
+
+// TestAnalyticsDimensionsAgreeOnTotals 三个维度是**同一批请求的三种切法**，合计必须相等。
+//
+// 这是多维度最容易出错的地方：只要有一个维度的累加漏了某类行（比如把空 Key 的行
+// 丢掉、或在某个分支里 continue），那个维度的合计就会悄悄小于另外两个 ——
+// 而每个维度自己看都是"自洽"的，界面上看不出任何异常。
+func TestAnalyticsDimensionsAgreeOnTotals(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	rows := []analyticsLogSeed{
+		{status: "success", modelName: "m1", apiKeyName: "key-a", channel: "ch-1", startedAt: base, prompt: 100},
+		{status: "success", modelName: "m1", apiKeyName: "key-a", channel: "ch-2", startedAt: base.Add(time.Minute), prompt: 200},
+		{status: "failed", modelName: "m2", apiKeyName: "key-b", channel: "ch-1", startedAt: base.Add(2 * time.Minute), faultKind: "member"},
+		// 空维度值：三个维度各自的空含义不同，都必须有归属而不是被丢弃。
+		{status: "failed", modelName: "", apiKeyName: "", channel: "", startedAt: base.Add(3 * time.Minute), faultKind: "transient"},
+		{status: "canceled", modelName: "m2", apiKeyName: "key-b", channel: "ch-1", startedAt: base.Add(4 * time.Minute)},
+	}
+	for _, row := range rows {
+		seedAnalyticsLog(t, conn, row)
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if out.RequestCount != int64(len(rows)) {
+		t.Fatalf("总请求数应为 %d，实得 %d", len(rows), out.RequestCount)
+	}
+
+	sum := func(stats []DimensionUsageStat) int64 {
+		var n int64
+		for _, s := range stats {
+			n += s.Requests
+		}
+		return n
+	}
+	byModel, byKey, byChannel := sum(out.Models), sum(out.APIKeys), sum(out.Channels)
+	if byModel != out.RequestCount || byKey != out.RequestCount || byChannel != out.RequestCount {
+		t.Fatalf("三个维度的请求数合计必须都等于总数 %d：模型=%d 客户端=%d 渠道=%d"+
+			"（某一维度丢了行，它自己看不出来）",
+			out.RequestCount, byModel, byKey, byChannel)
+	}
+
+	// 成本与 token 同理：同一条日志在每个维度各计一次，合计相等。
+	costSum := func(stats []DimensionUsageStat) float64 {
+		var v float64
+		for _, s := range stats {
+			v += s.Cost
+		}
+		return v
+	}
+	if math.Abs(costSum(out.APIKeys)-out.TotalCost) > 1e-9 {
+		t.Fatalf("客户端维度成本合计 %v 不等于总成本 %v", costSum(out.APIKeys), out.TotalCost)
+	}
+	if math.Abs(costSum(out.Channels)-out.TotalCost) > 1e-9 {
+		t.Fatalf("渠道维度成本合计 %v 不等于总成本 %v", costSum(out.Channels), out.TotalCost)
+	}
+}
+
+// TestAnalyticsDimensionGroupsByItsOwnField 每个维度必须按**自己那个字段**分组。
+//
+// 三个维度共用一份累加函数，最容易犯的错就是复制粘贴时忘了换字段
+// （比如客户端维度也按 Model 分组）——那样界面上的"客户端"列会显示成一串模型名。
+func TestAnalyticsDimensionGroupsByItsOwnField(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "success", modelName: "the-model", apiKeyName: "the-key", channel: "the-channel",
+		startedAt: base, prompt: 10,
+	})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Models) != 1 || analyticsDimensionAt(t, out.Models, 0, "Models").Model != "the-model" {
+		t.Fatalf("模型维度应只有 the-model，实得 %+v", out.Models)
+	}
+	if len(out.APIKeys) != 1 || analyticsDimensionAt(t, out.APIKeys, 0, "APIKeys").Model != "the-key" {
+		t.Fatalf("客户端维度应只有 the-key（按 api_key_name 分组），实得 %+v", out.APIKeys)
+	}
+	if len(out.Channels) != 1 || analyticsDimensionAt(t, out.Channels, 0, "Channels").Model != "the-channel" {
+		t.Fatalf("渠道维度应只有 the-channel（按 target_channel 分组），实得 %+v", out.Channels)
+	}
+}
+
+// TestAnalyticsDimensionEmptyLabelsDifferPerDimension 三个维度的"空"必须各有其名。
+//
+// "没填模型"是客户端没指定、"没有 Key"是未认证调用、"没有渠道"是请求压根没走到上游 ——
+// 处置动作完全不同。糊成同一个"(未指定)"会让读表的人查不下去。
+func TestAnalyticsDimensionEmptyLabelsDifferPerDimension(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	seedAnalyticsLog(t, conn, analyticsLogSeed{
+		status: "failed", modelName: "", apiKeyName: "", channel: "",
+		startedAt: base, faultKind: "transient",
+	})
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(out.Models) != 1 || len(out.APIKeys) != 1 || len(out.Channels) != 1 {
+		t.Fatalf("三个维度都应有一个空值条目，实得 %d/%d/%d",
+			len(out.Models), len(out.APIKeys), len(out.Channels))
+	}
+	labels := []string{analyticsDimensionAt(t, out.Models, 0, "Models").Model, analyticsDimensionAt(t, out.APIKeys, 0, "APIKeys").Model, analyticsDimensionAt(t, out.Channels, 0, "Channels").Model}
+	if labels[0] == labels[1] || labels[1] == labels[2] || labels[0] == labels[2] {
+		t.Fatalf("三个维度的空值显示名不能相同（否则三种不同的情况被糊成一个）：%v", labels)
+	}
+	for _, label := range labels {
+		if label == "" {
+			t.Fatalf("空值必须有可读的归属名，不能留空：%v", labels)
+		}
+	}
+}
+
+// TestAnalyticsDimensionSortsByRequestsThenName 排序：请求数倒序，同数按名称升序。
+//
+// 名称做次序不是为了好看：同数条目若没有稳定顺序，每次请求返回的行都可能换位置，
+// 界面上的表格会无端跳动。
+func TestAnalyticsDimensionSortsByRequestsThenName(t *testing.T) {
+	conn := withAnalyticsDB(t)
+	base := analyticsBase()
+	// zeta 与 alpha 各 2 条（同数），beta 3 条（最多）。
+	for i := 0; i < 3; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status: "success", apiKeyName: "beta", startedAt: base.Add(time.Duration(i) * time.Second), prompt: 1,
+		})
+	}
+	for i := 0; i < 2; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status: "success", apiKeyName: "zeta", startedAt: base.Add(time.Duration(10+i) * time.Second), prompt: 1,
+		})
+	}
+	for i := 0; i < 2; i++ {
+		seedAnalyticsLog(t, conn, analyticsLogSeed{
+			status: "success", apiKeyName: "alpha", startedAt: base.Add(time.Duration(20+i) * time.Second), prompt: 1,
+		})
+	}
+
+	out, err := AnalyticsOverviewStats(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	got := []string{}
+	for _, s := range out.APIKeys {
+		got = append(got, s.Model)
+	}
+	want := []string{"beta", "alpha", "zeta"}
+	if len(got) != len(want) {
+		t.Fatalf("客户端维度条目数=%d，want %d（%v）", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("排序 = %v，want %v（请求数倒序、同数按名称升序）", got, want)
+		}
+	}
+}
+
+// TestAnalyticsSortDimensionStatsDeterministic 直接验证排序函数本身（不经过 map）。
+//
+// 输入顺序刻意打乱且同数条目**逆序**排列：稳定的实现必须把它们翻正过来。
+// 若实现只按请求数排序，这里必然得到原来的（错误）顺序 —— 不会像端到端用例
+// 那样因为 map 遍历顺序而偶发通过。
+func TestAnalyticsSortDimensionStatsDeterministic(t *testing.T) {
+	stats := []DimensionUsageStat{
+		{Model: "zeta", Requests: 2},
+		{Model: "beta", Requests: 3},
+		{Model: "omega", Requests: 2},
+		{Model: "alpha", Requests: 2},
+		{Model: "delta", Requests: 5},
+	}
+	sortDimensionStats(stats)
+
+	want := []string{"delta", "beta", "alpha", "omega", "zeta"}
+	for i, name := range want {
+		if stats[i].Model != name {
+			got := make([]string, 0, len(stats))
+			for _, s := range stats {
+				got = append(got, s.Model)
+			}
+			t.Fatalf("排序结果 = %v，want %v（请求数倒序;同数按名称升序）", got, want)
+		}
+	}
+
+	// 幂等：再排一次不应改变顺序（稳定性的最低要求）。
+	before := make([]string, 0, len(stats))
+	for _, s := range stats {
+		before = append(before, s.Model)
+	}
+	sortDimensionStats(stats)
+	for i, s := range stats {
+		if s.Model != before[i] {
+			t.Fatalf("重复排序改变了顺序：%v -> %v", before, []string{s.Model})
+		}
+	}
+}

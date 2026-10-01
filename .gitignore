@@ -1,0 +1,40 @@
+data
+build
+static/out/*
+!static/out/README.md
+.vscode
+
+# 本地工作产物, 不入库
+数据备份*.json
+agent_word/
+skills/
+pyproject.toml
+.pytest_cache/
+__pycache__/
+*.egg-info/
+.venv/
+octopus-test*.exe
+octopus.exe
+# Go 构建被中断时留下的备份文件（如 octopus.exe~）。此前误提交过一次。
+*.exe~
+
+# 外部参考仓库, 不入库
+reference/
+
+# ── 运行时数据与凭据（绝不入库）─────────────────────────────
+# data/ 里含：数据库（渠道凭据密文）、credential.key（解密密钥）、
+# 会话、代理节点配置、日志。一旦提交等于把使用者的凭据与节点全公开。
+data/
+*.key
+credential.key
+*.db
+*.db-wal
+*.db-shm
+logs/
+sites.json
+.env
+.env.*
+
+# 内部协作过程记录（含生产域名/主机名/部署细节），只留本地不进公开库
+docs/agents/
+docs/worklog/

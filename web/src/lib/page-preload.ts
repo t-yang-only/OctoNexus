@@ -1,0 +1,22 @@
+import type { Page } from '@/stores/app';
+
+// pageImports 统一定义页面懒加载和导航预加载使用的模块入口。
+export const pageImports = {
+    home: () => import('@/components/modules/home'),
+    channel: () => import('@/components/modules/channel'),
+    group: () => import('@/components/modules/group'),
+    model: () => import('@/components/modules/model'),
+    account: () => import('@/components/modules/account'),
+    pool: () => import('@/components/modules/pool'),
+    proxy: () => import('@/components/modules/proxy'),
+    price: () => import('@/components/modules/price'),
+    extensions: () => import('@/components/modules/extensions'),
+    log: () => import('@/components/modules/log'),
+    projectlog: () => import('@/components/modules/project-log'),
+    setting: () => import('@/components/modules/setting'),
+};
+
+// preloadPage 根据导航意图提前加载对应页面模块。
+export function preloadPage(page: Page) {
+    void pageImports[page]();
+}

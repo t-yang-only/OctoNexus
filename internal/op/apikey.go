@@ -1,0 +1,108 @@
+package op
+
+import (
+	"context"
+	"fmt"
+	"sort"
+
+	"github.com/t-yang-only/OctoNexus/internal/db"
+	"github.com/t-yang-only/OctoNexus/internal/model"
+	"github.com/t-yang-only/OctoNexus/internal/utils/cache"
+)
+
+var apiKeyCache = cache.New[int, model.APIKey](16)
+var apiKeyIDMap = cache.New[string, int](16)
+
+// APIKeyCreate 新建一条 API Key 并同步两个索引缓存。
+// 显式列出列名: Enabled 带 `gorm:"default:true"`, 默认的 Create 会把零值字段排除在 INSERT 之外
+// (改写成 DEFAULT), 于是调用方传 enabled=false 会被静默落成数据库默认的 true —— 想建禁用 Key
+// 反而建出启用 Key。显式列出这些列后按入参原样落库。
+func APIKeyCreate(key *model.APIKey, ctx context.Context) error {
+	if err := db.GetDB().WithContext(ctx).
+		Select("name", "api_key", "enabled", "expire_at", "max_cost", "rpm", "tpm", "supported_models").
+		Create(key).Error; err != nil {
+		return fmt.Errorf("failed to create API key: %w", err)
+	}
+	apiKeyCache.Set(key.ID, *key)
+	apiKeyIDMap.Set(key.APIKey, key.ID)
+	return nil
+}
+
+func APIKeyUpdate(key *model.APIKey, ctx context.Context) error {
+	existing, ok := apiKeyCache.Get(key.ID)
+	if !ok {
+		return fmt.Errorf("API key not found")
+	}
+	if key.APIKey == "" {
+		key.APIKey = existing.APIKey
+	}
+	if err := db.GetDB().WithContext(ctx).Save(key).Error; err != nil {
+		return fmt.Errorf("failed to update API key: %w", err)
+	}
+	if key.APIKey != existing.APIKey {
+		apiKeyIDMap.Del(existing.APIKey)
+		apiKeyIDMap.Set(key.APIKey, key.ID)
+	}
+	apiKeyCache.Set(key.ID, *key)
+	return nil
+}
+
+// APIKeyList 返回全部 API Key, 按主键升序定序。
+// 设置页不提供排序开关, 而缓存遍历顺序随机, 故顺序须由此处定稿。
+func APIKeyList(ctx context.Context) ([]model.APIKey, error) {
+	keys := make([]model.APIKey, 0, apiKeyCache.Len())
+	for _, apiKey := range apiKeyCache.GetAll() {
+		keys = append(keys, apiKey)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].ID < keys[j].ID })
+	return keys, nil
+}
+
+func APIKeyGet(id int, ctx context.Context) (model.APIKey, error) {
+	apiKey, ok := apiKeyCache.Get(id)
+	if !ok {
+		return model.APIKey{}, fmt.Errorf("API key not found")
+	}
+	return apiKey, nil
+}
+
+func APIKeyGetByAPIKey(apiKey string, ctx context.Context) (model.APIKey, error) {
+	id, ok := apiKeyIDMap.Get(apiKey)
+	if !ok {
+		return model.APIKey{}, fmt.Errorf("API key not found")
+	}
+	return APIKeyGet(id, ctx)
+}
+
+func APIKeyDelete(id int, ctx context.Context) error {
+	k := model.APIKey{
+		ID: id,
+	}
+	if err := StatsAPIKeyDel(id); err != nil {
+		return fmt.Errorf("failed to delete stats API key: %v", err)
+	}
+	result := db.GetDB().WithContext(ctx).Delete(&k)
+	if result.RowsAffected == 0 {
+		// 用哨兵错误而不是普通 fmt.Errorf：让 handler 能识别「资源不存在」
+		// 并回 404，而不是把确定的"东西没了"报成 500 服务端故障（T-usability-012）。
+		return NotFoundf("API key %d not found", id)
+	}
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete API key: %w", result.Error)
+	}
+	apiKeyCache.Del(k.ID)
+	apiKeyIDMap.Del(k.APIKey)
+	return nil
+}
+
+func apiKeyRefreshCache(ctx context.Context) error {
+	apiKeys := []model.APIKey{}
+	if err := db.GetDB().WithContext(ctx).Find(&apiKeys).Error; err != nil {
+		return err
+	}
+	for _, apiKey := range apiKeys {
+		apiKeyCache.Set(apiKey.ID, apiKey)
+		apiKeyIDMap.Set(apiKey.APIKey, apiKey.ID)
+	}
+	return nil
+}

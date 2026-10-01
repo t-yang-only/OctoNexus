@@ -1,0 +1,261 @@
+package handlers
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/t-yang-only/OctoNexus/internal/model"
+	"github.com/t-yang-only/OctoNexus/internal/notify"
+	"github.com/t-yang-only/OctoNexus/internal/op"
+	"github.com/t-yang-only/OctoNexus/internal/poolstore"
+	"github.com/t-yang-only/OctoNexus/internal/relay"
+	"github.com/t-yang-only/OctoNexus/internal/server/middleware"
+	"github.com/t-yang-only/OctoNexus/internal/server/resp"
+	"github.com/t-yang-only/OctoNexus/internal/server/router"
+	"github.com/t-yang-only/OctoNexus/internal/task"
+)
+
+func init() {
+	router.NewGroupRouter("/api/v1/setting").
+		ServeOn(router.ServerAdmin).
+		Use(middleware.Auth()).
+		AddRoute(
+			router.NewRoute("/list", http.MethodGet).
+				Handle(getSettingList),
+		).
+		AddRoute(
+			router.NewRoute("/set", http.MethodPost).
+				Use(middleware.RequireJSON()).
+				Handle(setSetting),
+		).
+		AddRoute(
+			router.NewRoute("/export", http.MethodGet).
+				Handle(exportDB),
+		).
+		AddRoute(
+			router.NewRoute("/import", http.MethodPost).
+				Handle(importDB),
+		).
+		AddRoute(
+			router.NewRoute("/notify/channels", http.MethodGet).
+				Handle(listNotifyChannels),
+		).
+		AddRoute(
+			router.NewRoute("/notify/test", http.MethodPost).
+				Handle(testNotifyChannels),
+		)
+}
+
+// listNotifyChannels 返回各通知渠道的启用与配置状态: 只给"能不能发", 不回显带凭据的地址本身。
+func listNotifyChannels(c *gin.Context) {
+	resp.Success(c, notify.Targets())
+}
+
+// testNotifyChannels 发送前真实测试 (R-alert-001 余项): 用合成事件真的投递一次, 逐渠道回报成败与失败原因。
+// 未配置的渠道直接报缺项, 未启用但已配置的也会尝试——用户点这个按钮就是要验证配置对不对。
+func testNotifyChannels(c *gin.Context) {
+	results := notify.TestSend(c.Request.Context())
+	resp.Success(c, results)
+}
+
+func getSettingList(c *gin.Context) {
+	settings, err := op.SettingList(c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, settings)
+}
+
+func setSetting(c *gin.Context) {
+	var setting model.Setting
+	if err := c.ShouldBindJSON(&setting); err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := setting.Validate(); err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := op.SettingSetString(setting.Key, setting.Value); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	switch setting.Key {
+	case model.SettingKeyModelInfoUpdateInterval:
+		hours, err := strconv.Atoi(setting.Value)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
+	case model.SettingKeyRouteBalanceEnabled:
+		// 加权轮询热路径开关即时生效: relay 不耦合配置源, 由装配层在此注入。
+		enabled, err := strconv.ParseBool(setting.Value)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		relay.SetRouteBalanceEnabled(enabled)
+	case model.SettingKeyRouteSlowLatencyMs:
+		// 慢成员分区阈值即时生效 (T-route-003): relay 不耦合配置源, 由装配层在此注入。
+		// 解析失败不拦保存 —— 与其它数值设置同口径, 使用侧上次注入的值继续生效。
+		if ms, err := strconv.Atoi(setting.Value); err == nil {
+			relay.SetRouteSlowLatencyMs(int64(ms))
+		}
+	case model.SettingKeyQuotaScanInterval:
+		// 余额扫描周期热更新: 与注册同口径 (0 停用, task.Update 自会摘任务), 解析失败不拦保存。
+		if minutes, err := strconv.Atoi(setting.Value); err == nil {
+			task.Update(task.TaskQuotaScan, time.Duration(minutes)*time.Minute)
+		}
+	case model.SettingKeyRouteProbeInterval:
+		// 主动探活周期热更新: 与注册同口径 (0 停用, task.Update 自会摘任务), 解析失败不拦保存。
+		// 开关 route_probe_enabled 不必在此热接线: 探活任务每轮都重新读设置。
+		if seconds, err := strconv.Atoi(setting.Value); err == nil {
+			task.Update(task.TaskRouteProbe, time.Duration(seconds)*time.Second)
+		}
+	case model.SettingKeyRequestFaultAction:
+		// 请求本身非法时的取向热生效: relay 不耦合配置源, 由装配层在此注入（非法取值已在
+		// Validate 阶段拦下, 这里再回落一次也不会静默改成别的语义）。
+		relay.SetRequestFaultAction(setting.Value)
+	case model.SettingKeyPoolDeclarativeHosts:
+		// 声明式适配器的域名白名单即时生效：收紧白名单后，已注册但不再允许的适配器会在下一轮
+		// 刷新时失败（注册表本身不动——静默摘掉别人的适配器比让它报错更难查）。
+		poolstore.ApplyGuards()
+	case model.SettingKeyStatsSaveInterval:
+		// 统计保存周期热更新: 注册时与历史日志清理同周期, 改值两条一起跟随, 免得落库与清理节奏错位。
+		// 与注册同口径 (0 停用, task.Update 自会摘任务), 解析失败不拦保存。
+		if minutes, err := strconv.Atoi(setting.Value); err == nil {
+			interval := time.Duration(minutes) * time.Minute
+			task.Update(task.TaskStatsSave, interval)
+			task.Update(task.TaskRelayLogClean, interval)
+		}
+	}
+	resp.Success(c, setting)
+}
+
+func exportDB(c *gin.Context) {
+	dump, err := op.DBExportAll(c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.Header("Content-Type", "application/json")
+	c.Header("Content-Disposition", "attachment; filename=\"octopus-export-"+time.Now().Format("20060102150405")+".json\"")
+	c.JSON(http.StatusOK, dump)
+}
+
+func importDB(c *gin.Context) {
+	var dump model.DBDump
+
+	contentType := c.GetHeader("Content-Type")
+	if strings.Contains(contentType, "multipart/form-data") {
+		fh, err := c.FormFile("file")
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, "missing upload file field 'file'")
+			return
+		}
+		f, err := fh.Open()
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		defer f.Close()
+		body, err := io.ReadAll(f)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := decodeDBDump(body, &dump); err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := decodeDBDump(body, &dump); err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	seenLLMNames := make(map[string]struct{}, len(dump.LLMInfos))
+	for i := range dump.LLMInfos {
+		dump.LLMInfos[i].Name = strings.ToLower(strings.TrimSpace(dump.LLMInfos[i].Name))
+		if dump.LLMInfos[i].Name == "" {
+			resp.Error(c, http.StatusBadRequest, "model price name cannot be empty")
+			return
+		}
+		if _, ok := seenLLMNames[dump.LLMInfos[i].Name]; ok {
+			resp.Error(c, http.StatusBadRequest, "duplicate model price: "+dump.LLMInfos[i].Name)
+			return
+		}
+		seenLLMNames[dump.LLMInfos[i].Name] = struct{}{}
+	}
+	for i := range dump.Groups {
+		if dump.Groups[i].Mode == "" {
+			dump.Groups[i].Mode = model.GroupModeManual
+		}
+		model.NormalizeGroupRelayConfig(&dump.Groups[i].RelayConfig)
+		if !dump.Groups[i].Mode.IsValid() {
+			resp.Error(c, http.StatusBadRequest, "invalid group relay mode")
+			return
+		}
+	}
+
+	result, err := op.DBImportIncremental(c.Request.Context(), &dump)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := op.InitCache(); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	resp.Success(c, result)
+}
+
+func decodeDBDump(body []byte, dump *model.DBDump) error {
+	if dump == nil {
+		return json.Unmarshal(body, &struct{}{})
+	}
+
+	if err := json.Unmarshal(body, dump); err != nil {
+		return err
+	}
+
+	if dump.Version == 0 &&
+		len(dump.Channels) == 0 &&
+		len(dump.Groups) == 0 &&
+		len(dump.ChannelModels) == 0 &&
+		len(dump.GroupItems) == 0 &&
+		len(dump.Settings) == 0 &&
+		len(dump.APIKeys) == 0 &&
+		len(dump.LLMInfos) == 0 &&
+		len(dump.StatsDaily) == 0 &&
+		len(dump.StatsHourly) == 0 &&
+		len(dump.StatsTotal) == 0 &&
+		len(dump.StatsAPIKey) == 0 {
+		var wrapper struct {
+			Code    int             `json:"code"`
+			Message string          `json:"message"`
+			Data    json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(body, &wrapper); err == nil && len(wrapper.Data) > 0 {
+			return json.Unmarshal(wrapper.Data, dump)
+		}
+	}
+
+	return nil
+}
