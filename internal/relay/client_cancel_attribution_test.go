@@ -39,7 +39,12 @@ import (
 // 这是本组用例的核心：修之前这条会算出 false。
 func TestRoundNotUpstreamOnClientCancel(t *testing.T) {
 	parent, cancelParent := context.WithCancel(context.Background())
-	roundCtx, _ := context.WithCancelCause(parent)
+	// cancel 必须被调用，否则父 ctx 结束前这个子 ctx 一直挂着（go vet 抓的正是这条：
+	// "the cancel function returned by context.WithCancelCause should be called, not discarded"）。
+	// 本用例的断言在 defer 之前执行，所以这里补的 cancel 不影响它要验的语义
+	// —— 它验的是「父 ctx 结束会向上传播」，而 defer 发生在断言之后。
+	roundCtx, cancelRoundCause := context.WithCancelCause(parent)
+	defer cancelRoundCause(nil)
 
 	// 模拟客户端断开：父 ctx 结束，roundCtx 被向上传播地取消。
 	cancelParent()
