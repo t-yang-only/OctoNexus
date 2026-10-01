@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { CheckCircle2, CircleAlert, Clock3, Copy, ExternalLink, KeyRound, Link2, Loader2, Plus, RefreshCw, ShieldCheck, Sparkles, Trash2, UserRound } from 'lucide-react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
+import { CheckCircle2, CircleAlert, Clock3, ExternalLink, KeyRound, Link2, Loader2, Plus, RefreshCw, ShieldCheck, Sparkles, Trash2, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslations } from 'use-intl';
 import { useQueryClient } from '@tanstack/react-query';
@@ -13,7 +13,6 @@ import { CopyIconButton } from '@/components/common/CopyButton';
 import { cn } from '@/lib/utils';
 import {
     officialAccountListQueryKey,
-    jumpTokenListQueryKey,
     useAuthorizeOfficialAccount,
     useConfirmOfficialAccount,
     useCreateJumpToken,
@@ -202,9 +201,33 @@ function JumpPanel() {
     </div>;
 }
 
+// NOW_TICK_MS 是"当前时间"的刷新粒度。
+const NOW_TICK_MS = 30_000;
+
+// useRoughNow 提供一个每 NOW_TICK_MS 跳一次的粗略当前时间。
+//
+// 为什么不用 Date.now() 直接算：在渲染期调用不纯函数会让同一份输入在不同渲染中
+// 得到不同结果（react-hooks/purity），并发渲染下可能撕裂。useSyncExternalStore
+// 是 React 为"读取外部可变值"准备的正规出口。
+//
+// 快照**必须量化**到 NOW_TICK_MS：若每次 getSnapshot 都返回真实的 Date.now()，
+// React 会认为快照一直在变、无限重渲染。量化后同一个时间窗内返回值恒定。
+function useRoughNow() {
+    return useSyncExternalStore(
+        (onChange) => {
+            const id = window.setInterval(onChange, NOW_TICK_MS);
+            return () => window.clearInterval(id);
+        },
+        () => Math.floor(Date.now() / NOW_TICK_MS) * NOW_TICK_MS,
+        () => 0,
+    );
+}
+
 function JumpRow({ token }: { token: JumpToken }) {
     const t = useTranslations('accounts');
-    const expired = new Date(token.expires_at).getTime() < Date.now();
+    const now = useRoughNow();
+    // now 为 0 是首帧占位快照，此时不判定过期，免得把有效 token 误标成已过期。
+    const expired = now > 0 && new Date(token.expires_at).getTime() < now;
     return <div className="flex flex-col gap-2 rounded-2xl bg-muted/35 p-3 text-sm sm:flex-row sm:items-center"><div className="flex items-center gap-2"><Badge variant="outline">{token.kind === 'na' ? 'New API' : 'Sub2Api'}</Badge><span className="font-medium">{token.target_url}</span></div><div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">{token.consumed_at ? <Badge variant="secondary">{t('used')}</Badge> : expired ? <Badge variant="destructive">{t('expired')}</Badge> : <Badge variant="default">{t('available')}</Badge>}<span>{formatDate(token.created_at)}</span></div></div>;
 }
 

@@ -362,6 +362,11 @@ function getPayloadConfigFromPayload(
   return configLabelKey in config ? config[configLabelKey] : config[key]
 }
 
+/* eslint-disable react-refresh/only-export-components --
+   ChartTooltip 与 ChartLegend 是从 recharts 直接转出的组件，规则看不到它们的定义、
+   按「非组件导出」误报（本文件其余导出都是组件，规则只挑了这两个）。
+   这里是 shadcn/ui 的上游文件，把它们拆到别的文件会让后续同步上游产生无谓冲突，
+   所以就地关掉这一条，而不是为了 Lint 改动 vendored 结构。 */
 export {
   ChartContainer,
   ChartTooltip,
@@ -370,3 +375,4 @@ export {
   ChartLegendContent,
   ChartStyle,
 }
+/* eslint-enable react-refresh/only-export-components */

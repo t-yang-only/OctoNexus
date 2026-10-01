@@ -4,7 +4,10 @@ import { useTranslations } from 'use-intl';
 import { useLogs } from '@/api/log';
 import { VirtualizedGrid } from '@/components/common/VirtualizedGrid';
 import { LogCard } from './Item';
-import { LogToolbar, useFilteredLogs, type LogMemoryFilter } from './FilterBar';
+import { LogToolbar, type LogMemoryFilter } from './FilterBar';
+// useFilteredLogs 与计数帮手住在 filtered.ts：FilterBar.tsx 只导出组件，
+// 两者混在一个文件里会让组件的热更新失效（react-refresh/only-export-components）。
+import { useFilteredLogs } from './filtered';
 import { useLogAutoRefreshStore } from './store';
 
 // Log 展示进程内日志概览，并按 RequestID 实时更新卡片。

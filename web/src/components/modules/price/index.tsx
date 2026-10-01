@@ -30,21 +30,6 @@ function compact(value: number) {
 
 // SORTABLE 描述每个可排序列：key 是对外列名（传给后端白名单），
 // labelKey 是三语文案键，numeric 决定比较方式（数字列按数值比，文本列按字符串比）。
-const SORTABLE: Array<{ key: PriceSortColumn; labelKey: string; numeric: boolean }> = [
-    { key: 'site', labelKey: 'colSite', numeric: false },
-    { key: 'group', labelKey: 'colGroup', numeric: false },
-    { key: 'multiplier', labelKey: 'colMultiplier', numeric: true },
-    { key: 'model', labelKey: 'colModel', numeric: false },
-    { key: 'input', labelKey: 'colActualInput', numeric: true },
-    { key: 'output', labelKey: 'colActualOutput', numeric: true },
-    { key: 'cache_read', labelKey: 'colCacheRead', numeric: true },
-    { key: 'cny_input', labelKey: 'colCnyInput', numeric: true },
-    { key: 'cny_output', labelKey: 'colCnyOutput', numeric: true },
-    { key: 'per_call', labelKey: 'colPerCall', numeric: true },
-    { key: 'official_in', labelKey: 'colOfficialInput', numeric: true },
-    { key: 'official_out', labelKey: 'colOfficialOutput', numeric: true },
-];
-
 export function Price() {
     const t = useTranslations('price');
     const [tab, setTab] = useState<'models' | 'usage'>('models');

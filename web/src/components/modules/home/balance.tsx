@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Wallet, Layers, Coins, AlertCircle, RefreshCw, PencilLine, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'use-intl';

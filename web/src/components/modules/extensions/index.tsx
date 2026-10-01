@@ -450,7 +450,13 @@ function CollectorsPanel() {
     });
     const run = useMutation({
         mutationFn: runCredentialSource,
-        onSuccess: (data) => { invalidate(); data.ok ? toast.success(t('collectors.runOK', { value: data.item?.last_balance ?? 0 })) : toast.error(data.message || t('collectors.runFail')); },
+ onSuccess: (data) => {
+            invalidate();
+            // 原先是 `data.ok ? toast.success(...) : toast.error(...);` 这种三元当语句用，
+            // lint 的 no-unused-expressions 会报——表达式语句的返回值没人要，语义上也该用 if/else。
+            if (data.ok) toast.success(t('collectors.runOK', { value: data.item?.last_balance ?? 0 }));
+            else toast.error(data.message || t('collectors.runFail'));
+        },
         onError: (error: Error) => toast.error(error.message),
     });
     const startLogin = useMutation({

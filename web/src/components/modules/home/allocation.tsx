@@ -201,7 +201,8 @@ export function AllocationMonitor() {
             if (am !== bm) return am ? 1 : -1;
             if (am && bm) return a.item_id - b.item_id;
 
-            let diff = 0;
+            // 初值无意义: 下面 if/else 两个分支都会赋值（原写 = 0 是死赋值，lint 的 no-useless-assignment 抓到）。
+            let diff: number;
             if (sortKey === 'state') {
                 diff = STATE_RANK[stateOf(a)] - STATE_RANK[stateOf(b)];
             } else {

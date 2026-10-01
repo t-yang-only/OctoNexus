@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import {
     Activity,
     ArrowDownToLine,
-    ArrowUpFromLine,
     Brain,
     Database,
     Gauge,
