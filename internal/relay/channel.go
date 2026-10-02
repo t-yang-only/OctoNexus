@@ -12,9 +12,25 @@ import (
 	"github.com/looplj/axonhub/llm/transformer"
 	"github.com/looplj/axonhub/llm/transformer/anthropic"
 	"github.com/looplj/axonhub/llm/transformer/antigravity"
+	// 下面这批是 OpenAI 线协议的**厂商特化**转换器（见 vendorOutboundFor 的说明）。
+	"github.com/looplj/axonhub/llm/transformer/bailian"
+	"github.com/looplj/axonhub/llm/transformer/cerebras"
+	"github.com/looplj/axonhub/llm/transformer/cline"
+	"github.com/looplj/axonhub/llm/transformer/deepseek"
+	"github.com/looplj/axonhub/llm/transformer/doubao"
+	"github.com/looplj/axonhub/llm/transformer/fireworks"
 	"github.com/looplj/axonhub/llm/transformer/gemini"
+	"github.com/looplj/axonhub/llm/transformer/longcat"
+	"github.com/looplj/axonhub/llm/transformer/modelscope"
+	"github.com/looplj/axonhub/llm/transformer/moonshot"
+	"github.com/looplj/axonhub/llm/transformer/nanogpt"
+	"github.com/looplj/axonhub/llm/transformer/ollama"
 	"github.com/looplj/axonhub/llm/transformer/openai"
 	"github.com/looplj/axonhub/llm/transformer/openai/responses"
+	"github.com/looplj/axonhub/llm/transformer/opencode"
+	"github.com/looplj/axonhub/llm/transformer/openrouter"
+	"github.com/looplj/axonhub/llm/transformer/xai"
+	"github.com/looplj/axonhub/llm/transformer/zai"
 	"github.com/t-yang-only/OctoNexus/internal/model"
 	"github.com/tidwall/sjson"
 )
@@ -37,12 +53,22 @@ func buildOutbound(channel model.Channel, grant model.ChannelGrant, channelKey m
 		// 渠道同时支持 OpenAI 系与 Gemini 时的选择与加它之前逐字一致。
 		case grant.Protocols&model.ProtocolGeminiContents != 0:
 			protocol = model.ProtocolGeminiContents
+		case grant.Protocols&model.ProtocolOllamaChat != 0:
+			protocol = model.ProtocolOllamaChat
 		}
 	}
 
 	key := auth.NewStaticKeyProvider(channelKey.Key)
 	switch protocol {
 	case model.ProtocolOpenAIChatCompletion:
+		// 厂商方言优先：bailian / deepseek / openrouter / xai 等一批服务商
+		// 说的就是 OpenAI Chat Completions 线协议（实测它们的出站转换器 APIFormat
+		// 全部返回 openai/chat_completions，只是内嵌 OpenAI 转换器并覆写报文归一化），
+		// 所以按方言选转换器即可，不需要各占一个协议位。
+		// generic 方言返回 nil，继续走下面原有逻辑 —— 行为逐字不变。
+		if vendor, err := vendorOutboundFor(channel.Dialect, channel.BaseURL, channelKey.Key); vendor != nil || err != nil {
+			return vendor, protocol, passthrough, err
+		}
 		outbound, err := openai.NewOutboundTransformerWithConfig(&openai.Config{PlatformType: openai.PlatformOpenAI,
 			// 基地址按端点路径去重版本段: 用户把 /v1 写进 BaseURL 时不再拼出 /v1/v1/...（NM-DS-004）。
 			BaseURL:      model.ChannelBaseURL(channel.BaseURL, model.EndpointPathOrDefault(channel.OpenAIChatCompletionPath, "/v1/chat/completions")),
@@ -80,8 +106,71 @@ func buildOutbound(channel model.Channel, grant model.ChannelGrant, channelKey m
 			APIKeyProvider: key,
 		})
 		return outbound, protocol, passthrough, err
+	case model.ProtocolOllamaChat:
+		// Ollama 是**独立线协议**（APIFormat 实测 ollama/chat），不是 OpenAI 的方言，
+		// 所以占独立协议位、走这支。它同样自带规范路径，BaseURL 写到服务根即可。
+		outbound, err := ollama.NewOutboundTransformerWithConfig(&ollama.Config{
+			BaseURL:        channel.BaseURL,
+			APIKeyProvider: key,
+		})
+		return outbound, protocol, passthrough, err
 	default:
 		return nil, 0, false, fmt.Errorf("channel grant %d supports no known protocol: %d", grant.ID, grant.Protocols)
+	}
+}
+
+// vendorOutboundFor 按上游方言构造厂商专用的出站转换器；generic 方言返回 (nil, nil)，
+// 调用方随后走标准 OpenAI 转换器（即现有行为）。
+//
+// 为什么用方言而不是协议位：这批服务商的**线协议与 OpenAI 相同** ——
+// 实测它们出站转换器的 APIFormat() 全部返回 `openai/chat_completions`
+// （实现方式是内嵌 OpenAI 转换器、只覆写 TransformRequest/TransformResponse），
+// 差异只在报文体与请求头，正是项目对 Dialect 的定义。
+//
+// **base_url 一律原样传**，不与 channel.OpenAIChatCompletionPath 合成：
+// 这些转换器自带规范路径（在 BaseURL 后拼 /chat/completions），
+// 实测把已含路径的地址传进去会拼成 `.../v1/chat/completions/chat/completions`。
+// 所以这类渠道的 base_url 写到 /v1 那一层即可（如 https://api.deepseek.com/v1）。
+//
+// 参数用原始 key 字符串而不是 auth.APIKeyProvider：这十几家的两参构造器
+// 签名统一为 (baseURL, apiKey string)，与既有的 key provider 相比少一层包装。
+func vendorOutboundFor(dialect model.Dialect, baseURL, apiKey string) (transformer.Outbound, error) {
+	switch dialect {
+	case model.DialectBailian:
+		return bailian.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectCerebras:
+		// 这一家没有两参便捷构造器，只有 WithConfig（形状与其它厂商一致）。
+		return cerebras.NewOutboundTransformerWithConfig(&cerebras.Config{
+			BaseURL:        baseURL,
+			APIKeyProvider: auth.NewStaticKeyProvider(apiKey),
+		})
+	case model.DialectCline:
+		return cline.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectDeepSeek:
+		return deepseek.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectDoubao:
+		return doubao.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectFireworks:
+		return fireworks.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectLongcat:
+		return longcat.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectModelScope:
+		return modelscope.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectMoonshot:
+		return moonshot.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectNanoGPT:
+		return nanogpt.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectOpenCode:
+		return opencode.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectOpenRouter:
+		return openrouter.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectXAI:
+		return xai.NewOutboundTransformer(baseURL, apiKey)
+	case model.DialectZAI:
+		return zai.NewOutboundTransformer(baseURL, apiKey)
+	default:
+		// generic 以及非 OpenAI 线协议的方言（如 antigravity）都走这里。
+		return nil, nil
 	}
 }
 

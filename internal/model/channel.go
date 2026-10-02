@@ -17,6 +17,11 @@ const (
 	// 它与上面三种是**平行的线协议**而不是方言: 报文字段名与结构都不同,
 	// 因此必须占一个独立的协议位 (落库, 不可再变更), 不能靠方言表达。
 	ProtocolGeminiContents Protocol = 1 << 4
+	// ProtocolOllamaChat 是 Ollama 的原生对话线协议 (POST /api/chat)。
+	// 实测其出站转换器的 APIFormat() 返回 `ollama/chat` —— 与 OpenAI 系**不是**同一条线
+	// （请求体是 messages+options、响应体是 message+done），所以必须占独立协议位，
+	// 不能像 bailian/deepseek 那些厂商一样用方言表达。
+	ProtocolOllamaChat Protocol = 1 << 5
 )
 
 // 上游在标准协议之上的方言。
@@ -35,6 +40,36 @@ const (
 	//   · 报文要过一遍 sanitizer (剔除该后端不接受的字段)。
 	// 正是「同一协议下不同服务商的差异」这个方言定义本身，所以用 Dialect 表达而不是再加协议位。
 	DialectAntigravity Dialect = "antigravity"
+
+	// 下面这些方言都是**OpenAI Chat Completions 的厂商特化**：
+	// 实测它们的出站转换器 APIFormat() 全部返回 openai/chat_completions
+	// （它们内嵌 OpenAI 转换器，只覆写 TransformRequest/TransformResponse 做厂商归一化），
+	// 因此不该各占一个协议位 —— 正是 Dialect 存在的理由。
+	//
+	// 每个方言带来的实际差异举例：
+	//   bailian 合并连续的 tool_call 消息（百炼不接受连续 tool 消息）；
+	//   deepseek 把 reasoning 放进 reasoning_content；
+	//   openrouter 需要额外的 HTTP-Referer / X-Title 归属头；
+	//   xai / zai / moonshot 等的思考字段与采样参数白名单各不相同。
+	//
+	// **路径约定**：这些转换器自带规范路径，会在 BaseURL 后拼 `/chat/completions`，
+	// 所以渠道的 base_url 写到 `/v1` 那一层即可（如 https://api.deepseek.com/v1）。
+	// 渠道的 openai_chat_completion_path 字段对它们不生效 —— 实测若把已含路径的地址
+	// 传进去会拼成 `.../v1/chat/completions/chat/completions`（路径翻倍）。
+	DialectBailian    Dialect = "bailian"
+	DialectCerebras   Dialect = "cerebras"
+	DialectCline      Dialect = "cline"
+	DialectDeepSeek   Dialect = "deepseek"
+	DialectDoubao     Dialect = "doubao"
+	DialectFireworks  Dialect = "fireworks"
+	DialectLongcat    Dialect = "longcat"
+	DialectModelScope Dialect = "modelscope"
+	DialectMoonshot   Dialect = "moonshot"
+	DialectNanoGPT    Dialect = "nanogpt"
+	DialectOpenCode   Dialect = "opencode"
+	DialectOpenRouter Dialect = "openrouter"
+	DialectXAI        Dialect = "xai"
+	DialectZAI        Dialect = "zai"
 )
 
 // 渠道的可编辑配置; 落库时平铺成 channels 的各列, 出入 JSON 时平铺成渠道读写接口的各字段。

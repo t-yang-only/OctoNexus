@@ -26,7 +26,7 @@ var (
 // 漏了它，前端/导入把该位填进来会被拒成
 // "channel grant protocols N is empty or contains undefined bits"（实测踩过：
 // 只加了 model 里的常量与 relay 的转换器分支，端到端发请求时才被这一步拦下）。
-const definedProtocols = model.ProtocolOpenAIChatCompletion | model.ProtocolOpenAIResponse | model.ProtocolAnthropicMessage | model.ProtocolGeminiContents
+const definedProtocols = model.ProtocolOpenAIChatCompletion | model.ProtocolOpenAIResponse | model.ProtocolAnthropicMessage | model.ProtocolGeminiContents | model.ProtocolOllamaChat
 
 // ChannelDetailGet 返回指定渠道的完整配置, 供编辑表单读取。
 func ChannelDetailGet(id int) (model.ChannelDetail, error) {
