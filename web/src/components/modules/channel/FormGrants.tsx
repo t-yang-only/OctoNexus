@@ -46,7 +46,11 @@ function GrantCells({ state, setState, models, keyNames, remove, icon: Icon, tip
         // 单组合格才给提示: 批量格的不可用原因分散在多个凭据上, 说清反倒要另开一处说明。
         const single = models.length === 1 && keyNames.length === 1;
         return (
-            <span className="w-7 flex justify-center" title={single && total === 0 ? unsupportedTip : undefined}>
+            // shrink-0 很关键：这一格是固定宽度的复选框列，压缩它会把方框压扁；
+            // 该让位的是右边的模型名（它已经有 min-w-0 truncate，本就是设计成可截断的）。
+            // 新增 Gemini 列（第四列）后这一行明显更挤，尤其窄屏/移动端——
+            // 没有 shrink-0 时 flex 会优先压缩宽度固定的这几格，先坏的反而是控件。
+            <span className="w-7 shrink-0 flex justify-center" title={single && total === 0 ? unsupportedTip : undefined}>
                 <Checkbox
                     checked={value}
                     disabled={total === 0}
@@ -76,7 +80,7 @@ function GrantCells({ state, setState, models, keyNames, remove, icon: Icon, tip
             {cell(Protocol.OpenAIResponse)}
             {cell(Protocol.AnthropicMessage)}
             {cell(Protocol.GeminiContents)}
-            <span className="w-7 flex justify-center">
+            <span className="w-7 shrink-0 flex justify-center">
                 {remove && (
                     <IconButton
                         onClick={remove}
@@ -183,8 +187,10 @@ export function FormGrants({ state, setState }: {
             </div>
 
             <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-border overflow-hidden">
-                {/* 展开折叠在最左, 与下面模型行的箭头同侧; 协议标签, 三个批量勾选和清空靠右成组。
-                    标签用 ml-auto 顶到右侧, 紧挨复选框, 才能读作这三列的表头。 */}
+                {/* 展开折叠在最左, 与下面模型行的箭头同侧; 协议标签, 四个批量勾选和清空靠右成组。
+                    标签用 ml-auto 顶到右侧, 紧挨复选框, 才能读作这几列的表头。
+                    **协议列表变了必须同步这里**：它是硬编码文案而不是从 Protocol 枚举生成，
+                    漏改就会变成"表头三列、格子四列"的错位（新增 Gemini 时就漏过一次）。 */}
                 <div className="flex items-center gap-1 px-3 py-2 border-b border-border bg-muted/30 shrink-0">
                     {/* 全部展开与全部折叠共用一个按钮: 已全展开时折叠, 否则展开全部。 */}
                     <IconButton
@@ -196,7 +202,7 @@ export function FormGrants({ state, setState }: {
                         {allExpanded ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
                     </IconButton>
                     <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
-                        chat / response / message
+                        chat / response / message / gemini
                     </span>
                     {/* 表头覆盖全部模型全部凭据, 故勾选即批量, 删除即清空全部模型及其授权。 */}
                     <GrantCells
