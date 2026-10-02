@@ -7,50 +7,37 @@ import dayjs from 'dayjs';
 import { buttonVariants } from '@/components/ui/button';
 import Logo from '@/components/modules/logo';
 import { Activity } from './activity';
-import { PerformancePanel } from './performance';
 import { Total } from './total';
 import { Balance } from './balance';
 import { StatsChart } from './chart';
 import { Rank } from './rank';
-import { ModelMonitor } from './monitor';
-import { AllocationMonitor } from './allocation';
-import { RequestInsight } from './insight';
-import { LatencyDistributionPanel } from './latency';
-import RoutingProfilePanel from './routing';
-import { GroupHealthPanel } from './group-health';
 import { useHomeViewStore } from './store';
 
-// HomeSections 汇总首页各统计区块, 屏内正文与分享图舞台共用。
-// 模型调用分析（ModelMonitor）挂在榜单之后：约束登记 NM-CUR-025 裁决，
-// 不做 new-api 式三 Tab 看板、不新增导航页，只在首页追加一个监控区块。
+// HomeSections 汇总首页的**概览**区块, 屏内正文与分享图舞台共用。
 //
-// 请求窗口分析（RequestInsight）随后：它读 relay_logs 明细，专做 ModelMonitor
-// 结构上做不到的三件事（时间线堆叠 / 失败归因 / RPM 与 TPM），因此不是重复区块。
+// ## 主页只放概览（本轮拆分）
 //
-// 延迟分布（LatencyDistributionPanel）接在请求窗口分析之后：它回答的是另一类问题
-// ——前一块看「多少量、多少钱、失败都归谁」，这一块看「整体有多慢、慢是普遍的还是
-// 被少数拖累的」。项目既有的耗时画像都按渠道/分组切开，没有一面「整体健康线」的镜子。
-// 性能指标（PerformancePanel）紧随活跃度之后上移（需求5）：RPM / TPM / 吞吐 是
-// "现在跑得动多快"的直接读数，此前只埋在请求窗口分析那块长看板里，
-// 要看它得先滚过榜单与模型监控 —— 看数据的成本决定了它会不会被看。
+// 此前主页堆了 12 块，这一屏要滚很久，而最高频的四个数字（请求次数 / 词元 / 费用 /
+// 余额）被埋在长列表里。现在按「看数据的频率」分层：
+//   · 主页 = **概览读数**：一眼能看完、每次都看（总量 / 余额 / 活跃度 / 趋势 / 榜单）；
+//   · 分析页（导航「分析」）= **诊断读数**：定位问题才会看，且每块自带筛选与下钻
+//     （性能吞吐 / 模型分布 / 请求窗口 / 延迟分布 / 路由画像 / 分组健康 / 额度分压）。
+// 深度分析的面板实现仍在本模块内，由 @/components/modules/analytics 编排。
 //
-// 它与请求窗口分析共用同一个 500 条窗口（同 queryKey 会被 React Query 去重），
-// 因此首页同时挂两块也只发一次请求，且两处数字必然一致。
+// 这么切的直接收益有两个：主页不用再滚；分享图产出的是干净的概览而不是一条长图。
 function HomeSections() {
     return (
         <div className="@container/home space-y-6">
+            {/* 四个总量卡片：请求次数 / 词元 / 费用，主页的唯一「一句话报数」。 */}
             <Total />
+            {/* 总余额与未读渠道归类：账目概览。 */}
             <Balance />
+            {/* 活跃度热力图：一眼看出量在什么时候来。 */}
             <Activity />
-            <PerformancePanel />
+            {/* 趋势图：概览量级的时间走向。 */}
             <StatsChart />
+            {/* 榜单：渠道/分组/模型的排行概览。 */}
             <Rank />
-            <ModelMonitor />
-            <RequestInsight />
-            <LatencyDistributionPanel />
-            <RoutingProfilePanel />
-            <GroupHealthPanel />
-            <AllocationMonitor />
         </div>
     );
 }

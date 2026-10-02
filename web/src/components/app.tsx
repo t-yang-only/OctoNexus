@@ -25,6 +25,7 @@ const Group = lazy(() => pageImports.group().then((module) => ({ default: module
 const Model = lazy(() => pageImports.model().then((module) => ({ default: module.Model })));
 const Log = lazy(() => pageImports.log().then((module) => ({ default: module.Log })));
 const ProjectLog = lazy(() => pageImports.projectlog().then((module) => ({ default: module.ProjectLog })));
+const Analytics = lazy(() => pageImports.analytics().then((module) => ({ default: module.Analytics })));
 const Setting = lazy(() => pageImports.setting().then((module) => ({ default: module.Setting })));
 const Account = lazy(() => pageImports.account().then((module) => ({ default: module.Account })));
 const Pool = lazy(() => pageImports.pool().then((module) => ({ default: module.Pool })));
@@ -161,6 +162,7 @@ export function AppContainer() {
                             {visibleItem === 'extensions' && <Extensions />}
                             {visibleItem === 'log' && <Log />}
                             {visibleItem === 'projectlog' && <ProjectLog />}
+                            {visibleItem === 'analytics' && <Analytics />}
                             {visibleItem === 'setting' && <Setting />}
                         </motion.div>
                     </AnimatePresence>

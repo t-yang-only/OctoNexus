@@ -13,6 +13,7 @@ export const pageImports = {
     extensions: () => import('@/components/modules/extensions'),
     log: () => import('@/components/modules/log'),
     projectlog: () => import('@/components/modules/project-log'),
+    analytics: () => import('@/components/modules/analytics'),
     setting: () => import('@/components/modules/setting'),
 };
 

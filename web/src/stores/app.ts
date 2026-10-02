@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { LucideIcon } from 'lucide-react';
-import { Boxes, FolderTree, History, Home, Network, Puzzle, Radio, ScrollText, Settings, Sparkles, TrendingUp, UserRound } from 'lucide-react';
+import { Boxes, ChartLine, FolderTree, History, Home, Network, Puzzle, Radio, ScrollText, Settings, Sparkles, TrendingUp, UserRound } from 'lucide-react';
 
 // Page 表示应用支持的固定页面集合。
-export type Page = 'home' | 'channel' | 'group' | 'model' | 'account' | 'pool' | 'proxy' | 'price' | 'extensions' | 'log' | 'projectlog' | 'setting';
+export type Page = 'home' | 'channel' | 'group' | 'model' | 'account' | 'pool' | 'proxy' | 'price' | 'extensions' | 'log' | 'projectlog' | 'analytics' | 'setting';
 
 // NavItem 描述导航按钮使用的页面标识、文案和图标。
 type NavItem = { id: Page; label: string; icon: LucideIcon };
@@ -26,6 +26,9 @@ export const NAV_ITEMS: NavItem[] = [
     // 新增「日志」= 项目侧诊断（尝试链聚合等），与使用记录分工：
     // 使用记录回答「我调了什么」，日志回答「链路哪里在出问题」。
     { id: 'projectlog', label: 'Logs', icon: ScrollText },
+    // 新增「分析」= 把首页原先堆着的深度分析搬到这里，让主页只留概览。
+    // 位置紧跟「日志」：三者是同一条阅读动线 —— 记录 → 链路诊断 → 深度分析。
+    { id: 'analytics', label: 'Analytics', icon: ChartLine },
     { id: 'setting', label: 'Setting', icon: Settings },
 ];
 
