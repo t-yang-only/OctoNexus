@@ -8,6 +8,10 @@
 锚点是 log.card 段里的 "waitingResponse" 行: 它在段中, 行尾**带逗号**,
 在它后面插入新键最稳（不需要动段末那个没有逗号的键）。
 """
+import os
+# 仓库根：优先环境变量，否则按脚本位置反推（本脚本在 <仓库根>/<目录>/ 下）。
+# 原先这里写死本机绝对路径，换目录或换机器就跑不起来。
+_REPO = os.environ.get("OCTOPUS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import io
 import json
 
@@ -103,7 +107,7 @@ def patch(path: str, additions: dict) -> None:
 
 
 def main():
-    base = r'D:\奇怪的软件\octopus\web\src\locales'
+    base = os.path.join(_REPO, "web", "src", "locales")
     for name, additions in LOCALES.items():
         patch(base + '\\' + name, additions)
 

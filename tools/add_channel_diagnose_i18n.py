@@ -1,9 +1,12 @@
 """补「渠道可用性诊断」横幅的三语文案（channel.diagnose.*）。"""
 import json
 import os
+# 仓库根：优先环境变量，否则按脚本位置反推（本脚本在 <仓库根>/<目录>/ 下）。
+# 原先这里写死本机绝对路径，换目录或换机器就跑不起来。
+_REPO = os.environ.get("OCTOPUS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import sys
 
-ROOT = r"D:\奇怪的软件\octopus\web\src\locales"
+ROOT = os.path.join(_REPO, "web", "src", "locales")
 
 TEXTS = {
     "zh_hans": {

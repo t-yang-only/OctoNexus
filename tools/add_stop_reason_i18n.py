@@ -10,11 +10,15 @@
 取不到。因此必须**先定位 log 段起点，再在其后找第一个 filter**，
 并且复核命中行的缩进必须正好 4 空格。
 """
+import os
+# 仓库根：优先环境变量，否则按脚本位置反推（本脚本在 <仓库根>/<目录>/ 下）。
+# 原先这里写死本机绝对路径，换目录或换机器就跑不起来。
+_REPO = os.environ.get("OCTOPUS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import json
 import sys
 from pathlib import Path
 
-REPO = Path(r"D:\奇怪的软件\octopus")
+REPO = Path(_REPO)
 LOCALES = REPO / "web" / "src" / "locales"
 
 TEXTS = {

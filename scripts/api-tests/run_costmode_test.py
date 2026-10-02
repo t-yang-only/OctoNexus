@@ -10,6 +10,9 @@ Run: python run_costmode_test.py
 """
 
 import os
+# 仓库根：优先环境变量，否则按脚本位置反推（本脚本在 <仓库根>/<目录>/ 下）。
+# 原先这里写死本机绝对路径，换目录或换机器就跑不起来。
+_REPO = os.environ.get("OCTOPUS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import http.client
 import json
 import sys
@@ -84,7 +87,7 @@ def newest_log(model_name, tries=8, interval=0.5):
 def main():
     # API key: take the user's first key straight from the DB (never printed).
     import sqlite3
-    conn = sqlite3.connect(r"file:D:\奇怪的软件\octopus\data\data.db?mode=ro", uri=True)
+    conn = sqlite3.connect("file:" + os.path.join(_REPO, "data", "data.db") + "?mode=ro", uri=True)
     cols = [r[1] for r in conn.execute("pragma table_info(api_keys)").fetchall()]
     key_col = "api_key" if "api_key" in cols else "key"
     key = conn.execute(f"select {key_col} from api_keys where enabled = 1 order by id limit 1").fetchone()[0]

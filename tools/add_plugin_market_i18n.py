@@ -7,11 +7,15 @@
 
 规则同前：文本插入、保留 CRLF、每行带逗号、落盘前 json.loads 校验键集与兄弟键。
 """
+import os
+# 仓库根：优先环境变量，否则按脚本位置反推（本脚本在 <仓库根>/<目录>/ 下）。
+# 原先这里写死本机绝对路径，换目录或换机器就跑不起来。
+_REPO = os.environ.get("OCTOPUS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 import json
 from pathlib import Path
 
-LOCALES = Path(r"D:\奇怪的软件\octopus\web\src\locales")
+LOCALES = Path(os.path.join(_REPO, "web", "src", "locales"))
 
 MENU_ENTRIES = {
     "zh_hans.json": [("market", "插件市场")],

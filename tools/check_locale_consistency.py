@@ -17,13 +17,17 @@
 用法：python check_locale_consistency.py
 退出码 0 = 通过。
 """
+import os
+# 仓库根：优先环境变量，否则按脚本位置反推（本脚本在 <仓库根>/<目录>/ 下）。
+# 原先这里写死本机绝对路径，换目录或换机器就跑不起来。
+_REPO = os.environ.get("OCTOPUS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import json
 import re
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-LOCALES = Path(r"D:\奇怪的软件\octopus\web\src\locales")
+LOCALES = Path(os.path.join(_REPO, "web", "src", "locales"))
 FILES = ["zh_hans.json", "zh_hant.json", "en.json"]
 CJK = re.compile(r"[\u4e00-\u9fff]")
 

@@ -9,11 +9,15 @@
 为什么要改 model 项：它现在在中文里显示成"价格"，与 price 项同名，
 用户点"价格"分不清进哪个页面（这是抄错文案，与本次需求同属导航层）。
 """
+import os
+# 仓库根：优先环境变量，否则按脚本位置反推（本脚本在 <仓库根>/<目录>/ 下）。
+# 原先这里写死本机绝对路径，换目录或换机器就跑不起来。
+_REPO = os.environ.get("OCTOPUS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import json
 import sys
 from pathlib import Path
 
-LOCALES = Path(r"D:\奇怪的软件\octopus\web\src\locales")
+LOCALES = Path(os.path.join(_REPO, "web", "src", "locales"))
 
 EDITS = {
     "zh_hans.json": [

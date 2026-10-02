@@ -1,4 +1,4 @@
-﻿# 生成源码快照：只含 git 跟踪的文件。
+# 生成源码快照：只含 git 跟踪的文件。
 #
 # 为什么必须用 git archive 而不是 Copy-Item -Recurse：
 # 工作目录里躺着大量被 .gitignore 排除的产物 —— octopus.exe(70MB)、
@@ -14,13 +14,18 @@
 [CmdletBinding()]
 param(
     [string]$Ref = "HEAD",
-    [string]$Root = "D:\奇怪的软件\octopus-本地数据",
+    # 快照输出目录。留空则默认放在仓库的**同级**目录（见下方 $repo 之后）。
+    # 原先这里写死本机绝对路径，换目录或换机器就得改脚本。
+    [string]$Root = "",
     [int]$Keep = 0
 )
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
+
+# 输出目录默认取仓库的同级目录（与工作区分离：快照不该落在被快照的树里）。
+if (-not $Root) { $Root = Join-Path (Split-Path -Parent $repo) "octopus-本地数据" }
 
 # 提交号必须钉死在快照名里 —— 稀疏检出/换分支后，光凭目录名无法知道它对应哪次提交。
 $commit = (git rev-parse --short $Ref).Trim()

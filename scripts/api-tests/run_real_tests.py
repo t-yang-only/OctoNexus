@@ -11,6 +11,9 @@ Run: python run_real_tests.py
 """
 
 import os
+# 仓库根：优先环境变量，否则按脚本位置反推（本脚本在 <仓库根>/<目录>/ 下）。
+# 原先这里写死本机绝对路径，换目录或换机器就跑不起来。
+_REPO = os.environ.get("OCTOPUS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import http.client
 import json
 import sqlite3
@@ -27,7 +30,7 @@ if os.environ.get("OCTOPUS_ALLOW_REAL") != "1":
     raise SystemExit(0)
 
 ADMIN = os.environ.get("OCTOPUS_ADMIN_URL", "http://127.0.0.1:13303")
-DB = r"D:\奇怪的软件\octopus\data\data.db"
+DB = os.path.join(_REPO, "data", "data.db")
 
 PREFERRED = ["deepseek-v4.1-flash", "deepseek-v4-flash", "glm-5.3-flash", "deepseek-flash",
              "gemini-3.5-flash", "claude-haiku-4-5", "gpt-5.6-sol", "deepseek-v4-pro"]
