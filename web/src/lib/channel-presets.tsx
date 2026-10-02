@@ -16,7 +16,16 @@ import AzureIcon from '@thesvg/react/azure-azure-openai';
 // Gemini API 与 Antigravity 都有现成图标（后者正是 Google 那条 Cloud Code 路线）。
 import GeminiIcon from '@thesvg/react/ai-studio-google';
 import AntigravityIcon from '@thesvg/react/antigravity-google';
+// 厂商方言里没有现成品牌图标的（如 NanoGPT）用下面这个中性占位图标，不拿别家的顶上。
+import CerebrasIcon from '@thesvg/react/cerebras';
+import ClineIcon from '@thesvg/react/cline';
+import FireworksIcon from '@thesvg/react/fireworks';
+import LongCatIcon from '@thesvg/react/longcat';
+import ModelScopeIcon from '@thesvg/react/modelscope';
+import OpenCodeIcon from '@thesvg/react/opencode';
+import OllamaIcon from '@thesvg/react/ollama';
 import type { Dialect } from '@/api/channel';
+import { GenericVendorIcon } from './generic-vendor-icon';
 
 // ChannelPreset 是服务商的地址, 路径与方言预填模板。
 // 地址与路径只在前端存在, 不落库: 这些服务商对后端没有区别, 只是地址和路径不同。
@@ -62,20 +71,20 @@ export const CHANNEL_PRESETS: ChannelPreset[] = [
     },
     {
         id: 'volcengine', label: '火山方舟', Icon: VolcengineIcon,
-        dialect: 'generic',
+        dialect: 'doubao',
         base_url: 'https://ark.cn-beijing.volces.com/api/v3',
         openai_chat_completion_path: '/chat/completions', openai_response_path: '/responses', anthropic_message_path: '/messages',
     },
     {
         id: 'deepseek', label: 'DeepSeek', Icon: DeepSeekIcon,
-        dialect: 'generic',
-        base_url: 'https://api.deepseek.com',
+        dialect: 'deepseek',
+        base_url: 'https://api.deepseek.com/v1',
         openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
     },
     {
         id: 'openrouter', label: 'OpenRouter', Icon: OpenRouterIcon, iconClassName: 'brightness-0 dark:invert',
-        dialect: 'generic',
-        base_url: 'https://openrouter.ai/api',
+        dialect: 'openrouter',
+        base_url: 'https://openrouter.ai/api/v1',
         openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
     },
     {
@@ -86,26 +95,26 @@ export const CHANNEL_PRESETS: ChannelPreset[] = [
     },
     {
         id: 'dashscope', label: '通义千问', Icon: QwenIcon, iconClassName: 'brightness-0 dark:invert',
-        dialect: 'generic',
-        base_url: 'https://dashscope.aliyuncs.com/compatible-mode',
+        dialect: 'bailian',
+        base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
     },
     {
         id: 'moonshot', label: 'Moonshot', Icon: MoonshotIcon, iconClassName: 'brightness-0 dark:invert',
-        dialect: 'generic',
-        base_url: 'https://api.moonshot.cn',
+        dialect: 'moonshot',
+        base_url: 'https://api.moonshot.cn/v1',
         openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
     },
     {
         id: 'zhipu', label: '智谱 GLM', Icon: ZhipuIcon,
-        dialect: 'generic',
+        dialect: 'zai',
         base_url: 'https://open.bigmodel.cn/api/paas/v4',
         openai_chat_completion_path: '/chat/completions', openai_response_path: '/responses', anthropic_message_path: '/messages',
     },
     {
         id: 'xai', label: 'xAI', Icon: XAIIcon, iconClassName: 'brightness-0 dark:invert',
-        dialect: 'generic',
-        base_url: 'https://api.x.ai',
+        dialect: 'xai',
+        base_url: 'https://api.x.ai/v1',
         openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
     },
     {
@@ -135,6 +144,68 @@ export const CHANNEL_PRESETS: ChannelPreset[] = [
         id: 'antigravity', label: 'Antigravity', Icon: AntigravityIcon,
         dialect: 'antigravity',
         base_url: 'https://cloudcode-pa.googleapis.com',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    // ── OpenAI 线协议 + 厂商方言 ──
+    //
+    // 这一组的线协议与上面几家完全相同（都是 OpenAI Chat Completions），差别在报文归一化
+    // 与端点规则，由后端按 dialect 选转换器。**每个方言都必须有一个预设**：
+    // 表单里没有方言选择器，dialect 只能由预设带出，漏一家的后果不是"不好选"
+    // 而是"界面上根本设不出来"。
+    //
+    // base_url 一律写到**版本级**（/v1 之类），不要贴完整端点 ——
+    // 贴了会得到 .../chat/completions/chat/completions（实测踩过）。
+    // openai_chat_completion_path 对厂商方言是**惰性**的（转换器自带端点规则、结构上不读它），
+    // 这里仍填默认值只为满足类型，真正生效的是 base_url。
+    {
+        id: 'cerebras', label: 'Cerebras', Icon: CerebrasIcon,
+        dialect: 'cerebras',
+        base_url: 'https://api.cerebras.ai/v1',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    {
+        id: 'cline', label: 'Cline', Icon: ClineIcon,
+        dialect: 'cline',
+        base_url: 'https://api.cline.bot/v1',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    {
+        id: 'fireworks', label: 'Fireworks', Icon: FireworksIcon,
+        dialect: 'fireworks',
+        base_url: 'https://api.fireworks.ai/inference/v1',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    {
+        id: 'longcat', label: 'LongCat', Icon: LongCatIcon,
+        dialect: 'longcat',
+        base_url: 'https://api.longcat.chat/openai/v1',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    {
+        id: 'modelscope', label: 'ModelScope', Icon: ModelScopeIcon,
+        dialect: 'modelscope',
+        base_url: 'https://api-inference.modelscope.cn/v1',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    {
+        id: 'nanogpt', label: 'NanoGPT', Icon: GenericVendorIcon,
+        dialect: 'nanogpt',
+        base_url: 'https://nano-gpt.com/api/v1',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    {
+        id: 'opencode', label: 'OpenCode', Icon: OpenCodeIcon,
+        dialect: 'opencode',
+        base_url: 'https://opencode.ai/zen/v1',
+        openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
+    },
+    // Ollama 是**独立线协议**（/api/chat，实测 APIFormat 是 ollama/chat），不是 OpenAI 方言：
+    // 所以它的 dialect 保持 generic，靠**协议位**表达 —— 建渠道时要在授权矩阵里勾 ollama 那一列。
+    // 方言与协议位是两件事，别在这里填 dialect（填了也没用，后端只按协议位分派）。
+    {
+        id: 'ollama', label: 'Ollama', Icon: OllamaIcon,
+        dialect: 'generic',
+        base_url: 'http://127.0.0.1:11434',
         openai_chat_completion_path: CHAT, openai_response_path: RESP, anthropic_message_path: ANTH,
     },
 ];

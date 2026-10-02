@@ -12,6 +12,10 @@ export const Protocol = {
     // GeminiContents 是 Google 的 Gemini 原生线协议（/v1beta/models/{model}:generateContent，
     // 报文是 contents/parts）。位值必须与后端 model.ProtocolGeminiContents 一致。
     GeminiContents: 1 << 4,
+    // OllamaChat 是 Ollama 自己的线协议（/api/chat，报文是 messages/options）。
+    // 实测它的出站转换器 APIFormat 是 ollama/chat，与 openai/chat_completions 不同，
+    // 所以它是**独立协议位**而不是 OpenAI 方言。位值必须与后端 model.ProtocolOllamaChat 一致。
+    OllamaChat: 1 << 5,
 } as const;
 
 // Dialect 是上游在标准协议之上的方言，决定出站转换器的厂商特化配置。
@@ -19,7 +23,31 @@ export const Protocol = {
 //
 // antigravity 是 Gemini 协议下的 Google 特化路线（Antigravity / Cloud Code PA）：
 // 线协议与 generic 相同，差别在端点由后端转换器自选、要套 Cloud Code 信封、报文要过 sanitizer。
-export type Dialect = 'generic' | 'antigravity';
+//
+// 其余 14 个是 **OpenAI Chat Completions 线协议下的厂商方言**：它们的线协议与 generic
+// 完全相同（实测 APIFormat 全是 openai/chat_completions），差别在报文归一化与端点规则
+// ——例如 bailian 要合并连续的 tool_call 消息、deepseek 要改 reasoning 字段的落点。
+// 因为这些差异地址表达不了，所以由后端按方言选转换器，前端只负责把方言名存下来。
+//
+// **这些字符串必须与后端 internal/model/channel.go 的 model.Dialect* 常量逐字一致**：
+// 它们随渠道落库，改名等于让存量渠道认不出自己的方言。
+export type Dialect =
+    | 'generic'
+    | 'antigravity'
+    | 'bailian'
+    | 'cerebras'
+    | 'cline'
+    | 'deepseek'
+    | 'doubao'
+    | 'fireworks'
+    | 'longcat'
+    | 'modelscope'
+    | 'moonshot'
+    | 'nanogpt'
+    | 'opencode'
+    | 'openrouter'
+    | 'xai'
+    | 'zai';
 
 type CustomHeader = {
     header_key: string;

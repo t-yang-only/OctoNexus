@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Eraser, Plus, RefreshCw, Trash2, type LucideIcon } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import { Protocol } from '@/api/channel';
@@ -16,10 +16,26 @@ import { useModelProbe } from './probe';
 import { declareModel, isPairSupported, supportedKeyNames } from './grants';
 import { grantKey, type ChannelFormState } from './state';
 
-// GrantCells 渲染一行右侧固定的四格: chat, response, message 三个协议勾选和一个删除。
+// PROTOCOL_COLUMNS 是授权矩阵的协议列，**列与表头文案同源于这一个数组**。
+//
+// 为什么要收敛成数组：此前列是一串手写的 cell(...) 调用、表头是一句硬编码
+// "chat / response / message / gemini"，两者各写一份。新增 Gemini 列时就漏改过表头，
+// 结果"表头三列、格子四列"错位，而且界面看着不报错。现在加一列只需在这里加一行 ——
+// 表头文案由 label 派生，结构上不可能再对不上。
+//
+// label 是协议在界面上的短标识，与分组页 PROTOCOL_TAGS、日志页 PROTOCOL_LABELS 同一套词。
+const PROTOCOL_COLUMNS = [
+    { bit: Protocol.OpenAIChatCompletion, label: 'chat' },
+    { bit: Protocol.OpenAIResponse, label: 'response' },
+    { bit: Protocol.AnthropicMessage, label: 'message' },
+    { bit: Protocol.GeminiContents, label: 'gemini' },
+    { bit: Protocol.OllamaChat, label: 'ollama' },
+] as const;
+
+// GrantCells 渲染一行右侧固定的协议勾选格与一个删除格。
 // 表头, 模型行, 凭据子行的差别只是这一行覆盖的 (模型 × 凭据) 范围与删除动作, 勾选,
 // 三态和写入是同一套逻辑, 故三级共用此段, 列宽与对齐也因此天然一致。
-// 三个协议列固定, 凭据作为模型的子行, 故列数不随凭据数变化。
+// 协议列固定, 凭据作为模型的子行, 故列数不随凭据数变化。
 // 该凭据供不了的模型不参与三态计算也不接受勾选: 计进去会让全选显示为选不满, 写进去会存下无效授权。
 function GrantCells({ state, setState, models, keyNames, remove, icon: Icon, tip, unsupportedTip }: {
     state: ChannelFormState;
@@ -76,10 +92,9 @@ function GrantCells({ state, setState, models, keyNames, remove, icon: Icon, tip
 
     return (
         <>
-            {cell(Protocol.OpenAIChatCompletion)}
-            {cell(Protocol.OpenAIResponse)}
-            {cell(Protocol.AnthropicMessage)}
-            {cell(Protocol.GeminiContents)}
+            {PROTOCOL_COLUMNS.map((column) => (
+                <Fragment key={column.label}>{cell(column.bit)}</Fragment>
+            ))}
             <span className="w-7 shrink-0 flex justify-center">
                 {remove && (
                     <IconButton
@@ -187,10 +202,9 @@ export function FormGrants({ state, setState }: {
             </div>
 
             <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-border overflow-hidden">
-                {/* 展开折叠在最左, 与下面模型行的箭头同侧; 协议标签, 四个批量勾选和清空靠右成组。
+                {/* 展开折叠在最左, 与下面模型行的箭头同侧; 协议标签, 批量勾选和清空靠右成组。
                     标签用 ml-auto 顶到右侧, 紧挨复选框, 才能读作这几列的表头。
-                    **协议列表变了必须同步这里**：它是硬编码文案而不是从 Protocol 枚举生成，
-                    漏改就会变成"表头三列、格子四列"的错位（新增 Gemini 时就漏过一次）。 */}
+                    标签文案由 PROTOCOL_COLUMNS 的 label 派生, 不再手写 —— 见该常量的注释。 */}
                 <div className="flex items-center gap-1 px-3 py-2 border-b border-border bg-muted/30 shrink-0">
                     {/* 全部展开与全部折叠共用一个按钮: 已全展开时折叠, 否则展开全部。 */}
                     <IconButton
@@ -202,7 +216,7 @@ export function FormGrants({ state, setState }: {
                         {allExpanded ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
                     </IconButton>
                     <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
-                        chat / response / message / gemini
+                        {PROTOCOL_COLUMNS.map((column) => column.label).join(' / ')}
                     </span>
                     {/* 表头覆盖全部模型全部凭据, 故勾选即批量, 删除即清空全部模型及其授权。 */}
                     <GrantCells
