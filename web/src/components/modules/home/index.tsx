@@ -9,6 +9,7 @@ import Logo from '@/components/modules/logo';
 import { Activity } from './activity';
 import { Total } from './total';
 import { Balance } from './balance';
+import { PerformanceCompact } from './performance-compact';
 import { StatsChart } from './chart';
 import { Rank } from './rank';
 import { useHomeViewStore } from './store';
@@ -32,6 +33,8 @@ function HomeSections() {
             <Total />
             {/* 总余额与未读渠道归类：账目概览。 */}
             <Balance />
+            {/* 性能指标简版：只留 RPM / TPM / 吞吐 三个当下读数（完整版在分析页）。 */}
+            <PerformanceCompact />
             {/* 活跃度热力图：一眼看出量在什么时候来。 */}
             <Activity />
             {/* 趋势图：概览量级的时间走向。 */}

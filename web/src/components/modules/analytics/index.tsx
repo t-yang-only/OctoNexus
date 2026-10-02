@@ -5,6 +5,7 @@ import { LatencyDistributionPanel } from '@/components/modules/home/latency';
 import { ModelMonitor } from '@/components/modules/home/monitor';
 import { PerformancePanel } from '@/components/modules/home/performance';
 import RoutingProfilePanel from '@/components/modules/home/routing';
+import { DetailedStats } from './detailed-stats';
 
 // AnalyticsSections 汇总「深度分析」类区块。
 //
@@ -25,7 +26,10 @@ import RoutingProfilePanel from '@/components/modules/home/routing';
 export function AnalyticsSections() {
     return (
         <div className="@container/analytics space-y-6">
-            {/* 性能指标在最前：RPM / TPM / 吞吐是「现在跑得动多快」的直接读数。 */}
+            {/* 详细统计在最前：先给「一共服务了多少」的累计规模，再往下才是窗口内的诊断读数。
+                口径要分开看 —— 这一块是累计，下面是按最近若干条请求折算的窗口读数。 */}
+            <DetailedStats />
+            {/* 性能指标：RPM / TPM / 吞吐是「现在跑得动多快」的直接读数。 */}
             <PerformancePanel />
             {/* 模型调用分析：按模型拆分请求与成本，回答「钱花在哪几个模型上」。 */}
             <ModelMonitor />

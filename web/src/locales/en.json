@@ -65,6 +65,20 @@
     "expired": "Expired",
     "supportedModels": "Supported Models"
   },
+  "analytics": {
+    "detailed": {
+      "title": "Detailed stats",
+      "cumulativeNote": "Cumulative since first use",
+      "cumulativeToken": "Total tokens",
+      "cumulativeRequest": "Total requests",
+      "peakDailyRequest": "Peak daily requests",
+      "activeDays": "Active days",
+      "currentStreak": "Current streak",
+      "longestStreak": "Longest streak",
+      "daysUnit": "days",
+      "timesUnit": "req"
+    }
+  },
   "navbar": {
     "projectlog": "Logs",
     "analytics": "Analytics",

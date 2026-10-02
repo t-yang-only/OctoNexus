@@ -65,6 +65,20 @@
     "expired": "已過期",
     "supportedModels": "支援的模型"
   },
+  "analytics": {
+    "detailed": {
+      "title": "詳細統計",
+      "cumulativeNote": "累計口徑（從啟用至今）",
+      "cumulativeToken": "累計 Token 數",
+      "cumulativeRequest": "累計請求數",
+      "peakDailyRequest": "峰值單日請求",
+      "activeDays": "活躍天數",
+      "currentStreak": "當前連續天數",
+      "longestStreak": "最長連續天數",
+      "daysUnit": "天",
+      "timesUnit": "次"
+    }
+  },
   "navbar": {
     "projectlog": "日誌",
     "analytics": "分析",
