@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslations } from 'use-intl';
 import { AlertTriangle, ArrowDown, ArrowUp, Search } from 'lucide-react';
 import { priceModelsQuery, priceUsageQuery, type PriceModelRow, type PriceSortColumn, type PriceUsageRow } from '@/api/price';
+import { EMPTY_LIST } from '@/lib/empty';
 
 /** 价格与用量对比（T-price-001 / T-price-002 / 需求9 统一标准） */
 function money(value: number) {
@@ -41,8 +42,8 @@ export function Price() {
     const models = useQuery(priceModelsQuery(keyword.trim(), sort));
     const usage = useQuery(priceUsageQuery());
 
-    const rows = models.data?.items ?? [];
-    const usages = usage.data?.items ?? [];
+    const rows = models.data?.items ?? EMPTY_LIST;
+    const usages = usage.data?.items ?? EMPTY_LIST;
     const anomalyCount = useMemo(() => usages.filter((item) => item.anomaly).length, [usages]);
     // 同一模型在各站的人民币最低价，用来标出"这家更便宜"——用户要的就是这个对比。
     // 用人民币价而不是原币种价：统一标准之后这才是"我实际付出的钱"。

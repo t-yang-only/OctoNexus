@@ -9,6 +9,7 @@ import { AnimatedNumber } from '@/components/common/AnimatedNumber';
 import { formatCount, formatMoney, formatTime } from '@/lib/utils';
 import { useTheme } from '@/provider/theme';
 import { useHomeViewStore } from './store';
+import { EMPTY_LIST } from '@/lib/empty';
 
 // successTone 按成功率着色：与模型榜 successRate 文案同口径，颜色用本仓语义色（emerald/amber/rose）。
 function successTone(rate: number) {
@@ -33,7 +34,7 @@ export function ModelMonitor() {
 
     // 明细按调用量倒序，取 Top 8：与模型榜默认排序一致，表格只放得下头部。
     const topRows = useMemo(() => [...rows].sort((a, b) => b.count - a.count).slice(0, 8), [rows]);
-    const rangeRows = usageRows.length > 0 ? usageRows : [];
+    const rangeRows = usageRows.length > 0 ? usageRows : EMPTY_LIST;
     const rangeModels = useMemo(() => {
         const aggregate = new Map<string, { modelName: string; count: number; success: number; failed: number; wait: number; tokens: number; cost: number }>();
         for (const row of rangeRows) {

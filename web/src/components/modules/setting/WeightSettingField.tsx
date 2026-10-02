@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSettingList, useSetSetting, type Setting } from '@/api/setting';
 import { toast } from 'sonner';
+import { EMPTY_LIST } from '@/lib/empty';
 
 // WeightSettingField 是选路与转发类设置的一组控件（数字或下拉）。
 // 自包含: 自己从设置列表取当前值、自己保存并 toast, 免得为十几个键再抄一遍父组件的 state/ref/同步样板。
@@ -22,7 +23,7 @@ export function WeightSettingField({ settingKey, label, kind, options, max, hint
     const setSetting = useSetSetting();
     const [value, setValue] = useState<string>('');
     const initial = useRef<string>('');
-    const effective = (settingsQuery.data ?? []) as Setting[];
+    const effective = (settingsQuery.data ?? EMPTY_LIST) as Setting[];
 
     useEffect(() => {
         const found = effective.find((s) => s.key === settingKey);

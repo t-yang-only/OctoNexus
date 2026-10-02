@@ -19,6 +19,7 @@ import { AnimatedNumber } from '@/components/common/AnimatedNumber';
 import { formatCount, formatMoney } from '@/lib/utils';
 import { useTheme } from '@/provider/theme';
 import { SampleNote } from '@/components/sample-note';
+import { EMPTY_LIST } from '@/lib/empty';
 
 // 后端把尾部模型并进这个键，前端按它显示本地化的「其他」。
 const OTHER_KEY = '__other__';
@@ -109,8 +110,8 @@ export function RequestInsight() {
     const [metric, setMetric] = useState<TimelineMetric>('tokens');
     const [dimension, setDimension] = useState<DimensionKey>('models');
     const { data } = useAnalyticsOverview(window);
-    const series = data?.series ?? [];
-    const models = data?.models ?? [];
+    const series = data?.series ?? EMPTY_LIST;
+    const models = data?.models ?? EMPTY_LIST;
 
     // 堆叠键按明细顺序（后端已按请求数倒序），末尾补上「其他」。
     const stackKeys = useMemo(() => {

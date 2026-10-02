@@ -27,6 +27,7 @@ import {
     updateProxyNode,
     type ProxyNode,
 } from '@/api/proxy';
+import { EMPTY_LIST } from '@/lib/empty';
 
 // Proxy 是代理出口页。
 //
@@ -47,7 +48,7 @@ export function Proxy() {
     const [manualYAML, setManualYAML] = useState('');
     const [probing, setProbing] = useState<number | null>(null);
 
-    const nodes = nodesQuery.data?.items ?? [];
+    const nodes = nodesQuery.data?.items ?? EMPTY_LIST;
     const usage = nodesQuery.data?.usage ?? {};
     const core = coreQuery.data;
 
