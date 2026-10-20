@@ -72,6 +72,7 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.OfficialAccount{},
 		&model.JumpToken{},
 		&model.UsageHourly{},
+		&model.Sub2APIAccount{},
 		// 手动订阅（R-acct-004）：纯新增表，没有存量数据要迁移，因此不需要单独的迁移文件。
 		&model.ManualSubscription{},
 		// 代理节点池（R-proxy-001）：同样是纯新增表；为渠道/账号各配独立出口用。

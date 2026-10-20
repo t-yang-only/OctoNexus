@@ -1,328 +1,368 @@
-import { useMemo, useState, useSyncExternalStore } from 'react';
-import { CheckCircle2, CircleAlert, Clock3, ExternalLink, KeyRound, Link2, Loader2, Plus, RefreshCw, ShieldCheck, Sparkles, Trash2, UserRound } from 'lucide-react';
+import { useState } from 'react';
 import { toast } from 'sonner';
-import { useTranslations } from 'use-intl';
-import { useQueryClient } from '@tanstack/react-query';
+import {
+    CheckCircle2,
+    Loader2,
+    Plus,
+    RefreshCw,
+    Server,
+    Trash2,
+    Workflow,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
-import { CopyIconButton } from '@/components/common/CopyButton';
-import { cn } from '@/lib/utils';
 import {
-    officialAccountListQueryKey,
-    useAuthorizeOfficialAccount,
-    useConfirmOfficialAccount,
-    useCreateJumpToken,
-    useJumpTokens,
-    useOfficialAccounts,
-    useOfficialPools,
-    useRefreshOfficialAccountUsage,
-    useDeleteOfficialAccount,
-    useSyncOfficialPool,
-    type OfficialAccount,
-    type OfficialPoolStatus,
-    type OfficialProvider,
-    type JumpKind,
-    type JumpToken,
-} from '@/api/account';
+    useSub2APIAccounts,
+    useCreateSub2APIAccount,
+    useDeleteSub2APIAccount,
+    useProbeSub2APIAccount,
+    type Sub2APIAccount,
+    type Sub2APIPlatform,
+    type Sub2APIAccountType,
+} from '@/api/sub2api';
 
-const providerMeta: Record<OfficialProvider, { label: string; className: string }> = {
-    openai: { label: 'OpenAI', className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-    gemini: { label: 'Gemini', className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
-    claude: { label: 'Claude', className: 'bg-orange-500/10 text-orange-600 dark:text-orange-400' },
-};
+const platformOptions: Array<{ id: Sub2APIPlatform; label: string; defaultBaseURL: string; desc: string }> = [
+    { id: 'anthropic', label: 'Claude (Anthropic)', defaultBaseURL: 'https://api.anthropic.com', desc: '支持 Claude OAuth 会话、Setup Token 与 API Key 接入' },
+    { id: 'openai', label: 'OpenAI (ChatGPT)', defaultBaseURL: 'https://api.openai.com', desc: '支持 Responses / Chat Completions 协议反代' },
+    { id: 'gemini', label: 'Google Gemini', defaultBaseURL: 'https://generativelanguage.googleapis.com', desc: 'Google AI Studio / 订阅 OAuth 原生反代' },
+    { id: 'antigravity', label: 'Antigravity (Cloud Code)', defaultBaseURL: 'https://cloudcode-pa.googleapis.com', desc: 'Cloud Code PA 沙盒多环境反向代理' },
+    { id: 'grok', label: 'xAI Grok', defaultBaseURL: 'https://api.x.ai', desc: '支持 Grok 订阅会话桥接与 Responses 代理' },
+    { id: 'deepseek', label: 'DeepSeek', defaultBaseURL: 'https://api.deepseek.com', desc: '深度求索原生与兼容端点反代' },
+    { id: 'kimi', label: 'Moonshot Kimi', defaultBaseURL: 'https://api.moonshot.cn', desc: '月之暗面高并发与长上下文反代' },
+    { id: 'opencode_go', label: 'OpenCode (Go/Zen)', defaultBaseURL: 'https://opencode.ai/zen/v1', desc: 'OpenCode Zen 按量与 Go 订阅双模' },
+    { id: 'cline', label: 'Cline', defaultBaseURL: 'https://api.cline.bot/v1', desc: 'Cline 开发者订阅与积分反代' },
+];
 
-function formatDate(value: string | null) {
-    return value ? new Date(value).toLocaleString() : '—';
-}
+function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
+    const deleteMutation = useDeleteSub2APIAccount();
+    const probeMutation = useProbeSub2APIAccount();
+    const [probeResult, setProbeResult] = useState<string | null>(null);
 
-function StatusBadge({ account }: { account: OfficialAccount }) {
-    const t = useTranslations('accounts');
-    const healthy = account.status === 'active' && account.healthy;
-    const label = healthy ? t('status.healthy') : t(`status.${account.status}`);
-    return (
-        <Badge variant={healthy ? 'default' : account.status === 'error' ? 'destructive' : 'secondary'} className="gap-1">
-            {healthy ? <CheckCircle2 className="size-3" /> : <CircleAlert className="size-3" />}
-            {label}
-        </Badge>
-    );
-}
+    const handleDelete = () => {
+        if (confirm(`确认删除订阅反代账号「${account.name}」？`)) {
+            deleteMutation.mutate(account.id, {
+                onSuccess: () => toast.success('账号已删除'),
+                onError: (err) => toast.error('删除失败: ' + err.message),
+            });
+        }
+    };
 
-function AccountCard({ account }: { account: OfficialAccount }) {
-    const t = useTranslations('accounts');
-    const refresh = useRefreshOfficialAccountUsage();
-    const remove = useDeleteOfficialAccount();
-    const [confirming, setConfirming] = useState(false);
-    const meta = providerMeta[account.provider];
-
-    // 删除要二次确认，且把后果说清楚：账号删掉后号池里对应凭据也一并清掉，
-    // 之后这个官方账号参与的转发会少一条路 —— 这不是"取消"能撤销的动作。
-    const askDelete = () => setConfirming(true);
-    const cancelDelete = () => setConfirming(false);
-    const confirmDelete = () => {
-        remove.mutate(account.id, {
-            onSuccess: () => {
-                setConfirming(false);
-                toast.success(t('deleteSuccess'));
+    const handleProbe = () => {
+        setProbeResult(null);
+        probeMutation.mutate(account.id, {
+            onSuccess: (res) => {
+                setProbeResult(res.status);
+                toast.success('探测完成: ' + res.status);
             },
-            onError: (error) => toast.error(t('deleteFailed'), { description: error.message }),
+            onError: (err) => {
+                setProbeResult('异常');
+                toast.error('探测失败: ' + err.message);
+            },
         });
     };
 
     return (
-        <article className="group relative overflow-hidden rounded-3xl border border-border/70 bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
-            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary/70 via-primary/20 to-transparent" />
-            <div className="flex items-start gap-4">
-                <div className={`grid size-12 shrink-0 place-items-center rounded-2xl text-sm font-bold ${meta.className}`}>
-                    {account.provider === 'openai' ? 'AI' : account.provider === 'gemini' ? 'G' : 'C'}
-                </div>
-                <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="truncate font-semibold">{account.external_name || t('pendingAccount')}</h3>
-                        <Badge variant="outline" className="capitalize">{meta.label}</Badge>
-                        <StatusBadge account={account} />
+        <div className="flex flex-col justify-between rounded-2xl border border-border/70 bg-card p-5 shadow-sm transition-all hover:border-border hover:shadow-md">
+            <div>
+                <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                            <Server className="size-5" />
+                        </div>
+                        <div className="min-w-0">
+                            <h3 className="truncate font-semibold text-base leading-tight">{account.name}</h3>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">{account.base_url}</p>
+                        </div>
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">{t('accountId', { id: account.id })}</p>
-                    {/* pending 账号必须说明"它不会自己好"。
-                        线上实测有两条 openai-pending-* 挂了多天：授权链接生成过但从没扫码确认，
-                        凭据为空、不会进选路，而界面只显示一枚「待确认」徽章 ——
-                        用户看不出该拿它怎么办。按项目纪律，诊断要给出可执行的原因。 */}
-                    {account.status === 'pending' && (
-                        <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">
-                            {t('pendingHint')}
+                    <Badge variant={account.enabled ? 'default' : 'secondary'} className="capitalize shrink-0">
+                        {account.platform}
+                    </Badge>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-xl bg-muted/40 p-2.5">
+                        <span className="text-muted-foreground block mb-0.5">账号类型</span>
+                        <span className="font-medium text-foreground uppercase">{account.account_type}</span>
+                    </div>
+                    <div className="rounded-xl bg-muted/40 p-2.5">
+                        <span className="text-muted-foreground block mb-0.5">协议分流</span>
+                        <span className="font-medium text-foreground">{account.api_protocol}</span>
+                    </div>
+                </div>
+
+                {account.notes && (
+                    <p className="mt-3 rounded-lg border border-border/40 bg-muted/20 px-3 py-2 text-xs text-muted-foreground line-clamp-2">
+                        {account.notes}
+                    </p>
+                )}
+
+                {probeResult && (
+                    <div className="mt-3 flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
+                        <CheckCircle2 className="size-3.5" />
+                        连通性: {probeResult}
+                    </div>
+                )}
+            </div>
+
+            <div className="mt-5 flex items-center justify-between border-t border-border/50 pt-3">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-xl text-xs"
+                    onClick={handleProbe}
+                    disabled={probeMutation.isPending}
+                >
+                    {probeMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 size-3.5" />}
+                    测试连接
+                </Button>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 rounded-xl text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={handleDelete}
+                    disabled={deleteMutation.isPending}
+                >
+                    <Trash2 className="size-3.5" />
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+function Sub2APIAccountsPanel() {
+    const { data: accounts, isLoading, error } = useSub2APIAccounts();
+    const createMutation = useCreateSub2APIAccount();
+
+    const [name, setName] = useState('');
+    const [platform, setPlatform] = useState<Sub2APIPlatform>('anthropic');
+    const [accountType, setAccountType] = useState<Sub2APIAccountType>('oauth');
+    const [baseURL, setBaseURL] = useState('https://api.anthropic.com');
+    const [apiKey, setApiKey] = useState('');
+    const [apiProtocol, setApiProtocol] = useState('chat_completions');
+    const [notes, setNotes] = useState('');
+
+    const handlePlatformChange = (p: Sub2APIPlatform) => {
+        setPlatform(p);
+        const matched = platformOptions.find((opt) => opt.id === p);
+        if (matched) {
+            setBaseURL(matched.defaultBaseURL);
+        }
+    };
+
+    const handleCreate = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!name.trim()) {
+            toast.error('请填写账号名称');
+            return;
+        }
+        if (!baseURL.trim()) {
+            toast.error('请填写反代基地址');
+            return;
+        }
+
+        createMutation.mutate(
+            {
+                name: name.trim(),
+                platform,
+                account_type: accountType,
+                base_url: baseURL.trim(),
+                api_key: apiKey.trim(),
+                api_protocol: apiProtocol,
+                enabled: true,
+                notes: notes.trim(),
+            },
+            {
+                onSuccess: () => {
+                    toast.success('Sub2API 订阅反代账号创建成功');
+                    setName('');
+                    setApiKey('');
+                    setNotes('');
+                },
+                onError: (err) => toast.error('创建失败: ' + err.message),
+            }
+        );
+    };
+
+    return (
+        <div className="space-y-6">
+            <section className="rounded-3xl border border-border/70 bg-card p-6 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                            <Workflow className="size-3.5" />
+                            Sub2API 架构集成
+                        </div>
+                        <h2 className="text-xl font-bold tracking-tight">接入 Sub2API 订阅反代</h2>
+                        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                            无缝接入 Claude、OpenAI、Gemini、Antigravity、Grok 订阅池与多模型反代网关，支持协议直通、格式转换及防关联出口绑定。
                         </p>
-                    )}
-                </div>
-                <Button variant="ghost" size="icon" className="rounded-xl" disabled={refresh.isPending} onClick={() => refresh.mutate(account.id, { onSuccess: () => toast.success(t('refreshed')), onError: (error) => toast.error(t('refreshFailed'), { description: error.message }) })}>
-                    {refresh.isPending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                </Button>
-                <Button variant="ghost" size="icon" className="rounded-xl text-destructive hover:text-destructive" disabled={remove.isPending} onClick={askDelete} aria-label={t('delete')}>
-                    {remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                </Button>
-            </div>
-            {confirming && (
-                <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
-                    <span className="min-w-0 flex-1">{t('deleteConfirm', { name: account.external_name || t('pendingAccount') })}</span>
-                    <Button size="sm" variant="outline" className="rounded-xl" onClick={cancelDelete} disabled={remove.isPending}>{t('deleteCancel')}</Button>
-                    <Button size="sm" variant="destructive" className="rounded-xl" onClick={confirmDelete} disabled={remove.isPending}>
-                        {remove.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />} {t('deleteConfirmButton')}
-                    </Button>
-                </div>
-            )}
-            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Metric label={t('plan')} value={account.plan_tier || '—'} />
-                <Metric label={t('fiveHour')} value={account.window_5h || '—'} />
-                <Metric label={t('sevenDay')} value={account.window_7d || '—'} />
-                <Metric label={t('expires')} value={formatDate(account.expires_at)} />
-            </div>
-            {account.last_error && <div className="mt-4 flex items-start gap-2 rounded-2xl bg-destructive/10 p-3 text-xs text-destructive"><CircleAlert className="mt-0.5 size-4 shrink-0" />{account.last_error}</div>}
-            <p className="mt-4 text-right text-[11px] text-muted-foreground">{t('checkedAt', { value: formatDate(account.last_checked_at) })}</p>
-        </article>
-    );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-    return <div className="rounded-2xl bg-muted/40 p-3"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-1 truncate text-sm font-semibold tabular-nums">{value}</p></div>;
-}
-
-function OfficialAccountsPanel() {
-    const t = useTranslations('accounts');
-    const queryClient = useQueryClient();
-    const { data, isLoading, error } = useOfficialAccounts();
-    const authorize = useAuthorizeOfficialAccount();
-    const confirm = useConfirmOfficialAccount();
-    const [provider, setProvider] = useState<OfficialProvider>('openai');
-    const [pending, setPending] = useState<{ id: number; state: string; url: string } | null>(null);
-    const [code, setCode] = useState('');
-
-    const startAuthorization = () => authorize.mutate(provider, {
-        onSuccess: (result) => {
-            setPending({ id: result.account.id, state: result.state, url: result.authorize_url });
-            window.open(result.authorize_url, '_blank', 'noopener,noreferrer');
-            toast.success(t('authorizationStarted'));
-        },
-        onError: (requestError) => toast.error(t('authorizationFailed'), { description: requestError.message }),
-    });
-
-    const finishAuthorization = (event: React.FormEvent) => {
-        event.preventDefault();
-        if (!pending || !code.trim()) return;
-        confirm.mutate({ account_id: pending.id, one_time_code: code.trim(), state: pending.state }, {
-            onSuccess: () => {
-                setPending(null); setCode('');
-                void queryClient.invalidateQueries({ queryKey: officialAccountListQueryKey });
-                toast.success(t('authorizationComplete'));
-            },
-            onError: (requestError) => toast.error(t('authorizationFailed'), { description: requestError.message }),
-        });
-    };
-
-    return (
-        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto pb-8 pr-1">
-            <section className="relative overflow-hidden rounded-3xl border border-border/70 bg-gradient-to-br from-primary/[0.12] via-card to-card p-6">
-                <div className="absolute -right-16 -top-20 size-52 rounded-full bg-primary/10 blur-3xl" />
-                <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-                    <div><div className="mb-2 inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary"><ShieldCheck className="size-3.5" />{t('secureTitle')}</div><h2 className="text-xl font-bold tracking-tight">{t('officialTitle')}</h2><p className="mt-1 max-w-xl text-sm text-muted-foreground">{t('officialSubtitle')}</p></div>
-                    <div className="flex flex-wrap gap-2">
-                        {(Object.keys(providerMeta) as OfficialProvider[]).map((item) => <Button key={item} type="button" variant={provider === item ? 'default' : 'outline'} className="rounded-xl" onClick={() => setProvider(item)}>{providerMeta[item].label}</Button>)}
-                        <Button type="button" className="rounded-xl" disabled={authorize.isPending} onClick={startAuthorization}>{authorize.isPending ? <Loader2 className="animate-spin" /> : <Plus />} {t('connect')}</Button>
                     </div>
                 </div>
+
+                <Separator className="my-5" />
+
+                <form onSubmit={handleCreate} className="space-y-4">
+                    <FieldGroup className="gap-4">
+                        <div>
+                            <FieldLabel className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                目标平台选择
+                            </FieldLabel>
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                                {platformOptions.map((item) => (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        onClick={() => handlePlatformChange(item.id)}
+                                        className={`flex flex-col items-start rounded-xl border p-3 text-left transition-all ${
+                                            platform === item.id
+                                                ? 'border-primary bg-primary/5 text-primary shadow-sm'
+                                                : 'border-border/70 bg-muted/20 hover:border-border hover:bg-muted/40'
+                                        }`}
+                                    >
+                                        <span className="font-semibold text-xs text-foreground">{item.label}</span>
+                                        <span className="mt-1 line-clamp-1 text-[11px] text-muted-foreground">{item.desc}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <Field>
+                                <FieldLabel htmlFor="sub2api-name">账号别名</FieldLabel>
+                                <Input
+                                    id="sub2api-name"
+                                    placeholder="例如 Claude 拼车 01 号"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    className="rounded-xl"
+                                />
+                            </Field>
+
+                            <Field>
+                                <FieldLabel htmlFor="sub2api-url">反代基地址 (Base URL)</FieldLabel>
+                                <Input
+                                    id="sub2api-url"
+                                    placeholder="https://..."
+                                    value={baseURL}
+                                    onChange={(e) => setBaseURL(e.target.value)}
+                                    className="rounded-xl"
+                                />
+                            </Field>
+
+                            <Field>
+                                <FieldLabel htmlFor="sub2api-type">认证形式</FieldLabel>
+                                <select
+                                    id="sub2api-type"
+                                    className="flex h-9 w-full rounded-xl border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    value={accountType}
+                                    onChange={(e) => setAccountType(e.target.value as Sub2APIAccountType)}
+                                >
+                                    <option value="oauth">OAuth 会话 / 订阅反代</option>
+                                    <option value="apikey">标准 API Key</option>
+                                    <option value="setup-token">Setup Token (Claude)</option>
+                                </select>
+                            </Field>
+
+                            <Field>
+                                <FieldLabel htmlFor="sub2api-proto">上游协议分流</FieldLabel>
+                                <select
+                                    id="sub2api-proto"
+                                    className="flex h-9 w-full rounded-xl border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    value={apiProtocol}
+                                    onChange={(e) => setApiProtocol(e.target.value)}
+                                >
+                                    <option value="chat_completions">Chat Completions (OpenAI 兼容)</option>
+                                    <option value="responses">Responses (Codex 原生)</option>
+                                    <option value="anthropic">Anthropic Messages (/v1/messages)</option>
+                                    <option value="adaptive">自适应 (按入站协议直通)</option>
+                                </select>
+                            </Field>
+                        </div>
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <Field>
+                                <FieldLabel htmlFor="sub2api-key">访问凭据 (Token / Secret / Session Key)</FieldLabel>
+                                <Input
+                                    id="sub2api-key"
+                                    type="password"
+                                    placeholder="可选，若反代需要鉴权请填写"
+                                    value={apiKey}
+                                    onChange={(e) => setApiKey(e.target.value)}
+                                    className="rounded-xl"
+                                />
+                            </Field>
+
+                            <Field>
+                                <FieldLabel htmlFor="sub2api-notes">备注与说明</FieldLabel>
+                                <Input
+                                    id="sub2api-notes"
+                                    placeholder="配额窗口、拼车团队或出口节点说明"
+                                    value={notes}
+                                    onChange={(e) => setNotes(e.target.value)}
+                                    className="rounded-xl"
+                                />
+                            </Field>
+                        </div>
+
+                        <div className="flex justify-end pt-2">
+                            <Button type="submit" disabled={createMutation.isPending} className="rounded-xl px-5">
+                                {createMutation.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
+                                添加反代账号
+                            </Button>
+                        </div>
+                    </FieldGroup>
+                </form>
             </section>
-            {pending && <form onSubmit={finishAuthorization} className="rounded-3xl border border-primary/30 bg-primary/[0.06] p-5"><div className="flex items-start gap-3"><KeyRound className="mt-1 size-5 text-primary" /><div className="min-w-0 flex-1"><h3 className="font-semibold">{t('finishTitle')}</h3><p className="mt-1 text-sm text-muted-foreground">{t('finishSubtitle')}</p><div className="mt-4 flex flex-col gap-2 sm:flex-row"><Input value={code} onChange={(event) => setCode(event.target.value)} placeholder={t('codePlaceholder')} className="rounded-xl bg-background" autoComplete="one-time-code" /><Button type="submit" className="rounded-xl" disabled={confirm.isPending || !code.trim()}>{confirm.isPending ? <Loader2 className="animate-spin" /> : <CheckCircle2 />} {t('confirm')}</Button></div><button type="button" className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline" onClick={() => window.open(pending.url, '_blank', 'noopener,noreferrer')}><ExternalLink className="size-3" />{t('reopen')}</button></div></div></form>}
-            {isLoading && <LoadingState />}
-            {error && <ErrorState message={error.message} />}
-            {!isLoading && !error && data?.items.length === 0 && <EmptyState icon={Sparkles} title={t('noAccounts')} description={t('noAccountsHint')} />}
-            <div className="grid gap-4 xl:grid-cols-2">{data?.items.map((account) => <AccountCard key={account.id} account={account} />)}</div>
+
+            <section>
+                <div className="mb-4 flex items-center justify-between">
+                    <div>
+                        <h3 className="font-bold text-lg">已配置的 Sub2API 反代服务</h3>
+                        <p className="text-xs text-muted-foreground">已接入的订阅反代与网关账号列表，状态实时同步</p>
+                    </div>
+                </div>
+
+                {isLoading && (
+                    <div className="flex h-36 items-center justify-center rounded-2xl border border-dashed border-border">
+                        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+                    </div>
+                )}
+
+                {error && (
+                    <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+                        加载反代账号失败: {error.message}
+                    </div>
+                )}
+
+                {!isLoading && (!accounts || accounts.length === 0) && (
+                    <div className="flex h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-border p-6 text-center">
+                        <Server className="size-8 text-muted-foreground/50 mb-2" />
+                        <p className="text-sm font-medium text-foreground">暂无 Sub2API 订阅反代账号</p>
+                        <p className="mt-1 text-xs text-muted-foreground">在上方表单添加你的首个反代网关或订阅账号</p>
+                    </div>
+                )}
+
+                {accounts && accounts.length > 0 && (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {accounts.map((acct) => (
+                            <Sub2APIAccountCard key={acct.id} account={acct} />
+                        ))}
+                    </div>
+                )}
+            </section>
         </div>
     );
 }
-
-function JumpPanel() {
-    const t = useTranslations('accounts');
-    const { data, isLoading } = useJumpTokens();
-    const create = useCreateJumpToken();
-    const [kind, setKind] = useState<JumpKind>('na');
-    const [url, setUrl] = useState('');
-    const [created, setCreated] = useState<string | null>(null);
-
-    const submit = (event: React.FormEvent) => {
-        event.preventDefault();
-        if (!url.trim()) return;
-        create.mutate({ kind, target_url: url.trim() }, { onSuccess: (result) => { setCreated(`${window.location.origin}/api/v1/account/jump/go/${result.token}`); setUrl(''); toast.success(t('linkCreated')); }, onError: (error) => toast.error(t('linkFailed'), { description: error.message }) });
-    };
-
-    return <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto pb-8 pr-1">
-        <section className="rounded-3xl border border-border/70 bg-card p-6"><div className="flex items-start gap-3"><div className="grid size-11 place-items-center rounded-2xl bg-amber-500/10 text-amber-600"><Link2 className="size-5" /></div><div><h2 className="text-xl font-bold">{t('jumpTitle')}</h2><p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t('jumpSubtitle')}</p></div></div><Separator className="my-5" /><form onSubmit={submit}><FieldGroup className="gap-4"><div className="grid gap-4 sm:grid-cols-[180px_1fr_auto]"><Field><FieldLabel>{t('loginTarget')}</FieldLabel><div className="grid grid-cols-2 gap-2">{(['na', 's2'] as JumpKind[]).map((item) => <Button key={item} type="button" variant={kind === item ? 'default' : 'outline'} className="rounded-xl" onClick={() => setKind(item)}>{item === 'na' ? 'New API' : 'Sub2Api'}</Button>)}</div></Field><Field><FieldLabel htmlFor="jump-url">{t('targetUrl')}</FieldLabel><Input id="jump-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder={t('urlPlaceholder')} type="url" className="rounded-xl" /></Field><Button type="submit" className="mt-auto rounded-xl" disabled={create.isPending || !url.trim()}>{create.isPending ? <Loader2 className="animate-spin" /> : <Plus />} {t('createLink')}</Button></div></FieldGroup></form>{created && <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4"><div className="flex items-center gap-2 text-sm font-semibold text-emerald-600"><CheckCircle2 className="size-4" />{t('linkCreatedOnce')}</div><div className="flex items-center gap-2"><code className="min-w-0 flex-1 truncate rounded-xl bg-background px-3 py-2 text-xs">{created}</code><CopyIconButton text={created} className="grid size-9 shrink-0 place-items-center rounded-xl bg-background text-muted-foreground hover:text-foreground" /></div><p className="text-xs text-muted-foreground"><Clock3 className="mr-1 inline size-3" />{t('linkExpiry')}</p></div>}</section>
-        <section className="rounded-3xl border border-border/70 bg-card p-5"><div className="mb-4 flex items-center justify-between"><div><h3 className="font-semibold">{t('auditTitle')}</h3><p className="text-xs text-muted-foreground">{t('auditSubtitle')}</p></div><Badge variant="secondary">{data?.total ?? 0}</Badge></div>{isLoading ? <LoadingState /> : data?.items.length ? <div className="grid gap-2">{data.items.map((token) => <JumpRow key={token.id} token={token} />)}</div> : <EmptyState icon={Clock3} title={t('noLinks')} description={t('noLinksHint')} />}</section>
-    </div>;
-}
-
-// NOW_TICK_MS 是"当前时间"的刷新粒度。
-const NOW_TICK_MS = 30_000;
-
-// useRoughNow 提供一个每 NOW_TICK_MS 跳一次的粗略当前时间。
-//
-// 为什么不用 Date.now() 直接算：在渲染期调用不纯函数会让同一份输入在不同渲染中
-// 得到不同结果（react-hooks/purity），并发渲染下可能撕裂。useSyncExternalStore
-// 是 React 为"读取外部可变值"准备的正规出口。
-//
-// 快照**必须量化**到 NOW_TICK_MS：若每次 getSnapshot 都返回真实的 Date.now()，
-// React 会认为快照一直在变、无限重渲染。量化后同一个时间窗内返回值恒定。
-function useRoughNow() {
-    return useSyncExternalStore(
-        (onChange) => {
-            const id = window.setInterval(onChange, NOW_TICK_MS);
-            return () => window.clearInterval(id);
-        },
-        () => Math.floor(Date.now() / NOW_TICK_MS) * NOW_TICK_MS,
-        () => 0,
-    );
-}
-
-function JumpRow({ token }: { token: JumpToken }) {
-    const t = useTranslations('accounts');
-    const now = useRoughNow();
-    // now 为 0 是首帧占位快照，此时不判定过期，免得把有效 token 误标成已过期。
-    const expired = now > 0 && new Date(token.expires_at).getTime() < now;
-    return <div className="flex flex-col gap-2 rounded-2xl bg-muted/35 p-3 text-sm sm:flex-row sm:items-center"><div className="flex items-center gap-2"><Badge variant="outline">{token.kind === 'na' ? 'New API' : 'Sub2Api'}</Badge><span className="font-medium">{token.target_url}</span></div><div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">{token.consumed_at ? <Badge variant="secondary">{t('used')}</Badge> : expired ? <Badge variant="destructive">{t('expired')}</Badge> : <Badge variant="default">{t('available')}</Badge>}<span>{formatDate(token.created_at)}</span></div></div>;
-}
-
-// PoolPanel 是统一号池视图：OpenAI(GPT) 与 Gemini(谷歌) 以及 Claude 三个号池放在同一张表里，
-// 一个"全部同步"按钮即可把它们一起物化成号池渠道凭据（后端按 provider 各建一条渠道，渠道地址互不干扰）。
-function PoolPanel() {
-    const t = useTranslations('pool');
-    const { data, isLoading, error } = useOfficialPools();
-    const sync = useSyncOfficialPool();
-    const [notes, setNotes] = useState<Array<{ provider: OfficialProvider; notes: string[] }>>([]);
-    const pools = data?.items ?? [];
-
-    const runSync = (provider?: OfficialProvider) => {
-        sync.mutate(provider, {
-            onSuccess: (result) => {
-                const withNotes = (result.items ?? [])
-                    .filter((item) => (item.notes ?? []).length > 0)
-                    .map((item) => ({ provider: item.provider, notes: item.notes ?? [] }));
-                setNotes(withNotes);
-                toast.success(provider ? t('syncedOne', { provider: providerMeta[provider].label }) : t('syncedAll'));
-            },
-            onError: (err) => toast.error(t('syncFailed'), { description: err.message }),
-        });
-    };
-
-    return <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto pb-8 pr-1">
-        <section className="rounded-3xl border border-border/70 bg-card p-6">
-            <div className="flex items-start gap-3">
-                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-sky-500/10 text-sky-600"><KeyRound className="size-5" /></div>
-                <div className="min-w-0 flex-1">
-                    <h2 className="text-xl font-bold">{t('title')}</h2>
-                    <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{t('subtitle')}</p>
-                </div>
-                <Button className="rounded-xl" onClick={() => runSync()} disabled={sync.isPending}>
-                    {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />} {t('syncAll')}
-                </Button>
-            </div>
-            <Separator className="my-5" />
-            {isLoading ? <LoadingState /> : error ? <ErrorState message={error.message} /> : pools.length ? (
-                <div className="grid gap-4">
-                    {pools.map((pool) => <PoolCard key={pool.provider} pool={pool} syncing={sync.isPending} onSync={() => runSync(pool.provider)} />)}
-                </div>
-            ) : <EmptyState icon={Sparkles} title={t('empty')} description={t('emptyHint')} />}
-            {notes.length > 0 && <div className="mt-4 grid gap-2">{notes.map((item) => <div key={item.provider} className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.06] p-3 text-xs text-amber-700 dark:text-amber-400"><span className="font-semibold">{providerMeta[item.provider].label}</span>{item.notes.map((note, index) => <div key={index} className="mt-1">{note}</div>)}</div>)}</div>}
-        </section>
-    </div>;
-}
-
-// PoolCard 是一个服务商的号池：概览计数 + 逐账号的"账号 → 凭据"映射 + 单独同步入口。
-function PoolCard({ pool, syncing, onSync }: { pool: OfficialPoolStatus; syncing: boolean; onSync: () => void }) {
-    const t = useTranslations('pool');
-    const meta = providerMeta[pool.provider];
-    const members = pool.members ?? [];
-    return <div className="rounded-2xl border border-border/70 bg-muted/25 p-4">
-        <div className="flex flex-wrap items-center gap-3">
-            <span className={cn('rounded-lg px-2 py-0.5 text-xs font-semibold', meta.className)}>{meta.label}</span>
-            <span className="font-medium">{pool.channel_name}</span>
-            {pool.channel_id === 0 ? <Badge variant="secondary">{t('notSynced')}</Badge> : null}
-            <div className="ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                <span>{t('accounts')} <b className="text-foreground">{pool.accounts}</b></span>
-                <span>{t('activeKeys')} <b className="text-foreground">{pool.active_keys}</b></span>
-                <span>{t('models')} <b className="text-foreground">{pool.models}</b></span>
-                <span>{t('grants')} <b className="text-foreground">{pool.grants}</b></span>
-                <Button size="sm" variant="outline" className="rounded-xl" onClick={onSync} disabled={syncing}>
-                    <RefreshCw className="size-3.5" /> {t('syncOne')}
-                </Button>
-            </div>
-        </div>
-        {members.length ? <div className="mt-3 grid gap-1.5">{members.map((member) => <div key={member.account_id} className="flex flex-wrap items-center gap-2 rounded-xl bg-background/70 px-3 py-2 text-xs">
-            <span className="font-medium">{member.external_name}</span>
-            <Badge variant={member.status === 'active' ? 'default' : 'secondary'}>{member.status}</Badge>
-            {member.plan_tier ? <span className="text-muted-foreground">{member.plan_tier}</span> : null}
-            {member.window_5h ? <span className="text-muted-foreground">5H {member.window_5h}</span> : null}
-            {member.window_7d ? <span className="text-muted-foreground">7D {member.window_7d}</span> : null}
-            {member.expires_at ? <span className="text-muted-foreground">{formatDate(member.expires_at)}</span> : null}
-            <span className="ml-auto flex items-center gap-1.5">
-                {member.key_exists
-                    ? (member.key_enabled
-                        ? <><CheckCircle2 className="size-3.5 text-emerald-500" />{t('keyEnabled')}</>
-                        : <><CircleAlert className="size-3.5 text-muted-foreground" />{t('keyDisabled')}</>)
-                    : <><CircleAlert className="size-3.5 text-amber-500" />{t('keyMissing')}</>}
-            </span>
-        </div>)}</div> : <p className="mt-3 text-xs text-muted-foreground">{t('noAccount')}</p>}
-    </div>;
-}
-
-function LoadingState() { return <div className="grid place-items-center rounded-3xl border border-dashed border-border p-12 text-sm text-muted-foreground"><Loader2 className="mb-2 size-5 animate-spin" />Loading…</div>; }
-function ErrorState({ message }: { message: string }) { return <div className="rounded-3xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">{message}</div>; }
-function EmptyState({ icon: Icon, title, description }: { icon: typeof Sparkles; title: string; description: string }) { return <div className="grid place-items-center rounded-3xl border border-dashed border-border p-12 text-center"><Icon className="mb-3 size-8 text-muted-foreground/50" /><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{description}</p></div>; }
-
-export function AccountActions() { return null; }
 
 export function Account() {
-    const t = useTranslations('accounts');
-    const stats = useMemo(() => null, []);
-    void stats;
-    return <Tabs defaultValue="official" className="flex min-h-0 flex-1"><TabsList className="mb-4 grid w-full max-w-xl grid-cols-3 rounded-2xl bg-muted/60 p-1"><TabsTrigger value="official" className="rounded-xl"><UserRound className="size-4" />{t('officialTab')}</TabsTrigger><TabsTrigger value="pool" className="rounded-xl"><KeyRound className="size-4" />{t('poolTab')}</TabsTrigger><TabsTrigger value="jump" className="rounded-xl"><Link2 className="size-4" />{t('jumpTab')}</TabsTrigger></TabsList><TabsContent value="official"><OfficialAccountsPanel /></TabsContent><TabsContent value="pool"><PoolPanel /></TabsContent><TabsContent value="jump"><JumpPanel /></TabsContent></Tabs>;
+    return (
+        <div className="container mx-auto max-w-6xl py-6 px-4">
+            <Sub2APIAccountsPanel />
+        </div>
+    );
 }

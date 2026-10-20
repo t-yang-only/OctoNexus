@@ -50,6 +50,7 @@ func TestFreshInstallCreatesAllTables(t *testing.T) {
 		&model.OfficialAccount{},
 		&model.JumpToken{},
 		&model.UsageHourly{},
+		&model.Sub2APIAccount{},
 		&model.ManualSubscription{},
 		&model.ProxyNode{},
 		&model.ProxySubscription{},
