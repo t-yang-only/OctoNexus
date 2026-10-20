@@ -44,6 +44,7 @@ export interface Sub2APIAccountCreatePayload {
     api_key?: string;
     headers?: Record<string, string>;
     notes?: string;
+    sync_channel?: boolean;
 }
 
 export const sub2apiAccountListQueryKey = ['sub2api', 'accounts', 'list'] as const;

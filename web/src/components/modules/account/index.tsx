@@ -144,6 +144,7 @@ function Sub2APIAccountsPanel() {
     const [baseURL, setBaseURL] = useState('https://api.anthropic.com');
     const [apiKey, setApiKey] = useState('');
     const [apiProtocol, setApiProtocol] = useState('chat_completions');
+    const [syncChannel, setSyncChannel] = useState(true);
     const [notes, setNotes] = useState('');
 
     const handlePlatformChange = (p: Sub2APIPlatform) => {
@@ -174,6 +175,7 @@ function Sub2APIAccountsPanel() {
                 api_key: apiKey.trim(),
                 api_protocol: apiProtocol,
                 enabled: true,
+                sync_channel: syncChannel,
                 notes: notes.trim(),
             },
             {
@@ -309,7 +311,16 @@ function Sub2APIAccountsPanel() {
                             </Field>
                         </div>
 
-                        <div className="flex justify-end pt-2">
+                        <div className="flex items-center justify-between pt-2">
+                            <label className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                                <input
+                                    type="checkbox"
+                                    checked={syncChannel}
+                                    onChange={(e) => setSyncChannel(e.target.checked)}
+                                    className="rounded border-border text-primary focus:ring-primary size-4"
+                                />
+                                <span>自动物化注册为系统渠道（同步接入路由分发与故障转移）</span>
+                            </label>
                             <Button type="submit" disabled={createMutation.isPending} className="rounded-xl px-5">
                                 {createMutation.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
                                 添加反代账号

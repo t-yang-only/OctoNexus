@@ -34,6 +34,7 @@ type Sub2APIAccountCreateRequest struct {
 	ApiKey      string                   `json:"api_key"`
 	Headers     map[string]string        `json:"headers"`
 	Notes       string                   `json:"notes"`
+	SyncChannel bool                     `json:"sync_channel"` // 是否同步物化为渠道
 }
 
 // Sub2APIAccountList 获取列表
@@ -47,7 +48,7 @@ func Sub2APIAccountList(ctx context.Context) ([]model.Sub2APIAccount, error) {
 	return list, err
 }
 
-// Sub2APIAccountCreate 创建新账号反代配置
+// Sub2APIAccountCreate 创建新账号反代配置并可选自动物化为渠道
 func Sub2APIAccountCreate(ctx context.Context, req Sub2APIAccountCreateRequest) (*model.Sub2APIAccount, error) {
 	if err := model.ValidateSub2APIPlatform(req.Platform); err != nil {
 		return nil, err
@@ -105,21 +106,79 @@ func Sub2APIAccountCreate(ctx context.Context, req Sub2APIAccountCreateRequest) 
 	if err := conn.Create(account).Error; err != nil {
 		return nil, fmt.Errorf("创建 Sub2API 账号失败: %w", err)
 	}
+
+	if req.SyncChannel {
+		_ = syncSub2APIAccountToChannel(ctx, conn, account, strings.TrimSpace(req.ApiKey))
+	}
+
 	return account, nil
 }
 
-// Sub2APIAccountDelete 删除账号配置
+// syncSub2APIAccountToChannel 将反代账号物化注册为系统渠道，无缝接入选路与统计体系
+func syncSub2APIAccountToChannel(ctx context.Context, conn *gorm.DB, acct *model.Sub2APIAccount, plainKey string) error {
+	channelName := fmt.Sprintf("Sub2API-%s-%s", acct.Platform, acct.Name)
+	dialect := model.DialectGeneric
+	if acct.Platform == model.Sub2APIPlatformAntigravity {
+		dialect = model.DialectAntigravity
+	}
+
+	var customHeaders []model.CustomHeader
+	var extraMap map[string]any
+	if json.Unmarshal([]byte(acct.Extra), &extraMap) == nil {
+		if hdrs, ok := extraMap["headers"].(map[string]any); ok {
+			for k, v := range hdrs {
+				if vs, ok := v.(string); ok && k != "" && vs != "" {
+					customHeaders = append(customHeaders, model.CustomHeader{
+						HeaderKey:   k,
+						HeaderValue: vs,
+					})
+				}
+			}
+		}
+	}
+
+	enabled := true
+	detail := &model.ChannelDetail{
+		ChannelConfig: model.ChannelConfig{
+			Name:         channelName,
+			Dialect:      dialect,
+			Enabled:      acct.Enabled,
+			BaseURL:      acct.BaseURL,
+			ProxyNodeID:  acct.ProxyNodeID,
+			CustomHeader: customHeaders,
+		},
+		Keys: []model.ChannelKeyInput{
+			{Name: "default", Key: plainKey, Enabled: &enabled},
+		},
+	}
+
+	created, err := ChannelCreate(detail, ctx)
+	if err == nil && created != nil {
+		acct.ChannelID = created.ID
+		conn.Model(acct).Update("channel_id", created.ID)
+	}
+	return err
+}
+
+// Sub2APIAccountDelete 删除账号配置及关联渠道
 func Sub2APIAccountDelete(ctx context.Context, id int) error {
 	conn := db.GetDB()
 	if conn == nil {
 		return fmt.Errorf("数据库连接不可用")
 	}
-	res := conn.Delete(&model.Sub2APIAccount{}, id)
+
+	var acct model.Sub2APIAccount
+	if err := conn.First(&acct, id).Error; err != nil {
+		return ErrSub2APIAccountNotFound
+	}
+
+	if acct.ChannelID > 0 {
+		_ = ChannelDel(acct.ChannelID, ctx)
+	}
+
+	res := conn.Delete(&acct)
 	if res.Error != nil {
 		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrSub2APIAccountNotFound
 	}
 	return nil
 }

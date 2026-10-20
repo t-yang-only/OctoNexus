@@ -46,6 +46,7 @@ type Sub2APIAccount struct {
 	Credentials  string             `json:"-" gorm:"not null;default:''"`            // 加密存储的凭据 JSON
 	Extra        string             `json:"extra" gorm:"not null;default:'{}'"`      // 自定义请求头覆写或高级配置
 	Notes        string             `json:"notes"`
+	ChannelID    int                `json:"channel_id" gorm:"not null;default:0"`    // 物化绑定的渠道 ID
 	CreatedAt    time.Time          `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt    time.Time          `json:"updated_at" gorm:"autoUpdateTime"`
 }
