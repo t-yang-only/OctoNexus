@@ -134,7 +134,6 @@ func Sub2APIAccountCreate(ctx context.Context, req Sub2APIAccountCreateRequest) 
 		return nil, fmt.Errorf("账号别名 %q 已存在，请更换名称", trimmedName)
 	}
 
-	// 敏感头（Authorization / Cookie 等）剥离加密存储，不放入 Extra 明文
 	sensitiveHeaders := make(map[string]string)
 	nonSensitiveHeaders := make(map[string]string)
 	for k, v := range req.Headers {
@@ -191,7 +190,7 @@ func Sub2APIAccountCreate(ctx context.Context, req Sub2APIAccountCreateRequest) 
 	}
 
 	if req.SyncChannel {
-		createdChan, err := syncSub2APIAccountToChannel(ctx, conn, account, strings.TrimSpace(req.ApiKey), sensitiveHeaders)
+		createdChan, err := syncSub2APIAccountToChannel(ctx, conn, account, strings.TrimSpace(req.ApiKey))
 		if err != nil {
 			_ = conn.Delete(account)
 			return nil, fmt.Errorf("创建关联渠道失败: %w", err)
@@ -207,9 +206,9 @@ func Sub2APIAccountCreate(ctx context.Context, req Sub2APIAccountCreateRequest) 
 	return account, nil
 }
 
-// syncSub2APIAccountToChannel 将反代账号物化注册为系统渠道并补齐模型与授权
-func syncSub2APIAccountToChannel(ctx context.Context, conn *gorm.DB, acct *model.Sub2APIAccount, plainKey string, sensitiveHeaders map[string]string) (*model.ChannelDetail, error) {
-	channelName := fmt.Sprintf("Sub2API-%s-%s", acct.Platform, acct.Name)
+// buildSub2APIChannelDetail 构造渠道物化规格，保证渠道模型、协议授权及安全头配置完整
+func buildSub2APIChannelDetail(acct *model.Sub2APIAccount, plainKey string) *model.ChannelDetail {
+	channelName := fmt.Sprintf("Sub2API-%s-%s-%d", acct.Platform, acct.Name, acct.ID)
 	dialect := model.DialectGeneric
 	var defaultModels []string
 	var protoMask model.Protocol
@@ -263,26 +262,19 @@ func syncSub2APIAccountToChannel(ctx context.Context, conn *gorm.DB, acct *model
 		defaultModels = []string{"default"}
 	}
 
+	// 仅透传非敏感自定义头，杜绝在渠道明文配置中二次落库敏感 Authorization 或 Cookie
 	var customHeaders []model.CustomHeader
 	var extraMap map[string]any
 	if json.Unmarshal([]byte(acct.Extra), &extraMap) == nil {
 		if hdrs, ok := extraMap["headers"].(map[string]any); ok {
 			for k, v := range hdrs {
-				if vs, ok := v.(string); ok && k != "" && vs != "" {
+				if vs, ok := v.(string); ok && k != "" && vs != "" && !isSensitiveHeader(k) {
 					customHeaders = append(customHeaders, model.CustomHeader{
 						HeaderKey:   k,
 						HeaderValue: vs,
 					})
 				}
 			}
-		}
-	}
-	for k, v := range sensitiveHeaders {
-		if k != "" && v != "" {
-			customHeaders = append(customHeaders, model.CustomHeader{
-				HeaderKey:   k,
-				HeaderValue: v,
-			})
 		}
 	}
 
@@ -297,6 +289,7 @@ func syncSub2APIAccountToChannel(ctx context.Context, conn *gorm.DB, acct *model
 
 	enabled := acct.Enabled
 	detail := &model.ChannelDetail{
+		ID: acct.ChannelID,
 		ChannelConfig: model.ChannelConfig{
 			Name:         channelName,
 			Dialect:      dialect,
@@ -312,7 +305,177 @@ func syncSub2APIAccountToChannel(ctx context.Context, conn *gorm.DB, acct *model
 		Grants: grants,
 	}
 
+	return detail
+}
+
+// syncSub2APIAccountToChannel 将反代账号物化注册为系统渠道并补齐模型与授权
+func syncSub2APIAccountToChannel(ctx context.Context, conn *gorm.DB, acct *model.Sub2APIAccount, plainKey string) (*model.ChannelDetail, error) {
+	detail := buildSub2APIChannelDetail(acct, plainKey)
 	return ChannelCreate(detail, ctx)
+}
+
+// Sub2APIAccountUpdate 更新账号配置并深度联动物化渠道
+func Sub2APIAccountUpdate(ctx context.Context, id int, req Sub2APIAccountUpdateRequest) (*model.Sub2APIAccount, error) {
+	conn := db.GetDB()
+	if conn == nil {
+		return nil, fmt.Errorf("数据库连接不可用")
+	}
+
+	var acct model.Sub2APIAccount
+	if err := conn.First(&acct, id).Error; err != nil {
+		return nil, ErrSub2APIAccountNotFound
+	}
+
+	if req.Name != nil {
+		trimmed := strings.TrimSpace(*req.Name)
+		if err := model.ValidateSub2APIName(trimmed); err != nil {
+			return nil, err
+		}
+		acct.Name = trimmed
+	}
+	if req.BaseURL != nil {
+		if err := model.ValidateSub2APIBaseURL(*req.BaseURL); err != nil {
+			return nil, err
+		}
+		acct.BaseURL = strings.TrimRight(strings.TrimSpace(*req.BaseURL), "/")
+	}
+	if req.AccountMode != nil {
+		if err := model.ValidateSub2APIAccountMode(*req.AccountMode); err != nil {
+			return nil, err
+		}
+		acct.AccountMode = *req.AccountMode
+	}
+	if req.APIProtocol != nil {
+		if err := model.ValidateSub2APIProtocol(*req.APIProtocol); err != nil {
+			return nil, err
+		}
+		acct.APIProtocol = *req.APIProtocol
+	}
+	if req.Enabled != nil {
+		acct.Enabled = *req.Enabled
+	}
+	if req.ProxyNodeID != nil {
+		if *req.ProxyNodeID > 0 {
+			var count int64
+			if err := conn.Model(&model.ProxyNode{}).Where("id = ?", *req.ProxyNodeID).Count(&count).Error; err != nil || count == 0 {
+				return nil, fmt.Errorf("绑定出口节点(%d)不存在", *req.ProxyNodeID)
+			}
+		}
+		acct.ProxyNodeID = *req.ProxyNodeID
+	}
+	if req.RateLimit != nil {
+		if err := model.ValidateSub2APIRateLimit(*req.RateLimit); err != nil {
+			return nil, err
+		}
+		acct.RateLimit = *req.RateLimit
+	}
+	if req.Notes != nil {
+		acct.Notes = strings.TrimSpace(*req.Notes)
+	}
+
+	plainKey := ""
+	sensitiveHeaders := make(map[string]string)
+	if acct.Credentials != "" {
+		if plain, err := secret.OpenWith(sub2apiSecretAAD, acct.Credentials); err == nil {
+			var credsMap map[string]any
+			if json.Unmarshal([]byte(plain), &credsMap) == nil {
+				if k, ok := credsMap["api_key"].(string); ok {
+					plainKey = k
+				}
+				if hdrs, ok := credsMap["headers"].(map[string]any); ok {
+					for hk, hv := range hdrs {
+						if hvs, ok := hv.(string); ok {
+							sensitiveHeaders[hk] = hvs
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if req.ApiKey != nil {
+		plainKey = strings.TrimSpace(*req.ApiKey)
+	}
+
+	nonSensitiveHeaders := make(map[string]string)
+	if acct.Extra != "" {
+		var extraMap map[string]any
+		if json.Unmarshal([]byte(acct.Extra), &extraMap) == nil {
+			if hdrs, ok := extraMap["headers"].(map[string]any); ok {
+				for hk, hv := range hdrs {
+					if hvs, ok := hv.(string); ok && !isSensitiveHeader(hk) {
+						nonSensitiveHeaders[hk] = hvs
+					}
+				}
+			}
+		}
+	}
+
+	if req.Headers != nil {
+		sensitiveHeaders = make(map[string]string)
+		nonSensitiveHeaders = make(map[string]string)
+		for k, v := range req.Headers {
+			tk := strings.TrimSpace(k)
+			tv := strings.TrimSpace(v)
+			if tk == "" || tv == "" {
+				continue
+			}
+			if isSensitiveHeader(tk) {
+				sensitiveHeaders[tk] = tv
+			} else {
+				nonSensitiveHeaders[tk] = tv
+			}
+		}
+	}
+
+	credsData := map[string]any{
+		"api_key": plainKey,
+		"headers": sensitiveHeaders,
+	}
+	credsBytes, _ := json.Marshal(credsData)
+	encCreds, err := secret.SealWith(sub2apiSecretAAD, string(credsBytes))
+	if err != nil {
+		return nil, fmt.Errorf("加密更新凭据失败: %w", err)
+	}
+	acct.Credentials = encCreds
+
+	extraData := map[string]any{
+		"headers":               nonSensitiveHeaders,
+		"has_sensitive_headers": len(sensitiveHeaders) > 0,
+	}
+	extraBytes, _ := json.Marshal(extraData)
+	acct.Extra = string(extraBytes)
+
+	// 联动处理已物化渠道或新增物化渠道
+	if req.SyncChannel != nil {
+		if *req.SyncChannel && acct.ChannelID == 0 {
+			// 新增物化渠道
+			createdChan, err := syncSub2APIAccountToChannel(ctx, conn, &acct, plainKey)
+			if err != nil {
+				return nil, fmt.Errorf("物化新建渠道失败: %w", err)
+			}
+			acct.ChannelID = createdChan.ID
+		} else if !*req.SyncChannel && acct.ChannelID > 0 {
+			// 解绑并删除渠道
+			_ = ChannelDel(acct.ChannelID, ctx)
+			acct.ChannelID = 0
+		}
+	}
+
+	// 若当前依然绑定渠道，深度同步更新渠道的所有关键字段（BaseURL、Key、Enabled、ProxyNodeID、Grants）
+	if acct.ChannelID > 0 {
+		detail := buildSub2APIChannelDetail(&acct, plainKey)
+		detail.ID = acct.ChannelID
+		if _, err := ChannelUpdate(detail, ctx); err != nil {
+			return nil, fmt.Errorf("联动物化渠道更新失败: %w", err)
+		}
+	}
+
+	if err := conn.Save(&acct).Error; err != nil {
+		return nil, fmt.Errorf("保存账号失败: %w", err)
+	}
+
+	return &acct, nil
 }
 
 // Sub2APIAccountDelete 删除账号配置及关联渠道
@@ -437,147 +600,3 @@ func Sub2APIAccountProbe(ctx context.Context, id int) (string, error) {
 
 	return fmt.Sprintf("HTTP %d (%s)", resp.StatusCode, resp.Status), nil
 }
-// Sub2APIAccountUpdate 更新账号配置
-func Sub2APIAccountUpdate(ctx context.Context, id int, req Sub2APIAccountUpdateRequest) (*model.Sub2APIAccount, error) {
-	conn := db.GetDB()
-	if conn == nil {
-		return nil, fmt.Errorf("数据库连接不可用")
-	}
-
-	var acct model.Sub2APIAccount
-	if err := conn.First(&acct, id).Error; err != nil {
-		return nil, ErrSub2APIAccountNotFound
-	}
-
-	if req.Name != nil {
-		trimmed := strings.TrimSpace(*req.Name)
-		if err := model.ValidateSub2APIName(trimmed); err != nil {
-			return nil, err
-		}
-		acct.Name = trimmed
-	}
-	if req.BaseURL != nil {
-		if err := model.ValidateSub2APIBaseURL(*req.BaseURL); err != nil {
-			return nil, err
-		}
-		acct.BaseURL = strings.TrimRight(strings.TrimSpace(*req.BaseURL), "/")
-	}
-	if req.AccountMode != nil {
-		if err := model.ValidateSub2APIAccountMode(*req.AccountMode); err != nil {
-			return nil, err
-		}
-		acct.AccountMode = *req.AccountMode
-	}
-	if req.APIProtocol != nil {
-		if err := model.ValidateSub2APIProtocol(*req.APIProtocol); err != nil {
-			return nil, err
-		}
-		acct.APIProtocol = *req.APIProtocol
-	}
-	if req.Enabled != nil {
-		acct.Enabled = *req.Enabled
-		if acct.ChannelID > 0 {
-			_ = ChannelEnabled(acct.ChannelID, *req.Enabled, ctx)
-		}
-	}
-	if req.ProxyNodeID != nil {
-		if *req.ProxyNodeID > 0 {
-			var count int64
-			if err := conn.Model(&model.ProxyNode{}).Where("id = ?", *req.ProxyNodeID).Count(&count).Error; err != nil || count == 0 {
-				return nil, fmt.Errorf("绑定出口节点(%d)不存在", *req.ProxyNodeID)
-			}
-		}
-		acct.ProxyNodeID = *req.ProxyNodeID
-	}
-	if req.RateLimit != nil {
-		if err := model.ValidateSub2APIRateLimit(*req.RateLimit); err != nil {
-			return nil, err
-		}
-		acct.RateLimit = *req.RateLimit
-	}
-	if req.Notes != nil {
-		acct.Notes = strings.TrimSpace(*req.Notes)
-	}
-
-	if req.ApiKey != nil || req.Headers != nil {
-		sensitiveHeaders := make(map[string]string)
-		plainKey := ""
-		if acct.Credentials != "" {
-			if plain, err := secret.OpenWith(sub2apiSecretAAD, acct.Credentials); err == nil {
-				var credsMap map[string]any
-				if json.Unmarshal([]byte(plain), &credsMap) == nil {
-					if k, ok := credsMap["api_key"].(string); ok {
-						plainKey = k
-					}
-					if hdrs, ok := credsMap["headers"].(map[string]any); ok {
-						for hk, hv := range hdrs {
-							if hvs, ok := hv.(string); ok {
-								sensitiveHeaders[hk] = hvs
-							}
-						}
-					}
-				}
-			}
-		}
-
-		if req.ApiKey != nil {
-			plainKey = strings.TrimSpace(*req.ApiKey)
-		}
-
-		nonSensitiveHeaders := make(map[string]string)
-		if acct.Extra != "" {
-			var extraMap map[string]any
-			if json.Unmarshal([]byte(acct.Extra), &extraMap) == nil {
-				if hdrs, ok := extraMap["headers"].(map[string]any); ok {
-					for hk, hv := range hdrs {
-						if hvs, ok := hv.(string); ok {
-							nonSensitiveHeaders[hk] = hvs
-						}
-					}
-				}
-			}
-		}
-
-		if req.Headers != nil {
-			sensitiveHeaders = make(map[string]string)
-			nonSensitiveHeaders = make(map[string]string)
-			for k, v := range req.Headers {
-				tk := strings.TrimSpace(k)
-				tv := strings.TrimSpace(v)
-				if tk == "" || tv == "" {
-					continue
-				}
-				if isSensitiveHeader(tk) {
-					sensitiveHeaders[tk] = tv
-				} else {
-					nonSensitiveHeaders[tk] = tv
-				}
-			}
-		}
-
-		credsData := map[string]any{
-			"api_key": plainKey,
-			"headers": sensitiveHeaders,
-		}
-		credsBytes, _ := json.Marshal(credsData)
-		encCreds, err := secret.SealWith(sub2apiSecretAAD, string(credsBytes))
-		if err != nil {
-			return nil, fmt.Errorf("加密更新凭据失败: %w", err)
-		}
-		acct.Credentials = encCreds
-
-		extraData := map[string]any{
-			"headers":               nonSensitiveHeaders,
-			"has_sensitive_headers": len(sensitiveHeaders) > 0,
-		}
-		extraBytes, _ := json.Marshal(extraData)
-		acct.Extra = string(extraBytes)
-	}
-
-	if err := conn.Save(&acct).Error; err != nil {
-		return nil, fmt.Errorf("保存账号失败: %w", err)
-	}
-
-	return &acct, nil
-}
-

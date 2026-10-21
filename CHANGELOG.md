@@ -2,22 +2,25 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.39] - 2026-10-21
+### Added
+- **Sub2API 账号更新与渠道物化实时联动**：更新反代账号时自动同步刷新底层对应渠道的 BaseURL、Key、Enabled 状态与协议授权，确保选路转发无时滞。
+- **全链路敏感头隔离脱敏**：渠道 `CustomHeader` 中自动过滤 Authorization、Cookie 等敏感字段，敏感凭据仅在 AES-256-GCM 加密块中解密使用，杜绝明文泄露。
+- **自动化回归测试套件**：新增 7 项涵盖增删改查、零值保留、渠道同步联动与敏感头隔离的单元测试，全仓测试全部通过。
+
+## [v0.79.38] - 2026-10-21
+### Fixed
+- **解决 Codex 独立审查发现的 F1-F8 缺陷**：
+  - 修复 GORM `default:true` 覆盖显式 `enabled: false` 问题。
+  - 规范化连接探测 BaseURL 拼接（避免 `/v1/v1/models`）。
+  - 接入完整 JSON 备份恢复（包含 `sub2api_accounts`）。
+  - 修复前端外层滚动截断（F9），优化多账号浏览体验。
+  - 增加数据库迁移 `017.go`，自动自愈 SQLite 全局索引冲突。
+
 ## [v0.79.37] - 2026-10-21
 ### Added
-- **Sub2API 渠道自动物化联动**：支持将反代账号一键注册物化为系统渠道（`sync_channel`），实现与路由、分压与选路的直接闭环。
-- **前端快捷选项**：增加物化复选框与连接探针实时状态反馈。
+- **Sub2API 渠道自动物化联动**：支持将反代账号一键注册物化为系统渠道（`sync_channel`）。
 
 ## [v0.79.36] - 2026-10-20
 ### Added
-- **Sub2API 订阅反代网关核心架构接入**：
-  - 支持 9 大平台（Claude, OpenAI, Gemini, Antigravity, Grok, Kimi, DeepSeek, OpenCode, Cline）。
-  - 支持 4 大协议分流模式（Chat Completions, Responses, Anthropic, Adaptive）。
-  - 接入 AES-256-GCM 独立凭据加密机制（AAD: `sub2api:account`）。
-  - 自动数据库迁移与全新建表校验测试。
-  - 前端卡片化管理面板（平滑替代原官方账号）。
-### Deprecated
-- 弃用旧版官方账号反代机制。
-
-## [v0.79.35] - 2026-10-20
-### Changed
-- 生产配置与群组全量同步完成，部署至 `apidate.yangonly.com`。
+- **Sub2API 订阅反代网关核心架构接入**：支持 9 大平台、4 大协议分流模式。

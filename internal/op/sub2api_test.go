@@ -287,3 +287,109 @@ func TestSub2APIProbePathsAndErrors(t *testing.T) {
 		t.Fatalf("上游返回 401 时 Probe 必须返回 error，实得 nil！")
 	}
 }
+func TestSub2APIAccountUpdateSyncsChannel(t *testing.T) {
+	conn, restore := openSub2APITestDB(t)
+	defer restore()
+
+	ctx := context.Background()
+
+	req := Sub2APIAccountCreateRequest{
+		Name:        "联动更新测试",
+		Platform:    model.Sub2APIPlatformOpenAI,
+		BaseURL:     "https://api.openai.com",
+		ApiKey:      "sk-old-key",
+		Enabled:     boolPtr(true),
+		SyncChannel: true,
+	}
+	created, err := Sub2APIAccountCreate(ctx, req)
+	if err != nil {
+		t.Fatalf("创建失败: %v", err)
+	}
+	if created.ChannelID == 0 {
+		t.Fatalf("物化未成功生成 ChannelID")
+	}
+
+	// 验证初始渠道状态
+	var chanRow model.Channel
+	if err := conn.First(&chanRow, created.ChannelID).Error; err != nil {
+		t.Fatalf("查询关联渠道失败: %v", err)
+	}
+	if chanRow.BaseURL != "https://api.openai.com" {
+		t.Fatalf("渠道初始 BaseURL 不匹配: %s", chanRow.BaseURL)
+	}
+
+	// 执行账号更新（更新 BaseURL 与 APIKey 与 Enabled）
+	newBase := "https://gateway.example.com/v1"
+	newKey := "sk-new-super-key"
+	updated, err := Sub2APIAccountUpdate(ctx, created.ID, Sub2APIAccountUpdateRequest{
+		BaseURL: &newBase,
+		ApiKey:  &newKey,
+		Enabled: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("更新账号失败: %v", err)
+	}
+	if updated.Enabled {
+		t.Fatalf("更新后账号 Enabled 应为 false")
+	}
+
+	// 核心断言：物化渠道的 BaseURL 与 Enabled 以及 Key 必须实时同步！（守住 R3-03 核心契约）
+	var chanUpdated model.Channel
+	if err := conn.First(&chanUpdated, created.ChannelID).Error; err != nil {
+		t.Fatalf("查询更新后渠道失败: %v", err)
+	}
+	if chanUpdated.BaseURL != newBase {
+		t.Fatalf("物化渠道未能同步更新 BaseURL！期望 %s, 实得 %s", newBase, chanUpdated.BaseURL)
+	}
+	if chanUpdated.Enabled {
+		t.Fatalf("物化渠道未能同步更新 Enabled 为 false！")
+	}
+
+	var keyRow model.ChannelKey
+	if err := conn.Where("channel_id = ?", created.ChannelID).First(&keyRow).Error; err != nil {
+		t.Fatalf("查询渠道凭据失败: %v", err)
+	}
+	plainKey, err := secret.Open(keyRow.Key)
+	if err != nil {
+		t.Fatalf("解密渠道凭据失败: %v", err)
+	}
+	if plainKey != newKey {
+		t.Fatalf("物化渠道未能同步更新 Key！期望 %s, 实得 %s", newKey, plainKey)
+	}
+}
+
+func TestSub2APIAccountChannelCustomHeaderNoSensitive(t *testing.T) {
+	conn, restore := openSub2APITestDB(t)
+	defer restore()
+
+	ctx := context.Background()
+
+	req := Sub2APIAccountCreateRequest{
+		Name:        "头安全测试",
+		Platform:    model.Sub2APIPlatformAnthropic,
+		BaseURL:     "https://api.anthropic.com",
+		ApiKey:      "sk-ant-test",
+		Headers: map[string]string{
+			"Authorization": "Bearer secret-auth-header-leak",
+			"Cookie":        "secret-cookie-leak",
+			"X-Org-Id":      "org-public-123",
+		},
+		Enabled:     boolPtr(true),
+		SyncChannel: true,
+	}
+	created, err := Sub2APIAccountCreate(ctx, req)
+	if err != nil {
+		t.Fatalf("创建失败: %v", err)
+	}
+
+	// 核心断言：渠道表的 CustomHeader 绝对禁止二次明文存储 Authorization 或 Cookie！（守住 R3-04 凭据闭环）
+	var chanRow model.Channel
+	if err := conn.First(&chanRow, created.ChannelID).Error; err != nil {
+		t.Fatalf("查询渠道失败: %v", err)
+	}
+	for _, h := range chanRow.CustomHeader {
+		if strings.EqualFold(h.HeaderKey, "Authorization") || strings.EqualFold(h.HeaderKey, "Cookie") {
+			t.Fatalf("渠道 CustomHeader 中依然泄漏了敏感头！Header: %s=%s", h.HeaderKey, h.HeaderValue)
+		}
+	}
+}
