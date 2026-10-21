@@ -35,12 +35,12 @@ const (
 type Sub2APIAccount struct {
 	ID           int                `json:"id" gorm:"primaryKey"`
 	Name         string             `json:"name" gorm:"not null"`
-	Platform     Sub2APIPlatform    `json:"platform" gorm:"not null;index:idx_sub2api_platform"`
+	Platform     Sub2APIPlatform    `json:"platform" gorm:"not null;index"`
 	AccountType  Sub2APIAccountType `json:"account_type" gorm:"not null;default:'oauth'"`
 	BaseURL      string             `json:"base_url" gorm:"not null"` // 反代目标基地址
 	AccountMode  string             `json:"account_mode" gorm:"not null;default:'payg'"` // payg | coding | go
 	APIProtocol  string             `json:"api_protocol" gorm:"not null;default:'chat_completions'"` // chat_completions | responses | anthropic | adaptive
-	Enabled      bool               `json:"enabled" gorm:"not null;default:true"`
+	Enabled      bool               `json:"enabled" gorm:"not null"` // 默认值在入口层赋予，禁止 gorm default:true 避免覆写显式 false
 	ProxyNodeID  int                `json:"proxy_node_id" gorm:"not null;default:0"` // 出口节点绑定
 	RateLimit    int                `json:"rate_limit" gorm:"not null;default:0"`    // 并发或RPM限制
 	Credentials  string             `json:"-" gorm:"not null;default:''"`            // 加密存储的凭据 JSON
@@ -49,6 +49,10 @@ type Sub2APIAccount struct {
 	ChannelID    int                `json:"channel_id" gorm:"not null;default:0"`    // 物化绑定的渠道 ID
 	CreatedAt    time.Time          `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt    time.Time          `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (Sub2APIAccount) TableName() string {
+	return "sub2api_accounts"
 }
 
 func ValidateSub2APIPlatform(p Sub2APIPlatform) error {
@@ -79,3 +83,45 @@ func ValidateSub2APIBaseURL(raw string) error {
 	}
 	return nil
 }
+
+func ValidateSub2APIAccountType(t Sub2APIAccountType) error {
+	switch t {
+	case Sub2APIAccountTypeOAuth, Sub2APIAccountTypeAPIKey, Sub2APIAccountTypeSetupToken:
+		return nil
+	default:
+		return fmt.Errorf("不支持的 Sub2API 认证形式: %s", t)
+	}
+}
+
+func ValidateSub2APIProtocol(proto string) error {
+	switch proto {
+	case "chat_completions", "responses", "anthropic", "adaptive":
+		return nil
+	default:
+		return fmt.Errorf("不支持的 Sub2API 协议类型: %s", proto)
+	}
+}
+
+func ValidateSub2APIAccountMode(mode string) error {
+	switch mode {
+	case "payg", "coding", "go":
+		return nil
+	default:
+		return fmt.Errorf("不支持的 Sub2API 账号模式: %s", mode)
+	}
+}
+
+func ValidateSub2APIName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("账号别名不能为空")
+	}
+	return nil
+}
+
+func ValidateSub2APIRateLimit(limit int) error {
+	if limit < 0 {
+		return fmt.Errorf("速率限制不能为负数")
+	}
+	return nil
+}
+

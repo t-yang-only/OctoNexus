@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -20,6 +21,18 @@ var (
 
 const sub2apiSecretAAD = "sub2api:account"
 
+// isSensitiveHeader 判定是否为鉴权与敏感请求头
+func isSensitiveHeader(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	return lower == "authorization" ||
+		lower == "cookie" ||
+		lower == "x-api-key" ||
+		lower == "api-key" ||
+		lower == "x-auth-token" ||
+		lower == "token" ||
+		lower == "proxy-authorization"
+}
+
 // Sub2APIAccountCreateRequest 创建请求
 type Sub2APIAccountCreateRequest struct {
 	Name        string                   `json:"name" binding:"required"`
@@ -28,13 +41,28 @@ type Sub2APIAccountCreateRequest struct {
 	BaseURL     string                   `json:"base_url" binding:"required"`
 	AccountMode string                   `json:"account_mode"`
 	APIProtocol string                   `json:"api_protocol"`
-	Enabled     bool                     `json:"enabled"`
+	Enabled     *bool                    `json:"enabled"`
 	ProxyNodeID int                      `json:"proxy_node_id"`
 	RateLimit   int                      `json:"rate_limit"`
 	ApiKey      string                   `json:"api_key"`
 	Headers     map[string]string        `json:"headers"`
 	Notes       string                   `json:"notes"`
 	SyncChannel bool                     `json:"sync_channel"` // 是否同步物化为渠道
+}
+
+// Sub2APIAccountUpdateRequest 更新请求
+type Sub2APIAccountUpdateRequest struct {
+	Name        *string                   `json:"name"`
+	BaseURL     *string                   `json:"base_url"`
+	AccountMode *string                   `json:"account_mode"`
+	APIProtocol *string                   `json:"api_protocol"`
+	Enabled     *bool                     `json:"enabled"`
+	ProxyNodeID *int                      `json:"proxy_node_id"`
+	RateLimit   *int                      `json:"rate_limit"`
+	ApiKey      *string                   `json:"api_key"`
+	Headers     map[string]string         `json:"headers"`
+	Notes       *string                   `json:"notes"`
+	SyncChannel *bool                     `json:"sync_channel"`
 }
 
 // Sub2APIAccountList 获取列表
@@ -50,19 +78,81 @@ func Sub2APIAccountList(ctx context.Context) ([]model.Sub2APIAccount, error) {
 
 // Sub2APIAccountCreate 创建新账号反代配置并可选自动物化为渠道
 func Sub2APIAccountCreate(ctx context.Context, req Sub2APIAccountCreateRequest) (*model.Sub2APIAccount, error) {
+	trimmedName := strings.TrimSpace(req.Name)
+	if err := model.ValidateSub2APIName(trimmedName); err != nil {
+		return nil, err
+	}
 	if err := model.ValidateSub2APIPlatform(req.Platform); err != nil {
 		return nil, err
 	}
 	if err := model.ValidateSub2APIBaseURL(req.BaseURL); err != nil {
 		return nil, err
 	}
+
+	acctType := req.AccountType
+	if acctType == "" {
+		acctType = model.Sub2APIAccountTypeOAuth
+	}
+	if err := model.ValidateSub2APIAccountType(acctType); err != nil {
+		return nil, err
+	}
+
+	accountMode := req.AccountMode
+	if accountMode == "" {
+		accountMode = "payg"
+	}
+	if err := model.ValidateSub2APIAccountMode(accountMode); err != nil {
+		return nil, err
+	}
+
+	apiProto := req.APIProtocol
+	if apiProto == "" {
+		apiProto = "chat_completions"
+	}
+	if err := model.ValidateSub2APIProtocol(apiProto); err != nil {
+		return nil, err
+	}
+
+	if err := model.ValidateSub2APIRateLimit(req.RateLimit); err != nil {
+		return nil, err
+	}
+
 	conn := db.GetDB()
 	if conn == nil {
 		return nil, fmt.Errorf("数据库连接不可用")
 	}
 
+	if req.ProxyNodeID > 0 {
+		var count int64
+		if err := conn.Model(&model.ProxyNode{}).Where("id = ?", req.ProxyNodeID).Count(&count).Error; err != nil || count == 0 {
+			return nil, fmt.Errorf("绑定出口节点(%d)不存在", req.ProxyNodeID)
+		}
+	}
+
+	var nameCount int64
+	if err := conn.Model(&model.Sub2APIAccount{}).Where("name = ?", trimmedName).Count(&nameCount).Error; err == nil && nameCount > 0 {
+		return nil, fmt.Errorf("账号别名 %q 已存在，请更换名称", trimmedName)
+	}
+
+	// 敏感头（Authorization / Cookie 等）剥离加密存储，不放入 Extra 明文
+	sensitiveHeaders := make(map[string]string)
+	nonSensitiveHeaders := make(map[string]string)
+	for k, v := range req.Headers {
+		tk := strings.TrimSpace(k)
+		tv := strings.TrimSpace(v)
+		if tk == "" || tv == "" {
+			continue
+		}
+		if isSensitiveHeader(tk) {
+			sensitiveHeaders[tk] = tv
+		} else {
+			nonSensitiveHeaders[tk] = tv
+		}
+	}
+
 	credsData := map[string]any{
 		"api_key": strings.TrimSpace(req.ApiKey),
+		"headers": sensitiveHeaders,
 	}
 	credsBytes, _ := json.Marshal(credsData)
 	encCreds, err := secret.SealWith(sub2apiSecretAAD, string(credsBytes))
@@ -71,31 +161,24 @@ func Sub2APIAccountCreate(ctx context.Context, req Sub2APIAccountCreateRequest) 
 	}
 
 	extraData := map[string]any{
-		"headers": req.Headers,
+		"headers":               nonSensitiveHeaders,
+		"has_sensitive_headers": len(sensitiveHeaders) > 0,
 	}
 	extraBytes, _ := json.Marshal(extraData)
 
-	accountMode := req.AccountMode
-	if accountMode == "" {
-		accountMode = "payg"
-	}
-	apiProto := req.APIProtocol
-	if apiProto == "" {
-		apiProto = "chat_completions"
-	}
-	acctType := req.AccountType
-	if acctType == "" {
-		acctType = model.Sub2APIAccountTypeOAuth
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
 	}
 
 	account := &model.Sub2APIAccount{
-		Name:        strings.TrimSpace(req.Name),
+		Name:        trimmedName,
 		Platform:    req.Platform,
 		AccountType: acctType,
 		BaseURL:     strings.TrimRight(strings.TrimSpace(req.BaseURL), "/"),
 		AccountMode: accountMode,
 		APIProtocol: apiProto,
-		Enabled:     req.Enabled,
+		Enabled:     enabled,
 		ProxyNodeID: req.ProxyNodeID,
 		RateLimit:   req.RateLimit,
 		Credentials: encCreds,
@@ -108,18 +191,76 @@ func Sub2APIAccountCreate(ctx context.Context, req Sub2APIAccountCreateRequest) 
 	}
 
 	if req.SyncChannel {
-		_ = syncSub2APIAccountToChannel(ctx, conn, account, strings.TrimSpace(req.ApiKey))
+		createdChan, err := syncSub2APIAccountToChannel(ctx, conn, account, strings.TrimSpace(req.ApiKey), sensitiveHeaders)
+		if err != nil {
+			_ = conn.Delete(account)
+			return nil, fmt.Errorf("创建关联渠道失败: %w", err)
+		}
+		account.ChannelID = createdChan.ID
+		if err := conn.Model(account).Update("channel_id", createdChan.ID).Error; err != nil {
+			_ = ChannelDel(createdChan.ID, ctx)
+			_ = conn.Delete(account)
+			return nil, fmt.Errorf("写入账号关联渠道ID失败: %w", err)
+		}
 	}
 
 	return account, nil
 }
 
-// syncSub2APIAccountToChannel 将反代账号物化注册为系统渠道，无缝接入选路与统计体系
-func syncSub2APIAccountToChannel(ctx context.Context, conn *gorm.DB, acct *model.Sub2APIAccount, plainKey string) error {
+// syncSub2APIAccountToChannel 将反代账号物化注册为系统渠道并补齐模型与授权
+func syncSub2APIAccountToChannel(ctx context.Context, conn *gorm.DB, acct *model.Sub2APIAccount, plainKey string, sensitiveHeaders map[string]string) (*model.ChannelDetail, error) {
 	channelName := fmt.Sprintf("Sub2API-%s-%s", acct.Platform, acct.Name)
 	dialect := model.DialectGeneric
-	if acct.Platform == model.Sub2APIPlatformAntigravity {
+	var defaultModels []string
+	var protoMask model.Protocol
+
+	switch acct.APIProtocol {
+	case "chat_completions":
+		protoMask = model.ProtocolOpenAIChatCompletion
+	case "responses":
+		protoMask = model.ProtocolOpenAIResponse
+	case "anthropic":
+		protoMask = model.ProtocolAnthropicMessage
+	case "adaptive":
+		protoMask = model.ProtocolOpenAIChatCompletion | model.ProtocolOpenAIResponse | model.ProtocolAnthropicMessage
+	default:
+		protoMask = model.ProtocolOpenAIChatCompletion
+	}
+
+	switch acct.Platform {
+	case model.Sub2APIPlatformAnthropic:
+		dialect = model.DialectGeneric
+		defaultModels = []string{"claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"}
+		if acct.APIProtocol == "anthropic" {
+			protoMask = model.ProtocolAnthropicMessage
+		}
+	case model.Sub2APIPlatformOpenAI:
+		dialect = model.DialectGeneric
+		defaultModels = []string{"gpt-4o", "gpt-4o-mini", "o1", "o3-mini", "gpt-4-turbo"}
+	case model.Sub2APIPlatformGemini:
+		dialect = model.DialectGeneric
+		defaultModels = []string{"gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-pro"}
+		protoMask |= model.ProtocolGeminiContents
+	case model.Sub2APIPlatformAntigravity:
 		dialect = model.DialectAntigravity
+		defaultModels = []string{"gemini-pro-agent", "gemini-1.5-pro"}
+	case model.Sub2APIPlatformGrok:
+		dialect = model.DialectXAI
+		defaultModels = []string{"grok-2", "grok-3"}
+	case model.Sub2APIPlatformDeepSeek:
+		dialect = model.DialectDeepSeek
+		defaultModels = []string{"deepseek-chat", "deepseek-reasoner"}
+	case model.Sub2APIPlatformKimi:
+		dialect = model.DialectMoonshot
+		defaultModels = []string{"moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"}
+	case model.Sub2APIPlatformOpenCode:
+		dialect = model.DialectOpenCode
+		defaultModels = []string{"opencode-zen", "opencode-go"}
+	case model.Sub2APIPlatformCline:
+		dialect = model.DialectCline
+		defaultModels = []string{"cline-default"}
+	default:
+		defaultModels = []string{"default"}
 	}
 
 	var customHeaders []model.CustomHeader
@@ -136,28 +277,42 @@ func syncSub2APIAccountToChannel(ctx context.Context, conn *gorm.DB, acct *model
 			}
 		}
 	}
+	for k, v := range sensitiveHeaders {
+		if k != "" && v != "" {
+			customHeaders = append(customHeaders, model.CustomHeader{
+				HeaderKey:   k,
+				HeaderValue: v,
+			})
+		}
+	}
 
-	enabled := true
+	grants := make([]model.ChannelGrantConfig, 0, len(defaultModels))
+	for _, m := range defaultModels {
+		grants = append(grants, model.ChannelGrantConfig{
+			ModelName: m,
+			KeyName:   "default",
+			Protocols: protoMask,
+		})
+	}
+
+	enabled := acct.Enabled
 	detail := &model.ChannelDetail{
 		ChannelConfig: model.ChannelConfig{
 			Name:         channelName,
 			Dialect:      dialect,
-			Enabled:      acct.Enabled,
+			Enabled:      enabled,
 			BaseURL:      acct.BaseURL,
 			ProxyNodeID:  acct.ProxyNodeID,
 			CustomHeader: customHeaders,
 		},
 		Keys: []model.ChannelKeyInput{
-			{Name: "default", Key: plainKey, Enabled: &enabled},
+			{Name: "default", Key: plainKey, Enabled: &enabled, ProxyNodeID: &acct.ProxyNodeID},
 		},
+		Models: defaultModels,
+		Grants: grants,
 	}
 
-	created, err := ChannelCreate(detail, ctx)
-	if err == nil && created != nil {
-		acct.ChannelID = created.ID
-		conn.Model(acct).Update("channel_id", created.ID)
-	}
-	return err
+	return ChannelCreate(detail, ctx)
 }
 
 // Sub2APIAccountDelete 删除账号配置及关联渠道
@@ -173,7 +328,11 @@ func Sub2APIAccountDelete(ctx context.Context, id int) error {
 	}
 
 	if acct.ChannelID > 0 {
-		_ = ChannelDel(acct.ChannelID, ctx)
+		if err := ChannelDel(acct.ChannelID, ctx); err != nil {
+			if !strings.Contains(err.Error(), "not found") {
+				return fmt.Errorf("删除关联渠道(%d)失败: %w", acct.ChannelID, err)
+			}
+		}
 	}
 
 	res := conn.Delete(&acct)
@@ -194,23 +353,76 @@ func Sub2APIAccountProbe(ctx context.Context, id int) (string, error) {
 		return "", err
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	probeURL := account.BaseURL + "/v1/models"
+	trimmedBase := strings.TrimRight(strings.TrimSpace(account.BaseURL), "/")
+	probeURL := strings.TrimSuffix(trimmedBase, "/v1") + "/v1/models"
+
+	var authBearer string
+	probeHeaders := make(map[string]string)
+
+	if account.Credentials != "" {
+		plainCreds, err := secret.OpenWith(sub2apiSecretAAD, account.Credentials)
+		if err != nil {
+			return "", fmt.Errorf("凭据解密失败: %w", err)
+		}
+		var credsMap map[string]any
+		if err := json.Unmarshal([]byte(plainCreds), &credsMap); err != nil {
+			return "", fmt.Errorf("凭据反序列化失败: %w", err)
+		}
+		if k, ok := credsMap["api_key"].(string); ok && k != "" {
+			authBearer = k
+		}
+		if hdrs, ok := credsMap["headers"].(map[string]any); ok {
+			for hk, hv := range hdrs {
+				if hvs, ok := hv.(string); ok && hk != "" && hvs != "" {
+					probeHeaders[hk] = hvs
+				}
+			}
+		}
+	}
+
+	if account.Extra != "" {
+		var extraMap map[string]any
+		if err := json.Unmarshal([]byte(account.Extra), &extraMap); err == nil {
+			if hdrs, ok := extraMap["headers"].(map[string]any); ok {
+				for hk, hv := range hdrs {
+					if hvs, ok := hv.(string); ok && hk != "" && hvs != "" {
+						probeHeaders[hk] = hvs
+					}
+				}
+			}
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("构建探测请求失败: %w", err)
 	}
 
-	if account.Credentials != "" {
-		plainCreds, err := secret.OpenWith(sub2apiSecretAAD, account.Credentials)
-		if err == nil {
-			var credsMap map[string]any
-			if json.Unmarshal([]byte(plainCreds), &credsMap) == nil {
-				if k, ok := credsMap["api_key"].(string); ok && k != "" {
-					req.Header.Set("Authorization", "Bearer "+k)
-				}
-			}
+	for k, v := range probeHeaders {
+		req.Header.Set(k, v)
+	}
+	if authBearer != "" && req.Header.Get("Authorization") == "" {
+		req.Header.Set("Authorization", "Bearer "+authBearer)
+	}
+
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+	}
+	if account.ProxyNodeID > 0 {
+		endpoint, err := ProxyNodeEndpoint(account.ProxyNodeID)
+		if err != nil {
+			return "", fmt.Errorf("绑定出口节点(%d)不可用: %w", account.ProxyNodeID, err)
 		}
+		parsedProxy, err := url.Parse(endpoint)
+		if err != nil {
+			return "", fmt.Errorf("解析出口节点地址失败: %w", err)
+		}
+		transport.Proxy = http.ProxyURL(parsedProxy)
+	}
+
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
 	}
 
 	resp, err := client.Do(req)
@@ -219,5 +431,153 @@ func Sub2APIAccountProbe(ctx context.Context, id int) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("上游返回错误状态: HTTP %d (%s)", resp.StatusCode, resp.Status)
+	}
+
 	return fmt.Sprintf("HTTP %d (%s)", resp.StatusCode, resp.Status), nil
 }
+// Sub2APIAccountUpdate 更新账号配置
+func Sub2APIAccountUpdate(ctx context.Context, id int, req Sub2APIAccountUpdateRequest) (*model.Sub2APIAccount, error) {
+	conn := db.GetDB()
+	if conn == nil {
+		return nil, fmt.Errorf("数据库连接不可用")
+	}
+
+	var acct model.Sub2APIAccount
+	if err := conn.First(&acct, id).Error; err != nil {
+		return nil, ErrSub2APIAccountNotFound
+	}
+
+	if req.Name != nil {
+		trimmed := strings.TrimSpace(*req.Name)
+		if err := model.ValidateSub2APIName(trimmed); err != nil {
+			return nil, err
+		}
+		acct.Name = trimmed
+	}
+	if req.BaseURL != nil {
+		if err := model.ValidateSub2APIBaseURL(*req.BaseURL); err != nil {
+			return nil, err
+		}
+		acct.BaseURL = strings.TrimRight(strings.TrimSpace(*req.BaseURL), "/")
+	}
+	if req.AccountMode != nil {
+		if err := model.ValidateSub2APIAccountMode(*req.AccountMode); err != nil {
+			return nil, err
+		}
+		acct.AccountMode = *req.AccountMode
+	}
+	if req.APIProtocol != nil {
+		if err := model.ValidateSub2APIProtocol(*req.APIProtocol); err != nil {
+			return nil, err
+		}
+		acct.APIProtocol = *req.APIProtocol
+	}
+	if req.Enabled != nil {
+		acct.Enabled = *req.Enabled
+		if acct.ChannelID > 0 {
+			_ = ChannelEnabled(acct.ChannelID, *req.Enabled, ctx)
+		}
+	}
+	if req.ProxyNodeID != nil {
+		if *req.ProxyNodeID > 0 {
+			var count int64
+			if err := conn.Model(&model.ProxyNode{}).Where("id = ?", *req.ProxyNodeID).Count(&count).Error; err != nil || count == 0 {
+				return nil, fmt.Errorf("绑定出口节点(%d)不存在", *req.ProxyNodeID)
+			}
+		}
+		acct.ProxyNodeID = *req.ProxyNodeID
+	}
+	if req.RateLimit != nil {
+		if err := model.ValidateSub2APIRateLimit(*req.RateLimit); err != nil {
+			return nil, err
+		}
+		acct.RateLimit = *req.RateLimit
+	}
+	if req.Notes != nil {
+		acct.Notes = strings.TrimSpace(*req.Notes)
+	}
+
+	if req.ApiKey != nil || req.Headers != nil {
+		sensitiveHeaders := make(map[string]string)
+		plainKey := ""
+		if acct.Credentials != "" {
+			if plain, err := secret.OpenWith(sub2apiSecretAAD, acct.Credentials); err == nil {
+				var credsMap map[string]any
+				if json.Unmarshal([]byte(plain), &credsMap) == nil {
+					if k, ok := credsMap["api_key"].(string); ok {
+						plainKey = k
+					}
+					if hdrs, ok := credsMap["headers"].(map[string]any); ok {
+						for hk, hv := range hdrs {
+							if hvs, ok := hv.(string); ok {
+								sensitiveHeaders[hk] = hvs
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if req.ApiKey != nil {
+			plainKey = strings.TrimSpace(*req.ApiKey)
+		}
+
+		nonSensitiveHeaders := make(map[string]string)
+		if acct.Extra != "" {
+			var extraMap map[string]any
+			if json.Unmarshal([]byte(acct.Extra), &extraMap) == nil {
+				if hdrs, ok := extraMap["headers"].(map[string]any); ok {
+					for hk, hv := range hdrs {
+						if hvs, ok := hv.(string); ok {
+							nonSensitiveHeaders[hk] = hvs
+						}
+					}
+				}
+			}
+		}
+
+		if req.Headers != nil {
+			sensitiveHeaders = make(map[string]string)
+			nonSensitiveHeaders = make(map[string]string)
+			for k, v := range req.Headers {
+				tk := strings.TrimSpace(k)
+				tv := strings.TrimSpace(v)
+				if tk == "" || tv == "" {
+					continue
+				}
+				if isSensitiveHeader(tk) {
+					sensitiveHeaders[tk] = tv
+				} else {
+					nonSensitiveHeaders[tk] = tv
+				}
+			}
+		}
+
+		credsData := map[string]any{
+			"api_key": plainKey,
+			"headers": sensitiveHeaders,
+		}
+		credsBytes, _ := json.Marshal(credsData)
+		encCreds, err := secret.SealWith(sub2apiSecretAAD, string(credsBytes))
+		if err != nil {
+			return nil, fmt.Errorf("加密更新凭据失败: %w", err)
+		}
+		acct.Credentials = encCreds
+
+		extraData := map[string]any{
+			"headers":               nonSensitiveHeaders,
+			"has_sensitive_headers": len(sensitiveHeaders) > 0,
+		}
+		extraBytes, _ := json.Marshal(extraData)
+		acct.Extra = string(extraBytes)
+	}
+
+	if err := conn.Save(&acct).Error; err != nil {
+		return nil, fmt.Errorf("保存账号失败: %w", err)
+	}
+
+	return &acct, nil
+}
+

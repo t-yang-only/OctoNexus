@@ -33,6 +33,7 @@ func openImportTestDB(t *testing.T) *gorm.DB {
 		&model.StatsHourly{},
 		&model.StatsAPIKey{},
 		&model.OfficialAccount{},
+		&model.Sub2APIAccount{},
 		&model.ProxyNode{},
 		&model.ProxySubscription{},
 		&model.ManualSubscription{},

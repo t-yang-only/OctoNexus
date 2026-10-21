@@ -77,9 +77,16 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
                             <p className="mt-0.5 truncate text-xs text-muted-foreground">{account.base_url}</p>
                         </div>
                     </div>
-                    <Badge variant={account.enabled ? 'default' : 'secondary'} className="capitalize shrink-0">
-                        {account.platform}
-                    </Badge>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        {account.channel_id && account.channel_id > 0 ? (
+                            <Badge variant="outline" className="text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
+                                渠道 #{account.channel_id}
+                            </Badge>
+                        ) : null}
+                        <Badge variant={account.enabled ? 'default' : 'secondary'} className="capitalize">
+                            {account.platform}
+                        </Badge>
+                    </div>
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
@@ -372,8 +379,10 @@ function Sub2APIAccountsPanel() {
 
 export function Account() {
     return (
-        <div className="container mx-auto max-w-6xl py-6 px-4">
-            <Sub2APIAccountsPanel />
+        <div className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto px-4 py-6">
+            <div className="container mx-auto max-w-6xl">
+                <Sub2APIAccountsPanel />
+            </div>
         </div>
     );
 }

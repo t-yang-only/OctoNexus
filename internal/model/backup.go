@@ -25,6 +25,7 @@ type DBDump struct {
 	ProxySubscriptions  []ProxySubscriptionExport `json:"proxy_subscriptions,omitempty"`
 	OfficialAccounts    []OfficialAccountExport   `json:"official_accounts,omitempty"`
 	ManualSubscriptions []ManualSubscription      `json:"manual_subscriptions,omitempty"`
+	Sub2APIAccounts     []Sub2APIAccountExport    `json:"sub2api_accounts,omitempty"`
 
 	StatsTotal  []StatsTotal  `json:"stats_total,omitempty"`
 	StatsDaily  []StatsDaily  `json:"stats_daily,omitempty"`
@@ -53,6 +54,11 @@ type OfficialAccountExport struct {
 	OfficialAccount
 	AccessCipherOut  string `json:"access_cipher,omitempty"`  // 密文：访问凭据
 	RefreshCipherOut string `json:"refresh_cipher,omitempty"` // 密文：刷新凭据
+}
+
+type Sub2APIAccountExport struct {
+	Sub2APIAccount
+	CredentialsOut string `json:"credentials,omitempty"` // 密文：访问凭据
 }
 
 type DBImportResult struct {

@@ -83,6 +83,19 @@ func DBExportAll(ctx context.Context) (*model.DBDump, error) {
 			RefreshCipherOut: row.RefreshCipher,
 		})
 	}
+	var sub2apiAccounts []model.Sub2APIAccount
+	if conn.Migrator().HasTable(&model.Sub2APIAccount{}) {
+		if err := conn.Find(&sub2apiAccounts).Error; err != nil {
+			return nil, fmt.Errorf("export sub2api_accounts: %w", err)
+		}
+	}
+	d.Sub2APIAccounts = make([]model.Sub2APIAccountExport, 0, len(sub2apiAccounts))
+	for _, row := range sub2apiAccounts {
+		d.Sub2APIAccounts = append(d.Sub2APIAccounts, model.Sub2APIAccountExport{
+			Sub2APIAccount: row,
+			CredentialsOut: row.Credentials,
+		})
+	}
 	if err := conn.Find(&d.ManualSubscriptions).Error; err != nil {
 		return nil, fmt.Errorf("export manual_subscriptions: %w", err)
 	}
@@ -346,6 +359,17 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 		} else {
 			res.RowsAffected["official_accounts"] = n
 		}
+		sub2apiRows := make([]model.Sub2APIAccount, 0, len(dump.Sub2APIAccounts))
+		for _, row := range dump.Sub2APIAccounts {
+			acct := row.Sub2APIAccount
+			acct.Credentials = row.CredentialsOut
+			sub2apiRows = append(sub2apiRows, acct)
+		}
+		if n, err := createRowsRaw(tx, sub2apiRows, []clause.Column{{Name: "id"}}, false); err != nil {
+			return fmt.Errorf("import sub2api_accounts: %w", err)
+		} else {
+			res.RowsAffected["sub2api_accounts"] = n
+		}
 		if n, err := createRowsRaw(tx, dump.ManualSubscriptions, []clause.Column{{Name: "id"}}, false); err != nil {
 			return fmt.Errorf("import manual_subscriptions: %w", err)
 		} else {
@@ -561,6 +585,8 @@ func createRowsRaw(tx *gorm.DB, rows any, columns []clause.Column, doNothing boo
 		return rawCreate(tx, v, "proxy_subscriptions", columns, doNothing)
 	case []model.OfficialAccount:
 		return rawCreate(tx, v, "official_accounts", columns, doNothing)
+	case []model.Sub2APIAccount:
+		return rawCreate(tx, v, "sub2api_accounts", columns, doNothing)
 	case []model.ManualSubscription:
 		return rawCreate(tx, v, "manual_subscriptions", columns, doNothing)
 	case []model.StatsTotal:

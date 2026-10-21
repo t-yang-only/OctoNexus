@@ -27,6 +27,7 @@ export interface Sub2APIAccount {
     rate_limit: number;
     extra: string;
     notes?: string;
+    channel_id?: number;
     created_at: string;
     updated_at: string;
 }
@@ -95,5 +96,19 @@ export function useProbeSub2APIAccount() {
             apiRequest<{ id: number; status: string }>(`/api/v1/sub2api/accounts/${id}/probe`, {
                 method: 'POST',
             }),
+    });
+}
+
+export function useUpdateSub2APIAccount() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, payload }: { id: number; payload: Partial<Sub2APIAccountCreatePayload> }) =>
+            apiRequest<Sub2APIAccount>(`/api/v1/sub2api/accounts/${id}`, {
+                method: 'PUT',
+                body: payload,
+            }),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: sub2apiAccountListQueryKey });
+        },
     });
 }

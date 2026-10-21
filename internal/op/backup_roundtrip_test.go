@@ -52,6 +52,14 @@ func TestDBDumpRoundTripsProxyAndAccountTables(t *testing.T) {
 	if err := source.Create(&manual).Error; err != nil {
 		t.Fatalf("seed manual subscription: %v", err)
 	}
+	s2Creds, err := secret.SealWith("sub2api:account", `{"api_key":"rt-sub2-secret"}`)
+	if err != nil {
+		t.Fatalf("seal sub2api creds: %v", err)
+	}
+	s2Account := model.Sub2APIAccount{ID: 12, Name: "rt-s2", Platform: model.Sub2APIPlatformAnthropic, BaseURL: "https://example.invalid", Credentials: s2Creds, Enabled: true}
+	if err := source.Create(&s2Account).Error; err != nil {
+		t.Fatalf("seed sub2api account: %v", err)
+	}
 
 	dump, err := DBExportAll(context.Background())
 	if err != nil {
@@ -83,7 +91,7 @@ func TestDBDumpRoundTripsProxyAndAccountTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("import into fresh db: %v", err)
 	}
-	for _, table := range []string{"proxy_nodes", "proxy_subscriptions", "official_accounts", "manual_subscriptions"} {
+	for _, table := range []string{"proxy_nodes", "proxy_subscriptions", "official_accounts", "manual_subscriptions", "sub2api_accounts"} {
 		if res.RowsAffected[table] != 1 {
 			t.Fatalf("%s rows = %d, want 1 (rows_affected=%v)", table, res.RowsAffected[table], res.RowsAffected)
 		}

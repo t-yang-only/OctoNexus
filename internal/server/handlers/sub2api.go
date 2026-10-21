@@ -26,6 +26,11 @@ func init() {
 				Handle(sub2apiAccountCreate),
 		).
 		AddRoute(
+			router.NewRoute("/accounts/:id", http.MethodPut).
+				Use(middleware.RequireJSON()).
+				Handle(sub2apiAccountUpdate),
+		).
+		AddRoute(
 			router.NewRoute("/accounts/:id", http.MethodDelete).
 				Handle(sub2apiAccountDelete),
 		).
@@ -89,4 +94,28 @@ func sub2apiAccountProbe(c *gin.Context) {
 		return
 	}
 	resp.Success(c, gin.H{"id": id, "status": status})
+}
+
+func sub2apiAccountUpdate(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, "非法账号 ID")
+		return
+	}
+	var req op.Sub2APIAccountUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Error(c, http.StatusBadRequest, "请求参数非法: "+err.Error())
+		return
+	}
+	acct, err := op.Sub2APIAccountUpdate(c.Request.Context(), id, req)
+	if err != nil {
+		if errors.Is(err, op.ErrSub2APIAccountNotFound) {
+			resp.Error(c, http.StatusNotFound, "账号不存在")
+			return
+		}
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, acct)
 }

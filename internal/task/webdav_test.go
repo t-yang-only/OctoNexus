@@ -39,6 +39,7 @@ func openWebDAVTestDB(t *testing.T) {
 		&model.Group{}, &model.GroupItem{}, &model.APIKey{}, &model.Setting{}, &model.LLMInfo{},
 		&model.StatsTotal{}, &model.StatsDaily{}, &model.StatsHourly{}, &model.StatsAPIKey{},
 		&model.ProxyNode{}, &model.ProxySubscription{}, &model.OfficialAccount{},
+		&model.Sub2APIAccount{},
 		&model.ManualSubscription{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)

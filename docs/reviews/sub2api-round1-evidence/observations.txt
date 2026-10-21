@@ -1,0 +1,28 @@
+=== RUN   TestReviewSub2APIObservations
+=== RUN   TestReviewSub2APIObservations/disabled_account_becomes_enabled
+    sub2api_review_observation_test.go:46: enabled:false was returned as enabled:true
+=== RUN   TestReviewSub2APIObservations/materialized_channel_has_no_route
+    sub2api_review_observation_test.go:65: channel created, but model/grant/group-item counts are all zero
+=== RUN   TestReviewSub2APIObservations/duplicate_name_silently_skips_channel
+    sub2api_review_observation_test.go:78: same name: second account succeeds with channel_id=0
+=== RUN   TestReviewSub2APIObservations/delete_error_leaves_channel_alive
+    sub2api_review_observation_test.go:102: delete reports success: account gone, enabled channel survives
+=== RUN   TestReviewSub2APIObservations/probe_ignores_proxy_headers_and_http_failure
+    sub2api_review_observation_test.go:125: invalid bound proxy was bypassed; header omitted; path=/v1/v1/models; HTTP 401 returned without error
+=== RUN   TestReviewSub2APIObservations/probe_decryption_failure_is_silent
+    sub2api_review_observation_test.go:146: corrupt credentials: probe still sends unauthenticated request and succeeds
+=== RUN   TestReviewSub2APIObservations/custom_auth_header_is_plaintext_in_response
+    sub2api_review_observation_test.go:164: custom authorization header is plaintext in Extra and JSON response
+=== RUN   TestReviewSub2APIObservations/database_export_omits_new_accounts
+    sub2api_review_observation_test.go:184: DBExportAll succeeds but contains neither account nor sub2api_accounts section
+--- PASS: TestReviewSub2APIObservations (0.20s)
+    --- PASS: TestReviewSub2APIObservations/disabled_account_becomes_enabled (0.10s)
+    --- PASS: TestReviewSub2APIObservations/materialized_channel_has_no_route (0.02s)
+    --- PASS: TestReviewSub2APIObservations/duplicate_name_silently_skips_channel (0.01s)
+    --- PASS: TestReviewSub2APIObservations/delete_error_leaves_channel_alive (0.01s)
+    --- PASS: TestReviewSub2APIObservations/probe_ignores_proxy_headers_and_http_failure (0.02s)
+    --- PASS: TestReviewSub2APIObservations/probe_decryption_failure_is_silent (0.02s)
+    --- PASS: TestReviewSub2APIObservations/custom_auth_header_is_plaintext_in_response (0.01s)
+    --- PASS: TestReviewSub2APIObservations/database_export_omits_new_accounts (0.01s)
+PASS
+ok  	github.com/t-yang-only/OctoNexus/internal/op	0.438s
