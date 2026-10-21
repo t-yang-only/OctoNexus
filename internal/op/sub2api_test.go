@@ -388,8 +388,147 @@ func TestSub2APIAccountChannelCustomHeaderNoSensitive(t *testing.T) {
 		t.Fatalf("查询渠道失败: %v", err)
 	}
 	for _, h := range chanRow.CustomHeader {
-		if strings.EqualFold(h.HeaderKey, "Authorization") || strings.EqualFold(h.HeaderKey, "Cookie") {
-			t.Fatalf("渠道 CustomHeader 中依然泄漏了敏感头！Header: %s=%s", h.HeaderKey, h.HeaderValue)
+		if strings.EqualFold(h.HeaderKey, "Authorization") {
+			t.Fatalf("Authorization 不得进入渠道 CustomHeader！")
 		}
+		if strings.EqualFold(h.HeaderKey, "Cookie") {
+			if strings.Contains(h.HeaderValue, "secret-cookie-leak") {
+				t.Fatalf("Cookie 在 CustomHeader 中明文泄露！")
+			}
+			if !secret.IsSealed(h.HeaderValue) {
+				t.Fatalf("Cookie 必须为 AES-256 密文（enc:v1:）！实得: %s", h.HeaderValue)
+			}
+		}
+	}
+}
+func TestSub2APIAccountUpdatePreservesManualModelsAndSettings(t *testing.T) {
+	conn, restore := openSub2APITestDB(t)
+	defer restore()
+
+	ctx := context.Background()
+
+	// 1. 创建账号并物化渠道
+	req := Sub2APIAccountCreateRequest{
+		Name:        "保留人工配置测试",
+		Platform:    model.Sub2APIPlatformOpenAI,
+		BaseURL:     "https://api.openai.com",
+		ApiKey:      "sk-origin",
+		Enabled:     boolPtr(true),
+		SyncChannel: true,
+	}
+	created, err := Sub2APIAccountCreate(ctx, req)
+	if err != nil {
+		t.Fatalf("创建失败: %v", err)
+	}
+
+	// 2. 模拟运维人员在渠道上手动追加模型、修改自定义路径与计费
+	d, err := ChannelDetailGet(created.ChannelID)
+	if err != nil {
+		t.Fatalf("获取渠道详情失败: %v", err)
+	}
+	d.OpenAIChatCompletionPath = "/custom/chat/v1"
+	d.BillingMode = "subscription"
+	d.MonthlyQuota = 500
+	d.Models = append(d.Models, "my-custom-fine-tuned-model")
+	d.Grants = append(d.Grants, model.ChannelGrantConfig{
+		ModelName: "my-custom-fine-tuned-model",
+		KeyName:   "default",
+		Protocols: model.ProtocolOpenAIChatCompletion,
+	})
+	if _, err := ChannelUpdate(&d, ctx); err != nil {
+		t.Fatalf("更新渠道手工配置失败: %v", err)
+	}
+
+	// 3. 此时用户只更新账号的 Notes 字段
+	newNotes := "仅更新备注"
+	if _, err := Sub2APIAccountUpdate(ctx, created.ID, Sub2APIAccountUpdateRequest{Notes: &newNotes}); err != nil {
+		t.Fatalf("更新账号备注失败: %v", err)
+	}
+
+	// 4. 核心断言：手工配置的路径、计费与自定义模型必须完整保留，绝不能被全量冲掉！（攻克 R3-F1）
+	var c model.Channel
+	conn.First(&c, created.ChannelID)
+	if c.OpenAIChatCompletionPath != "/custom/chat/v1" || c.MonthlyQuota != 500 {
+		t.Fatalf("渠道手工配置的端点路径或配额被冲掉了！Path: %s, Quota: %f", c.OpenAIChatCompletionPath, c.MonthlyQuota)
+	}
+
+	var customModelCount int64
+	conn.Model(&model.ChannelModel{}).Where("channel_id = ? AND name = ?", created.ChannelID, "my-custom-fine-tuned-model").Count(&customModelCount)
+	if customModelCount != 1 {
+		t.Fatalf("渠道手工追加的自定义模型被无辜删除了！")
+	}
+}
+
+func TestSub2APIAccountCorruptCredentialsGuard(t *testing.T) {
+	conn, restore := openSub2APITestDB(t)
+	defer restore()
+
+	ctx := context.Background()
+
+	req := Sub2APIAccountCreateRequest{
+		Name:     "坏密文保护",
+		Platform: model.Sub2APIPlatformOpenAI,
+		BaseURL:  "https://api.openai.com",
+		ApiKey:   "sk-test",
+		Enabled:  boolPtr(true),
+	}
+	created, err := Sub2APIAccountCreate(ctx, req)
+	if err != nil {
+		t.Fatalf("创建失败: %v", err)
+	}
+
+	// 注入破坏密文
+	conn.Model(&model.Sub2APIAccount{}).Where("id = ?", created.ID).Update("credentials", "enc:v1:corrupted-value")
+
+	// 用户只更新备注，原坏密文不得被静默置空（攻克 R3-F5）
+	newNotes := "修改备注"
+	updated, err := Sub2APIAccountUpdate(ctx, created.ID, Sub2APIAccountUpdateRequest{Notes: &newNotes})
+	if err != nil {
+		t.Fatalf("只改备注应成功: %v", err)
+	}
+	if updated.Credentials != "enc:v1:corrupted-value" {
+		t.Fatalf("坏密文在未提供新凭据时被静默清空抹除了！实得: %s", updated.Credentials)
+	}
+}
+func TestSub2APIDisabledAccountMaterializesDisabledChannel(t *testing.T) {
+	conn, restore := openSub2APITestDB(t)
+	defer restore()
+
+	ctx := context.Background()
+
+	req := Sub2APIAccountCreateRequest{
+		Name:        "初始禁用物化",
+		Platform:    model.Sub2APIPlatformAnthropic,
+		BaseURL:     "https://api.anthropic.com",
+		ApiKey:      "sk-test",
+		Enabled:     boolPtr(false),
+		SyncChannel: true,
+	}
+	created, err := Sub2APIAccountCreate(ctx, req)
+	if err != nil {
+		t.Fatalf("创建失败: %v", err)
+	}
+	if created.Enabled {
+		t.Fatalf("创建后账号应为禁用 (false)")
+	}
+	if created.ChannelID == 0 {
+		t.Fatalf("物化渠道未分配 ID")
+	}
+
+	// 核心断言：物化渠道的 Enabled 也必须严格为 false，绝不能被 GORM default:true 反转！（攻克 R3-F7）
+	var c model.Channel
+	if err := conn.First(&c, created.ChannelID).Error; err != nil {
+		t.Fatalf("查询渠道失败: %v", err)
+	}
+	if c.Enabled {
+		t.Fatalf("初始禁用账号物化出的渠道 Enabled 变为 true！触发 GORM default 覆盖！")
+	}
+
+	cached, err := ChannelGet(created.ChannelID)
+	if err != nil {
+		t.Fatalf("读渠道缓存失败: %v", err)
+	}
+	if cached.Enabled {
+		t.Fatalf("渠道缓存中的 Enabled 也必须为 false！")
 	}
 }

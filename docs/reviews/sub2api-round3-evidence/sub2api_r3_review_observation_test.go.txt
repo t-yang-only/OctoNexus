@@ -1,0 +1,177 @@
+package op
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/t-yang-only/OctoNexus/internal/model"
+	"github.com/t-yang-only/OctoNexus/internal/secret"
+	"gorm.io/gorm"
+)
+
+// Observation tests assert the defects at c653a0f; PASS means reproduced, not fixed.
+func TestR3ReviewObservations(t *testing.T) {
+	ctx := context.Background()
+	create := func(t *testing.T, name string, sync bool) *model.Sub2APIAccount {
+		t.Helper()
+		a, err := Sub2APIAccountCreate(ctx, Sub2APIAccountCreateRequest{Name: name, Platform: model.Sub2APIPlatformOpenAI, BaseURL: "https://gateway.example", ApiKey: "synthetic-review-key", SyncChannel: sync})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	t.Run("NotesOverwriteManualChannel", func(t *testing.T) {
+		conn, restore := openSub2APITestDB(t)
+		defer restore()
+		a := create(t, "manual", true)
+		d, err := ChannelDetailGet(a.ChannelID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.OpenAIChatCompletionPath = "/custom/chat"
+		d.BillingMode = "subscription"
+		d.MonthlyQuota = 900
+		d.Models = append(d.Models, "private-model")
+		d.Grants = append(d.Grants, model.ChannelGrantConfig{ModelName: "private-model", KeyName: "default", Protocols: model.ProtocolOpenAIChatCompletion})
+		if _, err = ChannelUpdate(&d, ctx); err != nil {
+			t.Fatal(err)
+		}
+		note := "notes only"
+		if _, err = Sub2APIAccountUpdate(ctx, a.ID, Sub2APIAccountUpdateRequest{Notes: &note}); err != nil {
+			t.Fatal(err)
+		}
+		var c model.Channel
+		conn.First(&c, a.ChannelID)
+		var n int64
+		conn.Model(&model.ChannelModel{}).Where("channel_id = ? AND name = ?", a.ChannelID, "private-model").Count(&n)
+		if c.OpenAIChatCompletionPath != "/v1/chat/completions" || c.MonthlyQuota != 0 || n != 0 {
+			t.Fatalf("unexpected: %+v models=%d", c.ChannelConfig, n)
+		}
+		t.Log("REPRO: notes-only update reset custom endpoint/billing and deleted custom model")
+	})
+	t.Run("SaveFailureLeavesChannelChanged", func(t *testing.T) {
+		conn, restore := openSub2APITestDB(t)
+		defer restore()
+		a := create(t, "atomic-a", true)
+		_ = create(t, "atomic-b", false)
+		if err := conn.Exec("CREATE UNIQUE INDEX review_unique_account_name ON sub2api_accounts(name)").Error; err != nil {
+			t.Fatal(err)
+		}
+		name := "atomic-b"
+		base := "https://changed.example"
+		_, err := Sub2APIAccountUpdate(ctx, a.ID, Sub2APIAccountUpdateRequest{Name: &name, BaseURL: &base})
+		if err == nil {
+			t.Fatal("expected unique error")
+		}
+		var saved model.Sub2APIAccount
+		conn.First(&saved, a.ID)
+		var c model.Channel
+		conn.First(&c, a.ChannelID)
+		if saved.BaseURL == base || c.BaseURL != base {
+			t.Fatal("expected split state")
+		}
+		t.Log("REPRO: account Save rejected but channel already committed changed BaseURL")
+	})
+	t.Run("UnbindIgnoresDeleteError", func(t *testing.T) {
+		conn, restore := openSub2APITestDB(t)
+		defer restore()
+		a := create(t, "unbind", true)
+		cb := "review:fail_channel_delete"
+		if err := conn.Callback().Delete().Before("gorm:delete").Register(cb, func(tx *gorm.DB) {
+			if tx.Statement.Table == "channels" {
+				tx.AddError(errors.New("synthetic delete failure"))
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Callback().Delete().Remove(cb)
+		no := false
+		updated, err := Sub2APIAccountUpdate(ctx, a.ID, Sub2APIAccountUpdateRequest{SyncChannel: &no})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var n int64
+		conn.Model(&model.Channel{}).Where("id = ?", a.ChannelID).Count(&n)
+		if updated.ChannelID != 0 || n != 1 {
+			t.Fatal("expected orphan")
+		}
+		t.Log("REPRO: unbind succeeds while enabled channel remains in DB and cache")
+	})
+	t.Run("CorruptCredentialsSilentlyErased", func(t *testing.T) {
+		conn, restore := openSub2APITestDB(t)
+		defer restore()
+		a := create(t, "corrupt", true)
+		conn.Model(&model.Sub2APIAccount{}).Where("id = ?", a.ID).Update("credentials", "invalid-ciphertext")
+		note := "notes"
+		updated, err := Sub2APIAccountUpdate(ctx, a.ID, Sub2APIAccountUpdateRequest{Notes: &note})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := secret.OpenWith(sub2apiSecretAAD, updated.Credentials)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var k model.ChannelKey
+		conn.Where("channel_id = ?", a.ChannelID).First(&k)
+		pk, err := secret.Open(k.Key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pk != "" {
+			t.Fatal("expected empty key")
+		}
+		t.Logf("REPRO: bad ciphertext replaced with valid empty credentials %s and channel key emptied", p)
+	})
+	t.Run("DisabledCreateChannelEnabled", func(t *testing.T) {
+		conn, restore := openSub2APITestDB(t)
+		defer restore()
+		a, err := Sub2APIAccountCreate(ctx, Sub2APIAccountCreateRequest{Name: "disabled", Platform: model.Sub2APIPlatformOpenAI, BaseURL: "https://gateway.example", ApiKey: "synthetic", Enabled: boolPtr(false), SyncChannel: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var c model.Channel
+		conn.First(&c, a.ChannelID)
+		if a.Enabled || !c.Enabled {
+			t.Fatal("expected account=false channel=true")
+		}
+		t.Log("REPRO: disabled account created with enabled channel (default key disabled)")
+	})
+	t.Run("SensitiveHeadersNotMaterialized", func(t *testing.T) {
+		_, restore := openSub2APITestDB(t)
+		defer restore()
+		received := false
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			received = r.Header.Get("Cookie") == "session=synthetic"
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":[]}`))
+		}))
+		defer srv.Close()
+		a, err := Sub2APIAccountCreate(ctx, Sub2APIAccountCreateRequest{Name: "cookie", Platform: model.Sub2APIPlatformOpenAI, BaseURL: srv.URL, ApiKey: "synthetic", Headers: map[string]string{"Cookie": "session=synthetic", "X-Org-Id": "visible"}, SyncChannel: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Sub2APIAccountProbe(ctx, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		if !received {
+			t.Fatal("probe did not send cookie")
+		}
+		d, err := ChannelDetailGet(a.ChannelID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, h := range d.CustomHeader {
+			if h.HeaderKey == "Cookie" {
+				t.Fatal("unexpected cookie")
+			}
+		}
+		p, err := secret.OpenWith(sub2apiSecretAAD, a.Credentials)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("REPRO: local upstream probe received Cookie, but Cookie absent from relay channel spec; synthetic plaintext=%s", p)
+	})
+}

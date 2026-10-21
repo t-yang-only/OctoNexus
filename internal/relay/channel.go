@@ -32,6 +32,7 @@ import (
 	"github.com/looplj/axonhub/llm/transformer/xai"
 	"github.com/looplj/axonhub/llm/transformer/zai"
 	"github.com/t-yang-only/OctoNexus/internal/model"
+	"github.com/t-yang-only/OctoNexus/internal/secret"
 	"github.com/tidwall/sjson"
 )
 
@@ -212,6 +213,11 @@ func applyChannelConfig(channel model.Channel, request *httpclient.Request) erro
 		value := clientHeaderPlaceholder.ReplaceAllStringFunc(header.HeaderValue, func(placeholder string) string {
 			return request.Headers.Get(placeholder[len("{client_header:") : len(placeholder)-1])
 		})
+		if secret.IsSealed(value) {
+			if plain, err := secret.OpenWith("channel:header", value); err == nil {
+				value = plain
+			}
+		}
 		request.Headers.Set(header.HeaderKey, value)
 	}
 	return nil

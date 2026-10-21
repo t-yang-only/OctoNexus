@@ -1,0 +1,22 @@
+=== RUN   TestR3ReviewObservations
+=== RUN   TestR3ReviewObservations/NotesOverwriteManualChannel
+    sub2api_r3_review_observation_test.go:53: REPRO: notes-only update reset custom endpoint/billing and deleted custom model
+=== RUN   TestR3ReviewObservations/SaveFailureLeavesChannelChanged
+    sub2api_r3_review_observation_test.go:76: REPRO: account Save rejected but channel already committed changed BaseURL
+=== RUN   TestR3ReviewObservations/UnbindIgnoresDeleteError
+    sub2api_r3_review_observation_test.go:101: REPRO: unbind succeeds while enabled channel remains in DB and cache
+=== RUN   TestR3ReviewObservations/CorruptCredentialsSilentlyErased
+    sub2api_r3_review_observation_test.go:126: REPRO: bad ciphertext replaced with valid empty credentials {"api_key":"","headers":{}} and channel key emptied
+=== RUN   TestR3ReviewObservations/DisabledCreateChannelEnabled
+    sub2api_r3_review_observation_test.go:140: REPRO: disabled account created with enabled channel (default key disabled)
+=== RUN   TestR3ReviewObservations/SensitiveHeadersNotMaterialized
+    sub2api_r3_review_observation_test.go:175: REPRO: local upstream probe received Cookie, but Cookie absent from relay channel spec; synthetic plaintext={"api_key":"synthetic","headers":{"Cookie":"session=synthetic"}}
+--- PASS: TestR3ReviewObservations (0.05s)
+    --- PASS: TestR3ReviewObservations/NotesOverwriteManualChannel (0.03s)
+    --- PASS: TestR3ReviewObservations/SaveFailureLeavesChannelChanged (0.01s)
+    --- PASS: TestR3ReviewObservations/UnbindIgnoresDeleteError (0.00s)
+    --- PASS: TestR3ReviewObservations/CorruptCredentialsSilentlyErased (0.00s)
+    --- PASS: TestR3ReviewObservations/DisabledCreateChannelEnabled (0.00s)
+    --- PASS: TestR3ReviewObservations/SensitiveHeadersNotMaterialized (0.01s)
+PASS
+ok  	github.com/t-yang-only/OctoNexus/internal/op	0.160s

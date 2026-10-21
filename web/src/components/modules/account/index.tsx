@@ -2,12 +2,15 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import {
     CheckCircle2,
+    CircleAlert,
     Loader2,
+    Pencil,
     Plus,
     RefreshCw,
     Server,
     Trash2,
     Workflow,
+    X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,6 +22,7 @@ import {
     useCreateSub2APIAccount,
     useDeleteSub2APIAccount,
     useProbeSub2APIAccount,
+    useUpdateSub2APIAccount,
     type Sub2APIAccount,
     type Sub2APIPlatform,
     type Sub2APIAccountType,
@@ -39,7 +43,14 @@ const platformOptions: Array<{ id: Sub2APIPlatform; label: string; defaultBaseUR
 function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
     const deleteMutation = useDeleteSub2APIAccount();
     const probeMutation = useProbeSub2APIAccount();
+    const updateMutation = useUpdateSub2APIAccount();
     const [probeResult, setProbeResult] = useState<string | null>(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editName, setEditName] = useState(account.name);
+    const [editBaseURL, setEditBaseURL] = useState(account.base_url);
+    const [editApiKey, setEditApiKey] = useState('');
+    const [editNotes, setEditNotes] = useState(account.notes || '');
+    const [editEnabled, setEditEnabled] = useState(account.enabled);
 
     const handleDelete = () => {
         if (confirm(`确认删除订阅反代账号「${account.name}」？`)) {
@@ -58,11 +69,79 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
                 toast.success('探测完成: ' + res.status);
             },
             onError: (err) => {
-                setProbeResult('异常');
+                setProbeResult('失败: ' + err.message);
                 toast.error('探测失败: ' + err.message);
             },
         });
     };
+
+    const handleSaveEdit = (e: React.FormEvent) => {
+        e.preventDefault();
+        const payload: Record<string, unknown> = {
+            name: editName.trim(),
+            base_url: editBaseURL.trim(),
+            notes: editNotes.trim(),
+            enabled: editEnabled,
+        };
+        if (editApiKey.trim()) {
+            payload.api_key = editApiKey.trim();
+        }
+        updateMutation.mutate(
+            { id: account.id, payload },
+            {
+                onSuccess: () => {
+                    toast.success('账号已更新并同步');
+                    setIsEditing(false);
+                    setEditApiKey('');
+                },
+                onError: (err) => toast.error('更新失败: ' + err.message),
+            }
+        );
+    };
+
+    if (isEditing) {
+        return (
+            <form onSubmit={handleSaveEdit} className="flex flex-col justify-between rounded-2xl border border-primary/50 bg-card p-5 shadow-md">
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm">编辑反代账号</span>
+                        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setIsEditing(false)}>
+                            <X className="size-4" />
+                        </Button>
+                    </div>
+                    <Field>
+                        <FieldLabel className="text-xs">账号别名</FieldLabel>
+                        <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="h-8 text-xs rounded-lg" />
+                    </Field>
+                    <Field>
+                        <FieldLabel className="text-xs">反代基地址</FieldLabel>
+                        <Input value={editBaseURL} onChange={(e) => setEditBaseURL(e.target.value)} className="h-8 text-xs rounded-lg" />
+                    </Field>
+                    <Field>
+                        <FieldLabel className="text-xs">凭据密钥 (留空保持原样)</FieldLabel>
+                        <Input type="password" placeholder="留空不修改" value={editApiKey} onChange={(e) => setEditApiKey(e.target.value)} className="h-8 text-xs rounded-lg" />
+                    </Field>
+                    <Field>
+                        <FieldLabel className="text-xs">备注</FieldLabel>
+                        <Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} className="h-8 text-xs rounded-lg" />
+                    </Field>
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground">
+                        <input type="checkbox" checked={editEnabled} onChange={(e) => setEditEnabled(e.target.checked)} className="rounded size-3.5 text-primary" />
+                        <span>启用该反代账号</span>
+                    </label>
+                </div>
+                <div className="mt-4 flex items-center justify-end gap-2 border-t border-border/50 pt-3">
+                    <Button type="button" variant="outline" size="sm" className="h-8 text-xs rounded-lg" onClick={() => setIsEditing(false)}>
+                        取消
+                    </Button>
+                    <Button type="submit" size="sm" className="h-8 text-xs rounded-lg" disabled={updateMutation.isPending}>
+                        {updateMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                        保存更新
+                    </Button>
+                </div>
+            </form>
+        );
+    }
 
     return (
         <div className="flex flex-col justify-between rounded-2xl border border-border/70 bg-card p-5 shadow-sm transition-all hover:border-border hover:shadow-md">
@@ -107,25 +186,37 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
                 )}
 
                 {probeResult && (
-                    <div className="mt-3 flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
-                        <CheckCircle2 className="size-3.5" />
+                    <div className={`mt-3 flex items-center gap-1.5 text-xs font-medium ${probeResult.startsWith('失败') || probeResult === '异常' ? 'text-destructive' : 'text-emerald-600'}`}>
+                        {probeResult.startsWith('失败') || probeResult === '异常' ? <CircleAlert className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}
                         连通性: {probeResult}
                     </div>
                 )}
             </div>
 
             <div className="mt-5 flex items-center justify-between border-t border-border/50 pt-3">
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-xl text-xs"
-                    onClick={handleProbe}
-                    disabled={probeMutation.isPending}
-                >
-                    {probeMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 size-3.5" />}
-                    测试连接
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-xl text-xs"
+                        onClick={handleProbe}
+                        disabled={probeMutation.isPending}
+                    >
+                        {probeMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 size-3.5" />}
+                        测试连接
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 rounded-xl text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => setIsEditing(true)}
+                    >
+                        <Pencil className="mr-1.5 size-3.5" />
+                        编辑
+                    </Button>
+                </div>
                 <Button
                     type="button"
                     variant="ghost"

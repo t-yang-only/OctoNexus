@@ -73,6 +73,8 @@ export function useCreateSub2APIAccount() {
             }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: sub2apiAccountListQueryKey });
+            void queryClient.invalidateQueries({ queryKey: ['channel', 'list'] });
+            void queryClient.invalidateQueries({ queryKey: ['group', 'list'] });
         },
     });
 }
@@ -86,6 +88,8 @@ export function useDeleteSub2APIAccount() {
             }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: sub2apiAccountListQueryKey });
+            void queryClient.invalidateQueries({ queryKey: ['channel', 'list'] });
+            void queryClient.invalidateQueries({ queryKey: ['group', 'list'] });
         },
     });
 }
@@ -109,6 +113,8 @@ export function useUpdateSub2APIAccount() {
             }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: sub2apiAccountListQueryKey });
+            void queryClient.invalidateQueries({ queryKey: ['channel', 'list'] });
+            void queryClient.invalidateQueries({ queryKey: ['group', 'list'] });
         },
     });
 }
