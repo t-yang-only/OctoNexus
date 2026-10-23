@@ -2,6 +2,12 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.41] - 2026-10-23
+### Added
+- **动态模型发现与自动同步 (Round 4)**：新增 `POST /api/v1/sub2api/accounts/:id/sync-models`，从上游 `/v1/models` 拉取真实可用模型，去重后增量合并进物化渠道的模型与授权（协议位按账号 APIProtocol 自适应：chat_completions/responses/anthropic/adaptive），并走 ChannelUpdate 刷新分组授权；前端账号卡片新增「同步模型」入口（channel_id>0 时可见）。
+### Tests
+- `internal/op/sub2api_test.go` 增至 12 项：新增上游指纹（Bearer 送达与 `/v1/models` 路径归一化）、去重、幂等二次同步、未物化/上游 500/账号不存在三条守卫路径。
+
 ## [v0.79.40] - 2026-10-21
 ### Added
 - **Relay 动态解密 CustomHeader**：`internal/relay/channel.go` 支持密文 Header 实时解密注入，确保依赖 Cookie/Token 的上游网关在真实转发与探测中均自洽生效。

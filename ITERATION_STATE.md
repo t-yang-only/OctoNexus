@@ -32,13 +32,13 @@
 ---
 
 ## 4. 自动化测试与门禁证据
-- `internal/op/sub2api_test.go`：10 项严密单元测试 100% 全部通过。
+- `internal/op/sub2api_test.go`：12 项严密单元测试 100% 全部通过（新增动态模型同步上游指纹/去重/幂等/守卫用例）。
 - 全仓 Go 单元测试 `go test ./internal/...`：全部通过，0 FAIL。
 - 前端 `pnpm tsc --noEmit` & `pnpm lint`：全部通过，0 警告。
-- 线上测试环境热部署：HK4H8G `apidate.yangonly.com` 已运行 `v0.79.40`，服务正常活跃。
+- 线上测试环境热部署：HK4H8G `apidate.yangonly.com` 已运行 `v0.79.41`（commit c4372162），服务正常活跃，前端资产 hash 与本地构建一致。
 
 ---
 
 ## 5. 汇报状态
-- 当前周期累计已完成轮次：3 / 10
+- 当前周期累计已完成轮次：4 / 10
 - 下次 Server 酱汇报阈值：Round 10
