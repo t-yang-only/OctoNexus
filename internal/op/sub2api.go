@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/t-yang-only/OctoNexus/internal/db"
@@ -688,6 +689,15 @@ func Sub2APIAccountProbe(ctx context.Context, id int) (string, error) {
 	return fmt.Sprintf("HTTP %d (%s)", resp.StatusCode, resp.Status), nil
 }
 
+// syncModelsLocks 按渠道 ID 分锁, 保护动态模型同步的读-改-写窗口 (R5-F1)。
+// 单二进制部署下进程内互斥即覆盖全部并发源; LoadOrStore 保证同一渠道拿到同一把锁。
+var syncModelsLocks sync.Map
+
+func syncModelsLockFor(channelID int) *sync.Mutex {
+	v, _ := syncModelsLocks.LoadOrStore(channelID, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
 // Sub2APIAccountSyncModels 动态从上游 /v1/models 拉取真实可用模型并增量同步至物化渠道和自动分组
 func Sub2APIAccountSyncModels(ctx context.Context, id int) ([]string, error) {
 	conn := db.GetDB()
@@ -702,13 +712,24 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) ([]string, error) {
 		return nil, fmt.Errorf("该账号尚未物化为渠道，请先开启物化渠道")
 	}
 
+	// R5-F3: 无凭据时直接给出可执行错误, 不再静默发出无认证请求后让上游 401 替我们报错
+	if account.Credentials == "" {
+		return nil, fmt.Errorf("该账号未配置凭据，请先编辑账号补全 API Key 后再同步模型")
+	}
+
+	// R5-F1: 渠道级互斥保护读-改-写窗口: 并发 sync 或 sync 与面板编辑同时进行时,
+	// 后写者会静默覆盖先写者的合并结果。按渠道 ID 分锁, 单二进制部署即覆盖全部并发源。
+	syncLock := syncModelsLockFor(account.ChannelID)
+	syncLock.Lock()
+	defer syncLock.Unlock()
+
 	trimmedBase := strings.TrimRight(strings.TrimSpace(account.BaseURL), "/")
 	modelsURL := strings.TrimSuffix(trimmedBase, "/v1") + "/v1/models"
 
 	var authBearer string
 	requestHeaders := make(map[string]string)
 
-	if account.Credentials != "" {
+	{
 		plainCreds, err := secret.OpenWith(sub2apiSecretAAD, account.Credentials)
 		if err != nil {
 			return nil, fmt.Errorf("凭据解密失败: %w", err)
@@ -828,6 +849,19 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) ([]string, error) {
 	}
 
 	// 确保所有合并后的模型均包含授权
+	// R5-F2: grant 必须引用真实存在的凭据名。取渠道现有凭据(ChannelDetailGet 按名称排序, 取值确定),
+	// 不再硬编码 default —— 用户若在面板删掉/改名了物化时创建的 default 凭据,
+	// ChannelUpdate 会以 "channel key %q does not belong to channel" 拒绝且看不出与该从哪补。
+	grantKeyName := ""
+	for _, k := range existingChan.Keys {
+		if k.Name != "" {
+			grantKeyName = k.Name
+			break
+		}
+	}
+	if grantKeyName == "" {
+		return nil, fmt.Errorf("关联渠道(%d)没有可用凭据，请先在面板为该渠道添加渠道 Key 后重试", account.ChannelID)
+	}
 	grantMap := make(map[string]struct{})
 	for _, g := range existingChan.Grants {
 		grantMap[g.ModelName] = struct{}{}
@@ -836,7 +870,7 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) ([]string, error) {
 		if _, ok := grantMap[m]; !ok {
 			existingChan.Grants = append(existingChan.Grants, model.ChannelGrantConfig{
 				ModelName: m,
-				KeyName:   "default",
+				KeyName:   grantKeyName,
 				Protocols: protoMask,
 			})
 			grantMap[m] = struct{}{}
