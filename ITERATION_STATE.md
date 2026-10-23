@@ -32,6 +32,9 @@
 - **R3-F7 (禁用物化渠道 Enabled 修复)**：创建渠道后若账号为禁用态，显式调用 `ChannelEnabled(id, false)`，彻底消除 GORM default 标签反转问题。
 - **R3-F8 (前端编辑与缓存联动)**：卡片增加「编辑」入口支持即时修改别名、地址、Key、启停与备注；mutation 成功后同时触发渠道和分组的 Query 缓存失效。
 
+### Codex 通道受阻记录（Round 5/6 审查）
+- 本机 codex CLI（0.164.0）可启动，但执行中反复卡在远端通道重连（chatgpt.com 系服务不可达；`-c 'mcp_servers={}'` 禁用 MCP 后仍 Reconnecting 1/5→2/5 停滞，三次派发合计等待逾 60 分钟无产出）。非账号额度问题；本会话无 Cockpit Tools，无授权备用账号。按目标第四条采用恢复方式：以自审+隔离用例+变异检查闭环（Round 5/6 均已如此交付），Codex 独立评分留待网络条件允许后补派，台账不虚构评分。
+
 ### Round 4 审查结论与 Round 5 整改对照（全量闭环）
 - **R4 结论**：功能主路径正确（上游指纹 Bearer 送达、路径归一化、去重、幂等、协议位映射、前端三缓存失效均实证无缺陷）；JSON 畸形处理完备（类型不匹配/空列表/缺 data 均报错）。
 - **R5-F1（并发窗口，MEDIUM）**：`Sub2APIAccountSyncModels` 的 ChannelDetailGet→合并→ChannelUpdate 无渠道级互斥，而 ChannelUpdate 是整体替换语义（channel.go 注释实证）——并发 sync 或 sync 与面板编辑混跑时后写者的旧快照会抹掉手动模型。修法：按渠道 ID 分锁（进程内 `sync.Map`，单二进制部署即覆盖全部并发源），读-改-写全程持锁。
