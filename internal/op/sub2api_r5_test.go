@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/t-yang-only/OctoNexus/internal/model"
 )
@@ -16,7 +17,7 @@ import (
 // ChannelUpdate 是整体替换语义, 无锁时后写者的旧快照会静默抹掉先写者的手动模型;
 // 有锁时 sync 读-写原子, 手动追加不会被吞。20 轮重复消除单轮交错的偶然性。
 func TestSub2APISyncModelsConcurrentKeepsManualModels(t *testing.T) {
-	_, restore := openSub2APITestDB(t)
+	conn, restore := openSub2APITestDB(t)
 	defer restore()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,8 +41,18 @@ func TestSub2APISyncModelsConcurrentKeepsManualModels(t *testing.T) {
 	}
 
 	for round := 0; round < 20; round++ {
+		if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", created.ID).
+			Update("last_sync_at", time.Now().Add(-11*time.Second)).Error; err != nil {
+			t.Fatalf("拨动 LastSyncAt 失败: %v", err)
+		}
 		if _, err := Sub2APIAccountSyncModels(ctx, created.ID); err != nil {
 			t.Fatalf("第 %d 轮基线同步失败: %v", round, err)
+		}
+		// 本用例专测读-改-写互斥(R5-F1): 把最小间隔拨开, 让 8 路 sync 真正并发进入 RMW。
+		// 间隔保护本身由 TestSub2APISyncModelsMinIntervalGuard 覆盖, 两个守卫互不掩盖。
+		if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", created.ID).
+			Update("last_sync_at", time.Now().Add(-11*time.Second)).Error; err != nil {
+			t.Fatalf("第 %d 轮拨动 LastSyncAt 失败: %v", round, err)
 		}
 
 		var wg sync.WaitGroup
@@ -50,7 +61,8 @@ func TestSub2APISyncModelsConcurrentKeepsManualModels(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, err := Sub2APIAccountSyncModels(ctx, created.ID); err != nil {
+				if _, err := Sub2APIAccountSyncModels(ctx, created.ID); err != nil && !strings.Contains(err.Error(), "不足") {
+					// R8 最小间隔保护触发的拒绝是防误连打的合法结果, 不算并发写入失败
 					errCh <- err
 				}
 			}()
@@ -107,7 +119,7 @@ func TestSub2APISyncModelsConcurrentKeepsManualModels(t *testing.T) {
 // 上游新增模型的授权必须挂到 custom-key。改回硬编码时 ChannelUpdate 会以
 // "channel key %q does not belong to channel" 拒绝, 本用例直接红。
 func TestSub2APISyncModelsGrantFollowsRenamedKey(t *testing.T) {
-	_, restore := openSub2APITestDB(t)
+	conn, restore := openSub2APITestDB(t)
 	defer restore()
 
 	serveExtra := false
@@ -154,7 +166,11 @@ func TestSub2APISyncModelsGrantFollowsRenamedKey(t *testing.T) {
 		t.Fatalf("凭据改名失败: %v", err)
 	}
 
-	// 上游新增 model-gamma, sync 必须成功且新授权挂到 custom-key
+	// 上游新增 model-gamma, sync 必须成功且新授权挂到 custom-key(先拨开最小间隔)
+	if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", created.ID).
+		Update("last_sync_at", time.Now().Add(-11*time.Second)).Error; err != nil {
+		t.Fatalf("拨动 LastSyncAt 失败: %v", err)
+	}
 	serveExtra = true
 	synced, err := Sub2APIAccountSyncModels(ctx, created.ID)
 	if err != nil {

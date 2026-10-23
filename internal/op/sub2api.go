@@ -726,6 +726,16 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) (*Sub2APISyncModelsRe
 		return nil, fmt.Errorf("该账号未配置凭据，请先编辑账号补全 API Key 后再同步模型")
 	}
 
+	// R8-F1: 账号级最小间隔保护。误连打(双击/多标签页)会把同样的请求反复打到上游,
+	// 间隔内直接拒绝并告知剩余等待, 不消耗上游配额。零值 LastSyncAt(从未同步)不拦截。
+	const minSyncInterval = 10 * time.Second
+	if !account.LastSyncAt.IsZero() {
+		if wait := minSyncInterval - time.Since(account.LastSyncAt); wait > 0 {
+			return nil, fmt.Errorf("距上次成功同步不足 %d 秒，请 %.0f 秒后重试（防止误连打反复请求上游）",
+				int(minSyncInterval.Seconds()), wait.Seconds())
+		}
+	}
+
 	// R5-F1: 渠道级互斥保护读-改-写窗口: 并发 sync 或 sync 与面板编辑同时进行时,
 	// 后写者会静默覆盖先写者的合并结果。按渠道 ID 分锁, 单二进制部署即覆盖全部并发源。
 	syncLock := syncModelsLockFor(account.ChannelID)
@@ -922,6 +932,11 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) (*Sub2APISyncModelsRe
 			Update("last_sync_models", string(payload)).Error; err != nil {
 			return nil, fmt.Errorf("回写同步基准失败: %w", err)
 		}
+	}
+	// 回写成功时间戳, 作为最小间隔保护的基准
+	if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", account.ID).
+		Update("last_sync_at", time.Now()).Error; err != nil {
+		return nil, fmt.Errorf("回写同步时间失败: %w", err)
 	}
 
 	return &Sub2APISyncModelsResult{

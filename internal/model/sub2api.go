@@ -50,9 +50,11 @@ type Sub2APIAccount struct {
 	// LastSyncModels 记录上一次成功同步时上游返回的模型集合(JSON 数组文本)。
 	// 它是"下架"判据的基准: 只有上次在上游、这次不在的模型才算下架;
 	// 物化预置与手填模型从未进入过该集合, 不会被误报为下架(R6-F1)。
-	LastSyncModels string    `json:"-" gorm:"not null;default:''"`
-	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt      time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	LastSyncModels string `json:"-" gorm:"not null;default:''"`
+	// LastSyncAt 上次成功同步的时间: 入口层做最小间隔保护, 防误连打把请求打到上游 (R8-F1)
+	LastSyncAt time.Time `json:"-" gorm:"autoUpdateTime:false"`
+	CreatedAt  time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt  time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (Sub2APIAccount) TableName() string {

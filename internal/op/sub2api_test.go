@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/t-yang-only/OctoNexus/internal/db"
@@ -538,7 +539,7 @@ func TestSub2APIDisabledAccountMaterializesDisabledChannel(t *testing.T) {
 // 前者用假上游记录 Authorization 头与请求路径（mock 不校验密钥，HTTP 200 不代表解密生效），
 // 后者按名称逐条断言模型与授权，避免被物化时预置的默认模型数干扰。
 func TestSub2APISyncModelsDynamicDiscovery(t *testing.T) {
-	_, restore := openSub2APITestDB(t)
+	conn, restore := openSub2APITestDB(t)
 	defer restore()
 
 	var gotAuth, gotPath string
@@ -618,7 +619,11 @@ func TestSub2APISyncModelsDynamicDiscovery(t *testing.T) {
 		}
 	}
 
-	// 幂等：再次同步不得重复追加
+	// 幂等：再次同步不得重复追加(先拨开 R8 最小间隔)
+	if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", created.ID).
+		Update("last_sync_at", time.Now().Add(-11*time.Second)).Error; err != nil {
+		t.Fatalf("拨动 LastSyncAt 失败: %v", err)
+	}
 	again, err := Sub2APIAccountSyncModels(ctx, created.ID)
 	if err != nil {
 		t.Fatalf("二次同步失败: %v", err)

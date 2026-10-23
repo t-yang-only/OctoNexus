@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/t-yang-only/OctoNexus/internal/model"
 )
@@ -12,7 +13,7 @@ import (
 // R6-F1: 同步结果必须可观测 —— Added 只报本次新并入, Stale 只报上游已下架。
 // 关键不变量: Stale 仅罗列, 绝不在 sync 内删除对应模型(人工配置保护, R3-F1 教训)。
 func TestSub2APISyncModelsReportsAddedAndStale(t *testing.T) {
-	_, restore := openSub2APITestDB(t)
+	conn, restore := openSub2APITestDB(t)
 	defer restore()
 
 	serve := `{"data":[{"id":"model-alpha"},{"id":"model-beta"}]}`
@@ -45,7 +46,11 @@ func TestSub2APISyncModelsReportsAddedAndStale(t *testing.T) {
 		t.Fatalf("首次同步 Added 应为 2、Stale 应为 0, 实际 added=%v stale=%v", first.Added, first.Stale)
 	}
 
-	// 上游扩容: Added 只报新增的那一个, 不得把旧模型算成新增
+	// 上游扩容: Added 只报新增的那一个, 不得把旧模型算成新增(先拨开最小间隔)
+	if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", created.ID).
+		Update("last_sync_at", time.Now().Add(-11*time.Second)).Error; err != nil {
+		t.Fatalf("拨动 LastSyncAt 失败: %v", err)
+	}
 	serve = `{"data":[{"id":"model-alpha"},{"id":"model-beta"},{"id":"model-gamma"}]}`
 	second, err := Sub2APIAccountSyncModels(ctx, created.ID)
 	if err != nil {
@@ -58,7 +63,11 @@ func TestSub2APISyncModelsReportsAddedAndStale(t *testing.T) {
 		t.Fatalf("上游扩容时不应有 Stale, 实际: %v", second.Stale)
 	}
 
-	// 上游缩容: Stale 报出下架模型, 且这些模型必须仍留在渠道里(只报告不删除)
+	// 上游缩容: Stale 报出下架模型, 且这些模型必须仍留在渠道里(只报告不删除, 先拨开最小间隔)
+	if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", created.ID).
+		Update("last_sync_at", time.Now().Add(-11*time.Second)).Error; err != nil {
+		t.Fatalf("拨动 LastSyncAt 失败: %v", err)
+	}
 	serve = `{"data":[{"id":"model-alpha"}]}`
 	third, err := Sub2APIAccountSyncModels(ctx, created.ID)
 	if err != nil {
