@@ -123,7 +123,16 @@ export function useSyncSub2APIModels() {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: (id: number) =>
-            apiRequest<{ id: number; synced: boolean; models: string[]; count: number }>(
+            apiRequest<{
+                id: number;
+                synced: boolean;
+                models: string[];
+                count: number;
+                added: string[];
+                added_count: number;
+                stale: string[];
+                stale_count: number;
+            }>(
                 `/api/v1/sub2api/accounts/${id}/sync-models`,
                 { method: 'POST' }
             ),

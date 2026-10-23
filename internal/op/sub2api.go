@@ -699,7 +699,16 @@ func syncModelsLockFor(channelID int) *sync.Mutex {
 }
 
 // Sub2APIAccountSyncModels 动态从上游 /v1/models 拉取真实可用模型并增量同步至物化渠道和自动分组
-func Sub2APIAccountSyncModels(ctx context.Context, id int) ([]string, error) {
+// Sub2APISyncModelsResult 动态模型同步结果。
+// Stale 是「上游已不再返回、但渠道里仍有」的模型: 只报告不删除 —— 渠道模型可能含
+// 人工手填与历史授权(R3-F1 的保护教训), 自动清理会误伤, 必须由运维在面板确认后处理。
+type Sub2APISyncModelsResult struct {
+	Models []string `json:"models"` // 同步后渠道全量模型
+	Added  []string `json:"added"`  // 本次新并入的模型
+	Stale  []string `json:"stale"`  // 上游已下架但渠道仍有的模型(待人工确认)
+}
+
+func Sub2APIAccountSyncModels(ctx context.Context, id int) (*Sub2APISyncModelsResult, error) {
 	conn := db.GetDB()
 	if conn == nil {
 		return nil, fmt.Errorf("数据库连接不可用")
@@ -841,10 +850,36 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) ([]string, error) {
 	for _, m := range existingChan.Models {
 		modelMap[m] = struct{}{}
 	}
+	var addedModels []string
 	for _, m := range upstreamModels {
 		if _, exists := modelMap[m]; !exists {
 			existingChan.Models = append(existingChan.Models, m)
 			modelMap[m] = struct{}{}
+			addedModels = append(addedModels, m)
+		}
+	}
+
+	// 下架判据的基准是「上一次成功同步时上游返回的集合」而非「渠道当前模型」:
+	// 物化预置与运维手填的模型从未进入过该集合, 用渠道存量当基准会把它们误报成下架。
+	// 首次同步(无基准)不报 Stale —— 没有"上次"就无从判断"下架"。
+	var lastSyncModels []string
+	if account.LastSyncModels != "" {
+		if err := json.Unmarshal([]byte(account.LastSyncModels), &lastSyncModels); err != nil {
+			lastSyncModels = nil // 坏基准按无基准处理, 不阻断同步主流程
+		}
+	}
+	lastSyncSet := make(map[string]struct{}, len(lastSyncModels))
+	for _, m := range lastSyncModels {
+		lastSyncSet[m] = struct{}{}
+	}
+	upstreamSet := make(map[string]struct{}, len(upstreamModels))
+	for _, m := range upstreamModels {
+		upstreamSet[m] = struct{}{}
+	}
+	var staleModels []string
+	for _, m := range lastSyncModels {
+		if _, gone := upstreamSet[m]; !gone {
+			staleModels = append(staleModels, m)
 		}
 	}
 
@@ -881,5 +916,17 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) ([]string, error) {
 		return nil, fmt.Errorf("更新渠道模型授权失败: %w", err)
 	}
 
-	return existingChan.Models, nil
+	// 成功后回写本次上游集合, 作为下一次同步的下架判据基准
+	if payload, err := json.Marshal(upstreamModels); err == nil {
+		if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", account.ID).
+			Update("last_sync_models", string(payload)).Error; err != nil {
+			return nil, fmt.Errorf("回写同步基准失败: %w", err)
+		}
+	}
+
+	return &Sub2APISyncModelsResult{
+		Models: existingChan.Models,
+		Added:  addedModels,
+		Stale:  staleModels,
+	}, nil
 }

@@ -582,7 +582,7 @@ func TestSub2APISyncModelsDynamicDiscovery(t *testing.T) {
 	}
 
 	countAlpha, countBeta := 0, 0
-	for _, m := range synced {
+	for _, m := range synced.Models {
 		switch m {
 		case "model-alpha":
 			countAlpha++
@@ -591,7 +591,7 @@ func TestSub2APISyncModelsDynamicDiscovery(t *testing.T) {
 		}
 	}
 	if countAlpha != 1 || countBeta != 1 {
-		t.Fatalf("去重后 model-alpha/beta 应各出现一次: %v", synced)
+		t.Fatalf("去重后 model-alpha/beta 应各出现一次: %v", synced.Models)
 	}
 
 	// 落库层：渠道模型与授权按名称逐条核对
@@ -624,7 +624,7 @@ func TestSub2APISyncModelsDynamicDiscovery(t *testing.T) {
 		t.Fatalf("二次同步失败: %v", err)
 	}
 	againAlpha, againBeta := 0, 0
-	for _, m := range again {
+	for _, m := range again.Models {
 		switch m {
 		case "model-alpha":
 			againAlpha++
@@ -633,7 +633,7 @@ func TestSub2APISyncModelsDynamicDiscovery(t *testing.T) {
 		}
 	}
 	if againAlpha != 1 || againBeta != 1 {
-		t.Fatalf("二次同步后模型被重复追加: %v", again)
+		t.Fatalf("二次同步后模型被重复追加: %v", again.Models)
 	}
 }
 

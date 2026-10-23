@@ -26,29 +26,33 @@ const (
 type Sub2APIAccountType string
 
 const (
-	Sub2APIAccountTypeOAuth      Sub2APIAccountType = "oauth"      // OAuth订阅反代账号
-	Sub2APIAccountTypeAPIKey     Sub2APIAccountType = "apikey"     // 平台标准 API Key / Session Token
-	Sub2APIAccountTypeSetupToken Sub2APIAccountType = "setup-token"// Claude Setup Token
+	Sub2APIAccountTypeOAuth      Sub2APIAccountType = "oauth"       // OAuth订阅反代账号
+	Sub2APIAccountTypeAPIKey     Sub2APIAccountType = "apikey"      // 平台标准 API Key / Session Token
+	Sub2APIAccountTypeSetupToken Sub2APIAccountType = "setup-token" // Claude Setup Token
 )
 
 // Sub2APIAccount 接入 Sub2API 的统一订阅账号与反代配置
 type Sub2APIAccount struct {
-	ID           int                `json:"id" gorm:"primaryKey"`
-	Name         string             `json:"name" gorm:"not null"`
-	Platform     Sub2APIPlatform    `json:"platform" gorm:"not null;index"`
-	AccountType  Sub2APIAccountType `json:"account_type" gorm:"not null;default:'oauth'"`
-	BaseURL      string             `json:"base_url" gorm:"not null"` // 反代目标基地址
-	AccountMode  string             `json:"account_mode" gorm:"not null;default:'payg'"` // payg | coding | go
-	APIProtocol  string             `json:"api_protocol" gorm:"not null;default:'chat_completions'"` // chat_completions | responses | anthropic | adaptive
-	Enabled      bool               `json:"enabled" gorm:"not null"` // 默认值在入口层赋予，禁止 gorm default:true 避免覆写显式 false
-	ProxyNodeID  int                `json:"proxy_node_id" gorm:"not null;default:0"` // 出口节点绑定
-	RateLimit    int                `json:"rate_limit" gorm:"not null;default:0"`    // 并发或RPM限制
-	Credentials  string             `json:"-" gorm:"not null;default:''"`            // 加密存储的凭据 JSON
-	Extra        string             `json:"extra" gorm:"not null;default:'{}'"`      // 自定义请求头覆写或高级配置
-	Notes        string             `json:"notes"`
-	ChannelID    int                `json:"channel_id" gorm:"not null;default:0"`    // 物化绑定的渠道 ID
-	CreatedAt    time.Time          `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt    time.Time          `json:"updated_at" gorm:"autoUpdateTime"`
+	ID          int                `json:"id" gorm:"primaryKey"`
+	Name        string             `json:"name" gorm:"not null"`
+	Platform    Sub2APIPlatform    `json:"platform" gorm:"not null;index"`
+	AccountType Sub2APIAccountType `json:"account_type" gorm:"not null;default:'oauth'"`
+	BaseURL     string             `json:"base_url" gorm:"not null"`                                // 反代目标基地址
+	AccountMode string             `json:"account_mode" gorm:"not null;default:'payg'"`             // payg | coding | go
+	APIProtocol string             `json:"api_protocol" gorm:"not null;default:'chat_completions'"` // chat_completions | responses | anthropic | adaptive
+	Enabled     bool               `json:"enabled" gorm:"not null"`                                 // 默认值在入口层赋予，禁止 gorm default:true 避免覆写显式 false
+	ProxyNodeID int                `json:"proxy_node_id" gorm:"not null;default:0"`                 // 出口节点绑定
+	RateLimit   int                `json:"rate_limit" gorm:"not null;default:0"`                    // 并发或RPM限制
+	Credentials string             `json:"-" gorm:"not null;default:''"`                            // 加密存储的凭据 JSON
+	Extra       string             `json:"extra" gorm:"not null;default:'{}'"`                      // 自定义请求头覆写或高级配置
+	Notes       string             `json:"notes"`
+	ChannelID   int                `json:"channel_id" gorm:"not null;default:0"` // 物化绑定的渠道 ID
+	// LastSyncModels 记录上一次成功同步时上游返回的模型集合(JSON 数组文本)。
+	// 它是"下架"判据的基准: 只有上次在上游、这次不在的模型才算下架;
+	// 物化预置与手填模型从未进入过该集合, 不会被误报为下架(R6-F1)。
+	LastSyncModels string    `json:"-" gorm:"not null;default:''"`
+	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt      time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (Sub2APIAccount) TableName() string {
@@ -124,4 +128,3 @@ func ValidateSub2APIRateLimit(limit int) error {
 	}
 	return nil
 }
-

@@ -131,7 +131,7 @@ func sub2apiAccountSyncModels(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, "非法账号 ID")
 		return
 	}
-	synced, err := op.Sub2APIAccountSyncModels(c.Request.Context(), id)
+	result, err := op.Sub2APIAccountSyncModels(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, op.ErrSub2APIAccountNotFound) {
 			resp.Error(c, http.StatusNotFound, "账号不存在")
@@ -141,9 +141,13 @@ func sub2apiAccountSyncModels(c *gin.Context) {
 		return
 	}
 	resp.Success(c, gin.H{
-		"id":      id,
-		"synced":  true,
-		"models":  synced,
-		"count":   len(synced),
+		"id":          id,
+		"synced":      true,
+		"models":      result.Models,
+		"count":       len(result.Models),
+		"added":       result.Added,
+		"added_count": len(result.Added),
+		"stale":       result.Stale,
+		"stale_count": len(result.Stale),
 	})
 }

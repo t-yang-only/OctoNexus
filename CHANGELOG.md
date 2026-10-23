@@ -2,6 +2,13 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.43] - 2026-10-24
+### Added
+- **同步结果可观测化 (Round 6)**：`POST /api/v1/sub2api/accounts/:id/sync-models` 返回新增 `added`/`added_count`（本次新并入的模型）与 `stale`/`stale_count`（上游已下架的模型）。前端 toast 从「成功同步 N 个」升级为「新增 X 个，当前共 N 个；上游已下架 Y 个（未自动删除，请到渠道页人工确认）」。
+- **下架判据基准 (R6-F1)**：`sub2api_accounts.last_sync_models` 记录上次成功同步时上游返回的集合（AutoMigrate 加列）。Stale 只报「上次在上游、这次不在」的模型——物化预置与手填模型从未进入该集合，不会被误报成下架；首次同步无基准不报。Stale 仅罗列，绝不自动删除（R3-F1 人工配置保护）。
+### Tests
+- `internal/op/sub2api_r6_test.go`：首次 Added=2/Stale=0；上游扩容 Added 仅含新模型；上游缩容 Stale 报出下架且模型仍在渠道（只报告不删除）。变异（用渠道存量当下架基准）→ 首次同步即误报 5 个预置模型，用例红。
+
 ## [v0.79.42] - 2026-10-24
 ### Fixed
 - **并发读-改-写窗口互斥 (R5-F1)**：`Sub2APIAccountSyncModels` 的「读渠道 → 合并模型/授权 → 写渠道」全程按渠道 ID 分锁（进程内 `sync.Map` 互斥）。此前并发 sync 或 sync 与面板编辑同时进行时，后写者的旧快照会经 ChannelUpdate 的整体替换语义静默抹掉先写者的手动模型。

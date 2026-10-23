@@ -161,13 +161,13 @@ func TestSub2APISyncModelsGrantFollowsRenamedKey(t *testing.T) {
 		t.Fatalf("改名后同步失败(授权仍按硬编码 default 寻址): %v", err)
 	}
 	foundGamma := false
-	for _, m := range synced {
+	for _, m := range synced.Models {
 		if m == "model-gamma" {
 			foundGamma = true
 		}
 	}
 	if !foundGamma {
-		t.Fatalf("同步结果缺少 model-gamma: %v", synced)
+		t.Fatalf("同步结果缺少 model-gamma: %v", synced.Models)
 	}
 	after, err := ChannelDetailGet(created.ChannelID)
 	if err != nil {

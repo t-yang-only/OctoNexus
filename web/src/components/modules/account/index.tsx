@@ -68,7 +68,10 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
     const handleSyncModels = () => {
         syncModelsMutation.mutate(account.id, {
             onSuccess: (res) => {
-                toast.success(`成功同步 ${res.count} 个上游模型至关联渠道与分组！`);
+                const staleHint = res.stale_count > 0
+                    ? `；上游已下架 ${res.stale_count} 个（未自动删除，请到渠道页人工确认）`
+                    : '';
+                toast.success(`成功同步：新增 ${res.added_count} 个模型，当前共 ${res.count} 个${staleHint}`);
             },
             onError: (err) => {
                 toast.error('同步模型失败: ' + err.message);
