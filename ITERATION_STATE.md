@@ -55,4 +55,4 @@
 - 当前周期累计已完成轮次：6 / 10
 - 下次 Server 酱汇报阈值：Round 10
 - Round 5 已部署上线（v0.79.42，HK4H8G apidate，验证：Version/Commit、匿名 401、资产 hash 一致、DB 无损 channels=21/keys=60/sealed=60/groups=349）。
-Round 6 代码闭环待部署（v0.79.43，含前端改动，构建→上线流程同 Round 5）。
+Round 6 已部署上线（v0.79.43 @ 7adf6fa，含前端改动）：线上资产 index-DKJ-G_RL.js 与本地构建一致、匿名 401、Version/Commit 正确、DB 无损（21/60/sealed60/349）。
