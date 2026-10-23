@@ -2,6 +2,10 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.44] - 2026-10-24
+### Added
+- **同步最小间隔保护 (Round 8, R8-F1)**：同一账号 10 秒内的重复 sync 直接拒绝并提示剩余等待秒数，误连打（双击/多标签页）不再把同样的请求反复打到上游；`last_sync_at` 由 AutoMigrate 加列。R4/R5/R6 的连续同步判据相应拨开间隔，各守卫用例互不掩盖（R5-F1 去锁变异复验仍命中）。
+
 ## [v0.79.43] - 2026-10-24
 ### Added
 - **同步结果可观测化 (Round 6)**：`POST /api/v1/sub2api/accounts/:id/sync-models` 返回新增 `added`/`added_count`（本次新并入的模型）与 `stale`/`stale_count`（上游已下架的模型）。前端 toast 从「成功同步 N 个」升级为「新增 X 个，当前共 N 个；上游已下架 Y 个（未自动删除，请到渠道页人工确认）」。
