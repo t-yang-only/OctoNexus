@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import {
     CheckCircle2,
     CircleAlert,
+    Download,
     Loader2,
     Pencil,
     Plus,
@@ -23,6 +24,7 @@ import {
     useDeleteSub2APIAccount,
     useProbeSub2APIAccount,
     useUpdateSub2APIAccount,
+    useSyncSub2APIModels,
     type Sub2APIAccount,
     type Sub2APIPlatform,
     type Sub2APIAccountType,
@@ -44,6 +46,7 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
     const deleteMutation = useDeleteSub2APIAccount();
     const probeMutation = useProbeSub2APIAccount();
     const updateMutation = useUpdateSub2APIAccount();
+    const syncModelsMutation = useSyncSub2APIModels();
     const [probeResult, setProbeResult] = useState<string | null>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState(account.name);
@@ -61,6 +64,17 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
         }
     };
 
+
+    const handleSyncModels = () => {
+        syncModelsMutation.mutate(account.id, {
+            onSuccess: (res) => {
+                toast.success(`成功同步 ${res.count} 个上游模型至关联渠道与分组！`);
+            },
+            onError: (err) => {
+                toast.error('同步模型失败: ' + err.message);
+            },
+        });
+    };
     const handleProbe = () => {
         setProbeResult(null);
         probeMutation.mutate(account.id, {
@@ -206,6 +220,19 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
                         {probeMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 size-3.5" />}
                         测试连接
                     </Button>
+                    {account.channel_id && account.channel_id > 0 ? (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 rounded-xl text-xs"
+                            onClick={handleSyncModels}
+                            disabled={syncModelsMutation.isPending}
+                        >
+                            {syncModelsMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Download className="mr-1.5 size-3.5" />}
+                            同步模型
+                        </Button>
+                    ) : null}
                     <Button
                         type="button"
                         variant="ghost"

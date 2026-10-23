@@ -3,6 +3,7 @@ package op
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,11 +117,11 @@ func TestSub2APIEnabledFalsePreserved(t *testing.T) {
 
 	// 显式传 false，必须在落库后依然保持 false（守住 F4）
 	req := Sub2APIAccountCreateRequest{
-		Name:        "禁用账号",
-		Platform:    model.Sub2APIPlatformOpenAI,
-		BaseURL:     "https://api.openai.com",
-		ApiKey:      "sk-test",
-		Enabled:     boolPtr(false),
+		Name:     "禁用账号",
+		Platform: model.Sub2APIPlatformOpenAI,
+		BaseURL:  "https://api.openai.com",
+		ApiKey:   "sk-test",
+		Enabled:  boolPtr(false),
 	}
 	created, err := Sub2APIAccountCreate(ctx, req)
 	if err != nil {
@@ -365,10 +366,10 @@ func TestSub2APIAccountChannelCustomHeaderNoSensitive(t *testing.T) {
 	ctx := context.Background()
 
 	req := Sub2APIAccountCreateRequest{
-		Name:        "头安全测试",
-		Platform:    model.Sub2APIPlatformAnthropic,
-		BaseURL:     "https://api.anthropic.com",
-		ApiKey:      "sk-ant-test",
+		Name:     "头安全测试",
+		Platform: model.Sub2APIPlatformAnthropic,
+		BaseURL:  "https://api.anthropic.com",
+		ApiKey:   "sk-ant-test",
 		Headers: map[string]string{
 			"Authorization": "Bearer secret-auth-header-leak",
 			"Cookie":        "secret-cookie-leak",
@@ -530,5 +531,157 @@ func TestSub2APIDisabledAccountMaterializesDisabledChannel(t *testing.T) {
 	}
 	if cached.Enabled {
 		t.Fatalf("渠道缓存中的 Enabled 也必须为 false！")
+	}
+}
+
+// 动态模型发现的判据必须落在"上游收到了什么"与"库里落成了什么"两层：
+// 前者用假上游记录 Authorization 头与请求路径（mock 不校验密钥，HTTP 200 不代表解密生效），
+// 后者按名称逐条断言模型与授权，避免被物化时预置的默认模型数干扰。
+func TestSub2APISyncModelsDynamicDiscovery(t *testing.T) {
+	_, restore := openSub2APITestDB(t)
+	defer restore()
+
+	var gotAuth, gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		// 故意返回重复 ID：去重是本功能的硬性质
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-alpha"},{"id":"model-beta"},{"id":"model-alpha"}]}`))
+	}))
+	defer upstream.Close()
+
+	ctx := context.Background()
+	created, err := Sub2APIAccountCreate(ctx, Sub2APIAccountCreateRequest{
+		Name:        "动态模型同步账号",
+		Platform:    model.Sub2APIPlatformOpenAI,
+		APIProtocol: "chat_completions",
+		BaseURL:     upstream.URL,
+		ApiKey:      "sk-sync-test-001",
+		Enabled:     boolPtr(true),
+		SyncChannel: true,
+	})
+	if err != nil {
+		t.Fatalf("创建账号失败: %v", err)
+	}
+	if created.ChannelID == 0 {
+		t.Fatalf("SyncChannel=true 但未分配 ChannelID")
+	}
+
+	synced, err := Sub2APIAccountSyncModels(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("动态模型同步失败: %v", err)
+	}
+
+	// 上游指纹：解密后的 api_key 必须以 Bearer 送达，且路径归一化为 /v1/models
+	if gotAuth != "Bearer sk-sync-test-001" {
+		t.Fatalf("上游收到的 Authorization 不正确: %q", gotAuth)
+	}
+	if gotPath != "/v1/models" {
+		t.Fatalf("上游收到的模型路径不正确: %q", gotPath)
+	}
+
+	countAlpha, countBeta := 0, 0
+	for _, m := range synced {
+		switch m {
+		case "model-alpha":
+			countAlpha++
+		case "model-beta":
+			countBeta++
+		}
+	}
+	if countAlpha != 1 || countBeta != 1 {
+		t.Fatalf("去重后 model-alpha/beta 应各出现一次: %v", synced)
+	}
+
+	// 落库层：渠道模型与授权按名称逐条核对
+	detail, err := ChannelDetailGet(created.ChannelID)
+	if err != nil {
+		t.Fatalf("读渠道详情失败: %v", err)
+	}
+	haveModels := make(map[string]struct{}, len(detail.Models))
+	for _, m := range detail.Models {
+		haveModels[m] = struct{}{}
+	}
+	for _, want := range []string{"model-alpha", "model-beta"} {
+		if _, ok := haveModels[want]; !ok {
+			t.Fatalf("渠道模型缺少 %s: %v", want, detail.Models)
+		}
+	}
+	haveGrants := make(map[string]struct{}, len(detail.Grants))
+	for _, g := range detail.Grants {
+		haveGrants[g.ModelName] = struct{}{}
+	}
+	for _, m := range detail.Models {
+		if _, ok := haveGrants[m]; !ok {
+			t.Fatalf("模型 %s 缺少授权", m)
+		}
+	}
+
+	// 幂等：再次同步不得重复追加
+	again, err := Sub2APIAccountSyncModels(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("二次同步失败: %v", err)
+	}
+	againAlpha, againBeta := 0, 0
+	for _, m := range again {
+		switch m {
+		case "model-alpha":
+			againAlpha++
+		case "model-beta":
+			againBeta++
+		}
+	}
+	if againAlpha != 1 || againBeta != 1 {
+		t.Fatalf("二次同步后模型被重复追加: %v", again)
+	}
+}
+
+// 守卫分支：未物化、上游故障、账号不存在三条路径必须各自可辨识地失败。
+func TestSub2APISyncModelsGuards(t *testing.T) {
+	conn, restore := openSub2APITestDB(t)
+	defer restore()
+	ctx := context.Background()
+
+	unsynced := model.Sub2APIAccount{
+		Name:     "未物化账号",
+		Platform: model.Sub2APIPlatformOpenAI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := conn.Create(&unsynced).Error; err != nil {
+		t.Fatalf("造数据失败: %v", err)
+	}
+	if _, err := Sub2APIAccountSyncModels(ctx, unsynced.ID); err == nil {
+		t.Fatalf("ChannelID=0 的账号未被拒绝")
+	}
+
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failing.Close()
+
+	created, err := Sub2APIAccountCreate(ctx, Sub2APIAccountCreateRequest{
+		Name:        "上游故障账号",
+		Platform:    model.Sub2APIPlatformOpenAI,
+		APIProtocol: "chat_completions",
+		BaseURL:     failing.URL,
+		ApiKey:      "sk-fail-test",
+		Enabled:     boolPtr(true),
+		SyncChannel: true,
+	})
+	if err != nil {
+		t.Fatalf("创建账号失败: %v", err)
+	}
+	if _, err := Sub2APIAccountSyncModels(ctx, created.ID); err == nil {
+		t.Fatalf("上游 500 未被识别为错误")
+	}
+	// 上游故障后渠道详情仍可读（未被写坏）
+	if _, err := ChannelDetailGet(created.ChannelID); err != nil {
+		t.Fatalf("上游故障后渠道详情不可读: %v", err)
+	}
+
+	if _, err := Sub2APIAccountSyncModels(ctx, 999999); !errors.Is(err, ErrSub2APIAccountNotFound) {
+		t.Fatalf("不存在的账号应返回 ErrSub2APIAccountNotFound，实际: %v", err)
 	}
 }

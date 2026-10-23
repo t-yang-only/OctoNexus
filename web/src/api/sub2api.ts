@@ -118,3 +118,19 @@ export function useUpdateSub2APIAccount() {
         },
     });
 }
+
+export function useSyncSub2APIModels() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (id: number) =>
+            apiRequest<{ id: number; synced: boolean; models: string[]; count: number }>(
+                `/api/v1/sub2api/accounts/${id}/sync-models`,
+                { method: 'POST' }
+            ),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: sub2apiAccountListQueryKey });
+            void queryClient.invalidateQueries({ queryKey: ['channel', 'list'] });
+            void queryClient.invalidateQueries({ queryKey: ['group', 'list'] });
+        },
+    });
+}

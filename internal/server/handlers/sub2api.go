@@ -37,6 +37,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/accounts/:id/probe", http.MethodPost).
 				Handle(sub2apiAccountProbe),
+		).
+		AddRoute(
+			router.NewRoute("/accounts/:id/sync-models", http.MethodPost).
+				Handle(sub2apiAccountSyncModels),
 		)
 }
 
@@ -118,4 +122,28 @@ func sub2apiAccountUpdate(c *gin.Context) {
 		return
 	}
 	resp.Success(c, acct)
+}
+
+func sub2apiAccountSyncModels(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, "非法账号 ID")
+		return
+	}
+	synced, err := op.Sub2APIAccountSyncModels(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, op.ErrSub2APIAccountNotFound) {
+			resp.Error(c, http.StatusNotFound, "账号不存在")
+			return
+		}
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, gin.H{
+		"id":      id,
+		"synced":  true,
+		"models":  synced,
+		"count":   len(synced),
+	})
 }

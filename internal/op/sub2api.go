@@ -687,3 +687,165 @@ func Sub2APIAccountProbe(ctx context.Context, id int) (string, error) {
 
 	return fmt.Sprintf("HTTP %d (%s)", resp.StatusCode, resp.Status), nil
 }
+
+// Sub2APIAccountSyncModels 动态从上游 /v1/models 拉取真实可用模型并增量同步至物化渠道和自动分组
+func Sub2APIAccountSyncModels(ctx context.Context, id int) ([]string, error) {
+	conn := db.GetDB()
+	if conn == nil {
+		return nil, fmt.Errorf("数据库连接不可用")
+	}
+	var account model.Sub2APIAccount
+	if err := conn.First(&account, id).Error; err != nil {
+		return nil, ErrSub2APIAccountNotFound
+	}
+	if account.ChannelID == 0 {
+		return nil, fmt.Errorf("该账号尚未物化为渠道，请先开启物化渠道")
+	}
+
+	trimmedBase := strings.TrimRight(strings.TrimSpace(account.BaseURL), "/")
+	modelsURL := strings.TrimSuffix(trimmedBase, "/v1") + "/v1/models"
+
+	var authBearer string
+	requestHeaders := make(map[string]string)
+
+	if account.Credentials != "" {
+		plainCreds, err := secret.OpenWith(sub2apiSecretAAD, account.Credentials)
+		if err != nil {
+			return nil, fmt.Errorf("凭据解密失败: %w", err)
+		}
+		var credsMap map[string]any
+		if err := json.Unmarshal([]byte(plainCreds), &credsMap); err != nil {
+			return nil, fmt.Errorf("凭据解析失败: %w", err)
+		}
+		if k, ok := credsMap["api_key"].(string); ok && k != "" {
+			authBearer = k
+		}
+		if hdrs, ok := credsMap["headers"].(map[string]any); ok {
+			for hk, hv := range hdrs {
+				if hvs, ok := hv.(string); ok && hk != "" && hvs != "" {
+					requestHeaders[hk] = hvs
+				}
+			}
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建模型拉取请求失败: %w", err)
+	}
+
+	for k, v := range requestHeaders {
+		req.Header.Set(k, v)
+	}
+	if authBearer != "" && req.Header.Get("Authorization") == "" {
+		req.Header.Set("Authorization", "Bearer "+authBearer)
+	}
+
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+	}
+	if account.ProxyNodeID > 0 {
+		endpoint, err := ProxyNodeEndpoint(account.ProxyNodeID)
+		if err != nil {
+			return nil, fmt.Errorf("绑定出口节点不可用: %w", err)
+		}
+		parsedProxy, err := url.Parse(endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("解析出口节点地址失败: %w", err)
+		}
+		transport.Proxy = http.ProxyURL(parsedProxy)
+	}
+
+	client := &http.Client{
+		Timeout:   15 * time.Second,
+		Transport: transport,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求上游模型列表失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("上游模型端点返回错误 HTTP %d (%s)", resp.StatusCode, resp.Status)
+	}
+
+	type modelEntry struct {
+		ID string `json:"id"`
+	}
+	type modelListResp struct {
+		Data []modelEntry `json:"data"`
+	}
+
+	var listData modelListResp
+	if err := json.NewDecoder(resp.Body).Decode(&listData); err != nil {
+		return nil, fmt.Errorf("解析上游模型 JSON 失败: %w", err)
+	}
+
+	if len(listData.Data) == 0 {
+		return nil, fmt.Errorf("上游模型列表为空")
+	}
+
+	var upstreamModels []string
+	seen := make(map[string]struct{})
+	for _, m := range listData.Data {
+		tid := strings.TrimSpace(m.ID)
+		if tid != "" {
+			if _, ok := seen[tid]; !ok {
+				seen[tid] = struct{}{}
+				upstreamModels = append(upstreamModels, tid)
+			}
+		}
+	}
+
+	// 增量同步至关联物化渠道
+	existingChan, err := ChannelDetailGet(account.ChannelID)
+	if err != nil {
+		return nil, fmt.Errorf("读取关联渠道(%d)失败: %w", account.ChannelID, err)
+	}
+
+	protoMask := model.ProtocolOpenAIChatCompletion
+	switch account.APIProtocol {
+	case "responses":
+		protoMask = model.ProtocolOpenAIResponse
+	case "anthropic":
+		protoMask = model.ProtocolAnthropicMessage
+	case "adaptive":
+		protoMask = model.ProtocolOpenAIChatCompletion | model.ProtocolOpenAIResponse | model.ProtocolAnthropicMessage
+	}
+
+	// 合并并去重现有模型与上游拉取的动态模型
+	modelMap := make(map[string]struct{})
+	for _, m := range existingChan.Models {
+		modelMap[m] = struct{}{}
+	}
+	for _, m := range upstreamModels {
+		if _, exists := modelMap[m]; !exists {
+			existingChan.Models = append(existingChan.Models, m)
+			modelMap[m] = struct{}{}
+		}
+	}
+
+	// 确保所有合并后的模型均包含授权
+	grantMap := make(map[string]struct{})
+	for _, g := range existingChan.Grants {
+		grantMap[g.ModelName] = struct{}{}
+	}
+	for _, m := range existingChan.Models {
+		if _, ok := grantMap[m]; !ok {
+			existingChan.Grants = append(existingChan.Grants, model.ChannelGrantConfig{
+				ModelName: m,
+				KeyName:   "default",
+				Protocols: protoMask,
+			})
+			grantMap[m] = struct{}{}
+		}
+	}
+
+	if _, err := ChannelUpdate(&existingChan, ctx); err != nil {
+		return nil, fmt.Errorf("更新渠道模型授权失败: %w", err)
+	}
+
+	return existingChan.Models, nil
+}
