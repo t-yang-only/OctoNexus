@@ -18,7 +18,7 @@
 | **Round 3** | 渠道物化深度联动、更新一致性与敏感头全链路隔离 | `v0.79.40` | **68 / 100** (已复审) | 交付就绪 | 彻底解决 R3-F1~R3-F8 全部缺陷：增量保护渠道人工配置、CustomHeader 密文存储与 Relay 动态解密注入、全链路一致性与解绑阻断、数据库 018 历史脱敏迁移、前端编辑与多缓存联动 |
 | **Round 4** | 动态模型发现与渠道分组自动同步 | `c437216` + `ca1d5c6` (v0.79.41) | 自审闭环（Codex 交叉验证因宿主重启中断，明确记录为未完成） | 已部署 | 新增 `POST /api/v1/sub2api/accounts/:id/sync-models`：上游 `/v1/models` 拉取 → 去重 → 增量合并进物化渠道模型/授权（协议位随 APIProtocol 自适应）；12 项单测（上游指纹/去重/幂等/三条守卫）全绿；HK4H8G apidate 热部署验证（commit c4372162，前端资产 hash 一致） |
 | **Round 5** | Round 4 功能独立审查闭环（自审 + 判据 + 变异） | 本轮提交 (v0.79.42) | 自审（Codex 派发反复被宿主重启中断，改以自审+变异检查闭环并如实记录） | 已部署 | 修复 R5-F1（sync 读-改-写窗口无渠道级互斥，并发覆盖手动模型）/ R5-F2（grant 硬编码 default，凭据被改名后报不可执行错误）/ R5-F3（无凭据账号静默发无认证请求）；3 项隔离用例 + 3 项变异全部命中，还原后 op 包全绿 |
-| **Round 6** | 同步结果可观测化（新增/下架报告） | 本轮提交 (v0.79.43) | 待 Codex 审查 | 代码闭环待部署 | sync 返回值与前端 toast 新增 added/stale 报告；`last_sync_models` 基准字段（AutoMigrate）使下架判据只认「上次在上游」——首轮实现曾把物化预置模型误报为下架，由 R6 用例当场抓出后改为基准制；Stale 只报告不自动删除 |
+| **Round 6** | 同步结果可观测化（新增/下架报告） | 本轮提交 (v0.79.43) | 待 Codex 审查 | 已部署 | sync 返回值与前端 toast 新增 added/stale 报告；`last_sync_models` 基准字段（AutoMigrate）使下架判据只认「上次在上游」——首轮实现曾把物化预置模型误报为下架，由 R6 用例当场抓出后改为基准制；Stale 只报告不自动删除 |
 
 ---
 
@@ -52,7 +52,8 @@
 ---
 
 ## 5. 汇报状态
-- 当前周期累计已完成轮次：6 / 10
+- 当前周期累计已完成轮次：7 / 10
+- Round 7（部署闭环补全）：v0.79.43 上线后真实 Key 打 relay，High-flash 分组 → deepseek-flash 上游 200（0.98s，正常 completion），满足 T-deploy-003「真实 Key 发一条 200」；另实证 apidate 的 Sub2API 账号数为 0（官方备份 version 5 不含该表），sync 系列功能（Round 4/6）在此实例仅有单测覆盖，在线验证待用户在面板创建账号后自然发生
 - 下次 Server 酱汇报阈值：Round 10
 - Round 5 已部署上线（v0.79.42，HK4H8G apidate，验证：Version/Commit、匿名 401、资产 hash 一致、DB 无损 channels=21/keys=60/sealed=60/groups=349）。
 Round 6 已部署上线（v0.79.43 @ 7adf6fa，含前端改动）：线上资产 index-DKJ-G_RL.js 与本地构建一致、匿名 401、Version/Commit 正确、DB 无损（21/60/sealed60/349）。
