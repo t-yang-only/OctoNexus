@@ -604,6 +604,13 @@ func Sub2APIAccountProbe(ctx context.Context, id int) (string, error) {
 		return "", err
 	}
 
+	// R10-F1: 与 Sub2APIAccountSyncModels 的无凭据守卫对齐 (R5-F3 的同款交叉点):
+	// 无凭据时若照样发出请求, 上游 401 只会回一句 "上游返回错误状态: HTTP 401",
+	// 运维看不出是该补凭据。probe 与 sync 走同一套凭据语义, 此处必须在入口拦截。
+	if account.Credentials == "" {
+		return "", fmt.Errorf("该账号未配置凭据，请先编辑账号补全 API Key 后再探测")
+	}
+
 	trimmedBase := strings.TrimRight(strings.TrimSpace(account.BaseURL), "/")
 	probeURL := strings.TrimSuffix(trimmedBase, "/v1") + "/v1/models"
 
@@ -698,7 +705,6 @@ func syncModelsLockFor(channelID int) *sync.Mutex {
 	return v.(*sync.Mutex)
 }
 
-// Sub2APIAccountSyncModels 动态从上游 /v1/models 拉取真实可用模型并增量同步至物化渠道和自动分组
 // Sub2APISyncModelsResult 动态模型同步结果。
 // Stale 是「上游已不再返回、但渠道里仍有」的模型: 只报告不删除 —— 渠道模型可能含
 // 人工手填与历史授权(R3-F1 的保护教训), 自动清理会误伤, 必须由运维在面板确认后处理。
@@ -708,6 +714,8 @@ type Sub2APISyncModelsResult struct {
 	Stale  []string `json:"stale"`  // 上游已下架但渠道仍有的模型(待人工确认)
 }
 
+// Sub2APIAccountSyncModels 动态从上游 /v1/models 拉取真实可用模型并增量同步至物化渠道和自动分组。
+// 返回本次新增(Added)与上游已下架(Stale)的可观测结果; Stale 只报告不自动删除。
 func Sub2APIAccountSyncModels(ctx context.Context, id int) (*Sub2APISyncModelsResult, error) {
 	conn := db.GetDB()
 	if conn == nil {
