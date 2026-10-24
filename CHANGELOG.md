@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.53] - 2026-10-24
+### Security
+- **敏感设置项回显脱敏加固 (Round 16)**：
+  - **R16-F1 (HIGH) SettingList 剔除 pool_declarative_adapters 密文回显**：在 \SettingList\ 查询中过滤排除 \pool_declarative_adapters\ 项。该项存放全部声明式号池适配器的完整 JSON 密文（内含自定义鉴权与账密 API Key 等凭据块）；此前在全局设置列表查询接口中原样返回整段密文，虽经加密但违反最小暴露原则，现统一完全收口至 \poolstore.List\ 并在传输层严格经过 \poolstore.Redact\ 彻底清除 Secret 凭据，设置管理面列表绝不明文/全密文回显。
+
 ## [v0.79.52] - 2026-10-24
 ### Security
 - **备份导入导出凭据加固与基准往返 (Round 15)**：
