@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.65] - 2026-10-25
+### Usability & Reliability
+- **模型价格更新与删除状态语义收敛修复 (Round 28)**：
+  - **R28-F1 (HIGH) updateLLM 与 deleteLLM 未找到模型价格记录时返回 404**：此前 LLMUpdate、LLMDelete 与 LLMGet 在未找到目标模型记录时，仅返回裸字符串错误，并在 Handler 层（updateLLM / deleteLLM）统一被包裹为 500 Internal Server Error，破坏了 RESTful 规范（资源不存在应为 404）并引发虚假的服务端故障告警。现通过 op.NotFoundf 与 writeOpError 统一收口，对不存在的模型价格记录精确返回 404 Not Found。
+
 ## [v0.79.64] - 2026-10-25
 ### Usability & Reliability
 - **模型映射删除状态语义收敛修复 (Round 27)**：
