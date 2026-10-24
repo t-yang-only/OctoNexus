@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.58] - 2026-10-25
+### Usability & Reliability
+- **分组更新与查询状态语义收敛修复 (Round 21)**：
+  - **R21-F1 (HIGH) updateGroup 更新不存在分组准确回 404**：此前 deleteGroup 已使用 writeOpError 处理资源不存在场景（404），但 updateGroup 在 GroupUpdate 失败或 GroupGet 找不到时仍固定报 500 Internal Server Error，破坏 RESTful 契约并导致监控产生虚假服务端故障告警。现通过 op.NotFoundf 与 writeOpError 统一收口，对不存在的分组精确返回 404 Not Found。
+
 ## [v0.79.57] - 2026-10-25
 ### Usability & Reliability
 - **渠道更新状态语义收敛修复 (Round 20)**：
