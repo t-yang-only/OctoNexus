@@ -36,7 +36,7 @@ func GroupList() []model.Group {
 func GroupGet(id int) (model.Group, error) {
 	group, ok := groupCache.Get(id)
 	if !ok {
-		return model.Group{}, fmt.Errorf("group not found")
+		return model.Group{}, NotFoundf("group %d not found", id)
 	}
 	return groupSnapshot(group), nil
 }
@@ -234,7 +234,7 @@ func GroupCreate(req *model.GroupCreateRequest, ctx context.Context) (*model.Gro
 func GroupUpdate(id int, req *model.GroupUpdateRequest, ctx context.Context) (*model.Group, error) {
 	oldGroup, ok := groupCache.Get(id)
 	if !ok {
-		return nil, fmt.Errorf("group not found")
+		return nil, NotFoundf("group %d not found", id)
 	}
 	oldName := oldGroup.Name
 
