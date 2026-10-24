@@ -92,8 +92,9 @@ func DBExportAll(ctx context.Context) (*model.DBDump, error) {
 	d.Sub2APIAccounts = make([]model.Sub2APIAccountExport, 0, len(sub2apiAccounts))
 	for _, row := range sub2apiAccounts {
 		d.Sub2APIAccounts = append(d.Sub2APIAccounts, model.Sub2APIAccountExport{
-			Sub2APIAccount: row,
-			CredentialsOut: row.Credentials,
+			Sub2APIAccount:    row,
+			CredentialsOut:    row.Credentials,
+			LastSyncModelsOut: row.LastSyncModels,
 		})
 	}
 	if err := conn.Find(&d.ManualSubscriptions).Error; err != nil {
@@ -362,7 +363,10 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 		sub2apiRows := make([]model.Sub2APIAccount, 0, len(dump.Sub2APIAccounts))
 		for _, row := range dump.Sub2APIAccounts {
 			acct := row.Sub2APIAccount
-			acct.Credentials = row.CredentialsOut
+			acct.Credentials = sealSub2APICredentialsForStore(row.CredentialsOut)
+			if row.LastSyncModelsOut != "" {
+				acct.LastSyncModels = row.LastSyncModelsOut
+			}
 			sub2apiRows = append(sub2apiRows, acct)
 		}
 		if n, err := createRowsRaw(tx, sub2apiRows, []clause.Column{{Name: "id"}}, false); err != nil {

@@ -58,7 +58,8 @@ type OfficialAccountExport struct {
 
 type Sub2APIAccountExport struct {
 	Sub2APIAccount
-	CredentialsOut string `json:"credentials,omitempty"` // 密文：访问凭据
+	CredentialsOut    string `json:"credentials,omitempty"`      // 密文：访问凭据 (R15-F1/F2)
+	LastSyncModelsOut string `json:"last_sync_models,omitempty"` // 上次成功同步的模型集合 (R15-F3)
 }
 
 type DBImportResult struct {

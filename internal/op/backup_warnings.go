@@ -44,6 +44,11 @@ func importSecretWarnings(dump *model.DBDump) []string {
 		warnings = append(warnings, fmt.Sprintf(
 			"有 %d 个官方账号的凭据是密文但本实例的密钥解不开，需要重新授权", badAccounts))
 	}
+	// R15-F1: 订阅反代账号异机解密失败警告 —— 避免用户在恢复后遭遇黑盒 502/解密失败
+	if n := countUndecryptable(dump.Sub2APIAccounts, func(row model.Sub2APIAccountExport) []string { return []string{row.CredentialsOut} }, sub2apiSecretAAD); n > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"有 %d 个订阅反代账号的凭据是密文但本实例的密钥解不开（备份来自另一实例或 credential.key 已更换），需要重新编辑账号补全 API Key", n))
+	}
 	return warnings
 }
 

@@ -1073,3 +1073,16 @@ func Sub2APIAccountCleanStaleModels(ctx context.Context, id int) (*Sub2APICleanS
 
 	return &Sub2APICleanStaleModelsResult{Removed: removed}, nil
 }
+
+// sealSub2APICredentialsForStore 在导入或写入时保证凭据静态落库加密 (R15-F2)。
+// 空串与已带 enc:v1: 前缀的密文原样返回 (幂等); 仅对明文执行 SealWith。
+func sealSub2APICredentialsForStore(raw string) string {
+	if raw == "" || secret.IsSealed(raw) {
+		return raw
+	}
+	sealed, err := secret.SealWith(sub2apiSecretAAD, raw)
+	if err != nil {
+		return raw
+	}
+	return sealed
+}
