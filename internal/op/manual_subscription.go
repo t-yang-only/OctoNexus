@@ -64,7 +64,7 @@ func ManualSubscriptionGet(id int) (model.ManualSubscription, error) {
 			return item, nil
 		}
 	}
-	return model.ManualSubscription{}, fmt.Errorf("manual subscription %d not found", id)
+	return model.ManualSubscription{}, NotFoundf("manual subscription %d not found", id)
 }
 
 // ManualSubscriptionCreate 新建一条：先归一化校验，再落库，最后刷新缓存。
@@ -136,8 +136,12 @@ func ManualSubscriptionDelete(ctx context.Context, id int) error {
 	if _, err := ManualSubscriptionGet(id); err != nil {
 		return err
 	}
-	if err := db.GetDB().WithContext(ctx).Delete(&model.ManualSubscription{}, id).Error; err != nil {
-		return fmt.Errorf("failed to delete manual subscription: %w", err)
+	res := db.GetDB().WithContext(ctx).Delete(&model.ManualSubscription{}, id)
+	if res.Error != nil {
+		return fmt.Errorf("failed to delete manual subscription: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return NotFoundf("manual subscription %d not found", id)
 	}
 	return ManualSubscriptionRefresh(ctx)
 }

@@ -66,7 +66,7 @@ func updateManualSubscription(c *gin.Context) {
 	}
 	item, err := op.ManualSubscriptionUpdate(c.Request.Context(), req)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, item)
@@ -79,7 +79,7 @@ func deleteManualSubscription(c *gin.Context) {
 		return
 	}
 	if err := op.ManualSubscriptionDelete(c.Request.Context(), id); err != nil {
-		resp.Error(c, http.StatusNotFound, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, nil)
