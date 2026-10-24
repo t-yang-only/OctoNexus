@@ -2,11 +2,13 @@ package op
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/t-yang-only/OctoNexus/internal/db"
 	"github.com/t-yang-only/OctoNexus/internal/model"
+	"gorm.io/gorm"
 )
 
 // 模型映射的写路径：每次写操作后都刷新缓存，让面板上改完立即对转发生效
@@ -44,6 +46,9 @@ func ModelMappingCreate(ctx context.Context, req *model.ModelMappingCreateReques
 func ModelMappingUpdate(ctx context.Context, id int, req *model.ModelMappingUpdateRequest) (*model.ModelMapping, error) {
 	var item model.ModelMapping
 	if err := db.GetDB().WithContext(ctx).First(&item, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, NotFoundf("model mapping %d not found", id)
+		}
 		return nil, fmt.Errorf("find model mapping %d: %w", id, err)
 	}
 
@@ -118,6 +123,9 @@ func ModelMappingDelete(ctx context.Context, id int) error {
 func ModelMappingGet(ctx context.Context, id int) (*model.ModelMapping, error) {
 	var item model.ModelMapping
 	if err := db.GetDB().WithContext(ctx).First(&item, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, NotFoundf("model mapping %d not found", id)
+		}
 		return nil, fmt.Errorf("get model mapping %d: %w", id, err)
 	}
 	return &item, nil
@@ -125,9 +133,13 @@ func ModelMappingGet(ctx context.Context, id int) (*model.ModelMapping, error) {
 
 // ModelMappingToggle 切换启用状态（面板上的开关）。
 func ModelMappingToggle(ctx context.Context, id int, enabled bool) (*model.ModelMapping, error) {
-	if err := db.GetDB().WithContext(ctx).Model(&model.ModelMapping{}).
-		Where("id = ?", id).Update("enabled", enabled).Error; err != nil {
-		return nil, fmt.Errorf("toggle model mapping %d: %w", id, err)
+	res := db.GetDB().WithContext(ctx).Model(&model.ModelMapping{}).
+		Where("id = ?", id).Update("enabled", enabled)
+	if res.Error != nil {
+		return nil, fmt.Errorf("toggle model mapping %d: %w", id, res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return nil, NotFoundf("model mapping %d not found", id)
 	}
 	if err := ModelMappingRefresh(ctx); err != nil {
 		return nil, err

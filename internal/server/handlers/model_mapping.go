@@ -82,7 +82,7 @@ func updateModelMapping(c *gin.Context) {
 	}
 	item, err := op.ModelMappingUpdate(c.Request.Context(), id, &req)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, item)
@@ -116,7 +116,7 @@ func toggleModelMapping(c *gin.Context) {
 	}
 	item, err := op.ModelMappingToggle(c.Request.Context(), id, body.Enabled)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, item)
