@@ -12,6 +12,23 @@ import (
 	"github.com/t-yang-only/OctoNexus/internal/server/resp"
 )
 
+// CookieSecure 判定 auth cookie 是否应带 Secure 标志 (R14-F3)。
+// 反代 terminate TLS 时 gin 侧看到的是 http, 单看 Request.TLS 会永远 false;
+// X-Forwarded-Proto 由 Caddy 覆盖写入, 客户端伪造只能影响自己的 cookie 传输方式
+// (HTTPS 站点上本就该 Secure), 不构成窃取向量。
+func CookieSecure(c *gin.Context) bool {
+	if c.Request.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+}
+
+// ClearAuthCookie 服务端清除 auth cookie (R14-F2)。
+// HttpOnly 之后前端 JS 无法清除该 cookie, 登出与过期清理都必须走服务端。
+func ClearAuthCookie(c *gin.Context) {
+	c.SetCookie("auth", "", -1, "/", "", CookieSecure(c), true)
+}
+
 func Auth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, err := c.Cookie("auth")
@@ -21,7 +38,7 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 		if !auth.VerifyJWTToken(token) {
-			c.SetCookie("auth", "", -1, "/", "", false, false)
+			ClearAuthCookie(c)
 			resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
 			c.Abort()
 			return

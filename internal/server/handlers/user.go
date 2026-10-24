@@ -20,6 +20,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/login", http.MethodPost).
 				Handle(login),
+		).
+		AddRoute(
+			router.NewRoute("/logout", http.MethodPost).
+				Handle(logout),
 		)
 	router.NewGroupRouter("/api/v1/user").
 		ServeOn(router.ServerAdmin).
@@ -59,8 +63,16 @@ func login(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, resp.ErrInternalServer)
 		return
 	}
-	c.SetCookie("auth", token, maxAge, "/", "", false, false)
+	// R14-F1: HttpOnly=true —— XSS 读不到 JWT; Secure 按链路判定(反代 HTTPS 下生效)
+	c.SetCookie("auth", token, maxAge, "/", "", middleware.CookieSecure(c), true)
 	resp.Success(c, "login successfully")
+}
+
+// R14-F2: 服务端登出 —— HttpOnly cookie 前端无法清除, 登出必须走后端。
+// 挂在无鉴权组: 清除一个已失效/到期的 cookie 不泄露任何信息, 且过期后也要能登出。
+func logout(c *gin.Context) {
+	middleware.ClearAuthCookie(c)
+	resp.Success(c, "logout successfully")
 }
 
 func changePassword(c *gin.Context) {

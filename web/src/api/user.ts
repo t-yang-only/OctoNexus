@@ -90,9 +90,8 @@ export const useAuthStore = create<AuthState>()(
                     token: null,
                     isLoading: false
                 });
-                if (typeof document !== 'undefined') {
-                    document.cookie = 'auth=; Max-Age=0; Path=/; SameSite=Lax';
-                }
+                // R14-F2: HttpOnly cookie 前端清不掉, 登出必须走后端端点(失败也继续清本地态)
+                fetch('/api/v1/user/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
             }
         }),
         {
