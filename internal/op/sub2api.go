@@ -933,10 +933,21 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) (*Sub2APISyncModelsRe
 			return nil, fmt.Errorf("回写同步基准失败: %w", err)
 		}
 	}
-	// 回写成功时间戳, 作为最小间隔保护的基准
+	// 回写成功时间戳, 作为最小间隔保护的基准; 同一次写回可观测摘要(R9-F1)
+	summaryPayload, err := json.Marshal(map[string]any{
+		"added_count": len(addedModels),
+		"stale_count": len(staleModels),
+		"stale":       staleModels,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("生成同步摘要失败: %w", err)
+	}
 	if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", account.ID).
-		Update("last_sync_at", time.Now()).Error; err != nil {
-		return nil, fmt.Errorf("回写同步时间失败: %w", err)
+		Updates(map[string]any{
+			"last_sync_at":      time.Now(),
+			"last_sync_summary": string(summaryPayload),
+		}).Error; err != nil {
+		return nil, fmt.Errorf("回写同步时间与摘要失败: %w", err)
 	}
 
 	return &Sub2APISyncModelsResult{

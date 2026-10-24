@@ -51,6 +51,10 @@ type Sub2APIAccount struct {
 	// 它是"下架"判据的基准: 只有上次在上游、这次不在的模型才算下架;
 	// 物化预置与手填模型从未进入过该集合, 不会被误报为下架(R6-F1)。
 	LastSyncModels string `json:"-" gorm:"not null;default:''"`
+	// LastSyncSummary 上次同步的可观测摘要(JSON 文本): {"added_count":N,"stale_count":M,"stale":[...]}。
+	// 让"上次同步发现了什么"在账号列表/卡片上持久可见 —— 否则 toast 一闪即逝,
+	// 运维刷新页面后就不知道有哪些上游下架模型待人工确认 (R9-F1)。
+	LastSyncSummary string `json:"last_sync_summary" gorm:"not null;default:''"`
 	// LastSyncAt 上次成功同步的时间: 入口层做最小间隔保护, 防误连打把请求打到上游 (R8-F1)
 	LastSyncAt time.Time `json:"-" gorm:"autoUpdateTime:false"`
 	CreatedAt  time.Time `json:"created_at" gorm:"autoCreateTime"`

@@ -55,6 +55,17 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
     const [editNotes, setEditNotes] = useState(account.notes || '');
     const [editEnabled, setEditEnabled] = useState(account.enabled);
 
+    // 上次同步摘要(R9-F1): 坏 JSON 按无摘要处理, 不让一处脏数据带崩整张卡片
+    let syncSummary: { added_count: number; stale_count: number; stale: string[] } | null = null;
+    if (account.last_sync_summary) {
+        try {
+            const parsed = JSON.parse(account.last_sync_summary);
+            if (typeof parsed?.added_count === 'number') syncSummary = parsed;
+        } catch {
+            syncSummary = null;
+        }
+    }
+
     const handleDelete = () => {
         if (confirm(`确认删除订阅反代账号「${account.name}」？`)) {
             deleteMutation.mutate(account.id, {
@@ -206,6 +217,21 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
                     <div className={`mt-3 flex items-center gap-1.5 text-xs font-medium ${probeResult.startsWith('失败') || probeResult === '异常' ? 'text-destructive' : 'text-emerald-600'}`}>
                         {probeResult.startsWith('失败') || probeResult === '异常' ? <CircleAlert className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}
                         连通性: {probeResult}
+                    </div>
+                )}
+
+                {syncSummary && (
+                    <div className="mt-3 rounded-lg border border-border/40 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-1.5 font-medium text-foreground">
+                            <RefreshCw className="size-3.5" />
+                            上次同步：新增 {syncSummary.added_count} 个{ syncSummary.stale_count > 0 ? `，上游已下架 ${syncSummary.stale_count} 个` : '' }
+                        </div>
+                        {syncSummary.stale_count > 0 && (
+                            <div className="mt-1 leading-relaxed">
+                                <span className="text-amber-600 dark:text-amber-500">下架模型（未自动删除，请到渠道页人工确认后清理）：</span>
+                                {syncSummary.stale.join('、')}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

@@ -28,6 +28,7 @@ export interface Sub2APIAccount {
     extra: string;
     notes?: string;
     channel_id?: number;
+    last_sync_summary?: string;
     created_at: string;
     updated_at: string;
 }
