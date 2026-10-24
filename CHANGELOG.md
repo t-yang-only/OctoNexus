@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.64] - 2026-10-25
+### Usability & Reliability
+- **模型映射删除状态语义收敛修复 (Round 27)**：
+  - **R27-F1 (HIGH) deleteModelMapping 删除不存在规则时返回 404**：此前 ModelMappingDelete 在删除不存在的主键 ID 时直接忽略行影响数并返回 nil，或在出错时被 Handler 层统一包裹为 400 Bad Request，破坏了 RESTful 规范（资源不存在应为 404）。现通过 RowsAffected 检查、op.NotFoundf 与 writeOpError 统一收口，对不存在的模型映射删除精确返回 404 Not Found。
+
 ## [v0.79.63] - 2026-10-25
 ### Usability & Reliability
 - **模型映射更新与状态切换语义收敛修复 (Round 26)**：
