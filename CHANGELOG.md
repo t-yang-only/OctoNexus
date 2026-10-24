@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.51] - 2026-10-24
+### Security
+- **auth cookie 安全加固 (Round 14, R14-F1/F3)**：auth cookie 新增 \HttpOnly=true\（防止 XSS 读取 JWT，此前为 false）；\Secure\ 属性按链路判定（直连 TLS 或 \X-Forwarded-Proto: https\），反代 HTTPS 链路下自动生效，本地 http 开发环境不被破坏。
+- **服务端登出与路由解绑 (Round 14, R14-F2)**：HttpOnly cookie 前端 JS 无法清除，新增 \POST /api/v1/user/logout\ 服务端清除端点，前端登出改调该端点。v0.79.50 部署后在线验证抓出登出挂在 \RequireJSON()\ 组导致无 body 请求报 415，在 v0.79.51 中将登出移入独立路由组（无 JSON/无 Auth 要求）并补全路由级无 body 登出用例。双变异（去 HttpOnly 变异、登出挂回 JSON 组变异）均命中。
+
 ## [v0.79.49] - 2026-10-24
 ### Security
 - **登录防爆破 (Round 13, R13-F1, HIGH)**：管理面暴露公网而登录接口此前无限次试密。按用户名失败计数，5 次失败锁定 5 分钟，锁定期内即使口令正确也拒绝（429 + 剩余秒数），到期清零、登录成功清零。锁定阈值取自单测覆盖，在线验证打了 3 次错误密码（低于阈值）确认登录路径正常。
