@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.60] - 2026-10-25
+### Reliability & Consistency
+- **设置热生效分发容错与事务一致性加固 (Round 23)**：
+  - **R23-F1 (HIGH) setSetting 内存分发 switch 遵循统一 fail-safe 语义**：此前 model_info_update_interval 与 route_balance_enabled 在 SettingSetString 成功落库后，若 switch 分发中发生类型转换错误，会直接返回 400 截断并中断响应，破坏了持久化与 HTTP 状态的自洽性。现将 switch 分发收口为与其他设置项一致的非阻塞注入模式，确保落库成功后响应恒定 200，杜绝状态割裂。
+
 ## [v0.79.59] - 2026-10-25
 ### Usability & Reliability
 - **分组创建与子分组引用状态语义收敛修复 (Round 22)**：
