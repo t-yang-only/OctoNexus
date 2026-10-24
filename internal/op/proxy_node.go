@@ -390,6 +390,9 @@ func ProxySubscriptionUpdate(conn *gorm.DB, id int, in model.ProxySubscriptionIn
 	}
 	var sub model.ProxySubscription
 	if err := conn.First(&sub, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.ProxySubscription{}, NotFoundf("proxy subscription %d not found", id)
+		}
 		return model.ProxySubscription{}, err
 	}
 	updates := map[string]any{}
@@ -442,7 +445,14 @@ func ProxySubscriptionDelete(conn *gorm.DB, id int) error {
 	if err := conn.Where("sub_id = ?", id).Delete(&model.ProxyNode{}).Error; err != nil {
 		return fmt.Errorf("delete subscription nodes: %w", err)
 	}
-	return conn.Delete(&model.ProxySubscription{}, id).Error
+	res := conn.Delete(&model.ProxySubscription{}, id)
+	if res.Error != nil {
+		return fmt.Errorf("delete proxy subscription: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return NotFoundf("proxy subscription %d not found", id)
+	}
+	return nil
 }
 
 // ProxySubscriptionRefresh 拉取订阅并导入其节点。

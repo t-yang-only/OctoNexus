@@ -216,7 +216,7 @@ func proxySubscriptionUpdate(c *gin.Context) {
 	}
 	sub, err := op.ProxySubscriptionUpdate(nil, id, in)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"item": sub})
@@ -233,7 +233,7 @@ func proxySubscriptionDelete(c *gin.Context) {
 			resp.Error(c, http.StatusConflict, err.Error())
 			return
 		}
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"id": id, "removed": true})
