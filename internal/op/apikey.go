@@ -31,7 +31,7 @@ func APIKeyCreate(key *model.APIKey, ctx context.Context) error {
 func APIKeyUpdate(key *model.APIKey, ctx context.Context) error {
 	existing, ok := apiKeyCache.Get(key.ID)
 	if !ok {
-		return fmt.Errorf("API key not found")
+		return NotFoundf("API key %d not found", key.ID)
 	}
 	if key.APIKey == "" {
 		key.APIKey = existing.APIKey

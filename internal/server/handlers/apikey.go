@@ -96,7 +96,7 @@ func updateAPIKey(c *gin.Context) {
 		return
 	}
 	if err := op.APIKeyUpdate(&req, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, req)
