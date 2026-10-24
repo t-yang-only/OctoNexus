@@ -55,7 +55,7 @@
 ---
 
 ## 5. 汇报状态
-- 当前周期累计已完成轮次：17 / 10（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
+- 当前周期累计已完成轮次：18 / 10（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
 - Round 7（部署闭环补全）：v0.79.43 上线后真实 Key 打 relay，High-flash 分组 → deepseek-flash 上游 200（0.98s，正常 completion），满足 T-deploy-003「真实 Key 发一条 200」；另实证 apidate 的 Sub2API 账号数为 0（官方备份 version 5 不含该表），sync 系列功能（Round 4/6）在此实例仅有单测覆盖，在线验证待用户在面板创建账号后自然发生
 - Round 8（最小间隔保护，fa36c4e / v0.79.44 已部署）：账号级 10s 同步间隔 + 剩余等待提示，误连打不再反复打上游；R4/R5/R6 连续同步判据拨开间隔（各守卫互不掩盖，R5-F1 去锁变异复验命中）；R8 变异命中；全仓 21 包 0 FAIL；上线后真实转发 200（0.78s）、DB 无损（21/60/sealed60）
 - Round 9（摘要持久可见，05efda5 / v0.79.45 已部署）：last_sync_summary 落库 + 账号卡片常驻「新增 X / 下架 Y」与下架模型清单；R5-F1 用例按设计边界重建（锁不覆盖 sync 与面板保存交错，注释如实记录；判据改为并发 sync 无库竞争错误 + 并发前人工模型必存活，5 次复跑稳定、去锁变异红）；R9 变异命中；上线后新资产 index-CTqC2uiu.js、真实转发 200（0.98s）、DB 无损
@@ -67,6 +67,7 @@
 - Round 15（备份导入导出凭据加固与基准往返，2799d34 / v0.79.52 已部署）：importSecretWarnings 补齐 Sub2APIAccounts 异机解密失败警告(R15-F1)；导入明文凭据自动落库加密(R15-F2)；LastSyncModels 备份往返持久化(R15-F3)；3 项独立用例全过；3 项变异全部命中(去警告红、去加密红、去基准红)；上线后真实转发 200（0.84s）、DB 无损（21/60/sealed 60）
 - Round 16（敏感设置项回显脱敏加固，b5bed43 / v0.79.53 已部署）：SettingList 严格过滤剔除 pool_declarative_adapters 密文(R16-F1)；所有声明式号池出口统一强制收敛至 poolstore.List/Redact 脱敏链路；独立单元测试通过；变异测试命中杀灭；上线后真实转发 200（1.06s）、DB 无损（21/60/sealed 60）
 - Round 17（渠道模型拉取与探测专属出口节点接入，7e5829c / v0.79.54 已部署）：fetchModel 优先按 ProxyNodeID 路由至节点本地入站(R17-F1)；节点不存在或未分配端口时严格 502 fail-closed 阻断直连泄露真实 IP；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（1.31s）、DB 无损（21/60/sealed 60）
+- Round 18（API Key 新建白名单字段持久化修复，0ebc302 / v0.79.55 已部署）：APIKeyCreate 补齐 allowed_cidrs 列白名单(R18-F1)；防止新建 Key 时 IP/CIDR 来源白名单被静默丢弃；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（0.86s）、DB 无损（21/60/sealed 60）
 - 下次 Server 酱汇报阈值：Round 10
 - Round 5 已部署上线（v0.79.42，HK4H8G apidate，验证：Version/Commit、匿名 401、资产 hash 一致、DB 无损 channels=21/keys=60/sealed=60/groups=349）。
 Round 6 已部署上线（v0.79.43 @ 7adf6fa，含前端改动）：线上资产 index-DKJ-G_RL.js 与本地构建一致、匿名 401、Version/Commit 正确、DB 无损（21/60/sealed60/349）。

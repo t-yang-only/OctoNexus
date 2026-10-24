@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.55] - 2026-10-24
+### Security
+- **API Key 新建来源白名单字段持久化修复 (Round 18)**：
+  - **R18-F1 (HIGH) APIKeyCreate 补齐 allowed_cidrs 落库字段**：此前 \APIKeyCreate\ 为防止 GORM 默认值标签跳过 \Enabled=false\ 显式指定了落库列名列表，但遗漏了 \llowed_cidrs\。导致新建带有 IP/CIDR 白名单的 API Key 时，白名单配置在创建写入阶段被静默丢弃，IP 防护线失效。现已补齐落库白名单，确保新建 API Key 的来源 IP 访问控制真实落库生效。
+
 ## [v0.79.54] - 2026-10-24
 ### Security
 - **渠道模型拉取与探测专属出口节点接入 (Round 17)**：
