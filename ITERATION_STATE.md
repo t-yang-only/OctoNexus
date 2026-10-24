@@ -55,7 +55,7 @@
 ---
 
 ## 5. 汇报状态
-- 当前周期累计已完成轮次：30 / 10 (第三周期 10 轮达标，准备推送周期报告)（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
+- 当前周期累计已完成轮次：1 / 10 (第四周期 Round 31)（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
 - Round 7（部署闭环补全）：v0.79.43 上线后真实 Key 打 relay，High-flash 分组 → deepseek-flash 上游 200（0.98s，正常 completion），满足 T-deploy-003「真实 Key 发一条 200」；另实证 apidate 的 Sub2API 账号数为 0（官方备份 version 5 不含该表），sync 系列功能（Round 4/6）在此实例仅有单测覆盖，在线验证待用户在面板创建账号后自然发生
 - Round 8（最小间隔保护，fa36c4e / v0.79.44 已部署）：账号级 10s 同步间隔 + 剩余等待提示，误连打不再反复打上游；R4/R5/R6 连续同步判据拨开间隔（各守卫互不掩盖，R5-F1 去锁变异复验命中）；R8 变异命中；全仓 21 包 0 FAIL；上线后真实转发 200（0.78s）、DB 无损（21/60/sealed60）
 - Round 9（摘要持久可见，05efda5 / v0.79.45 已部署）：last_sync_summary 落库 + 账号卡片常驻「新增 X / 下架 Y」与下架模型清单；R5-F1 用例按设计边界重建（锁不覆盖 sync 与面板保存交错，注释如实记录；判据改为并发 sync 无库竞争错误 + 并发前人工模型必存活，5 次复跑稳定、去锁变异红）；R9 变异命中；上线后新资产 index-CTqC2uiu.js、真实转发 200（0.98s）、DB 无损
@@ -80,6 +80,7 @@
 - Round 28（模型价格更新与删除语义收敛修复，9aceb3d / v0.79.65 已部署）：updateLLM/deleteLLM 准确返回 404 而非 500(R28-F1)；消除模型价格查空时的虚假服务端故障误报；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（0.98s）、DB 无损（21/60/sealed 60）
 - Round 29（代理节点更新与删除语义收敛修复，f8dcd3c / v0.79.66 已部署）：proxyNodeUpdate/proxyNodeDelete 准确返回 404 而非 400(R29-F1)；消除代理节点查空时的状态码语义混淆；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（0.98s）、DB 无损（21/60/sealed 60）
 - Round 30（代理订阅更新与删除语义收敛修复，cc5412d / v0.79.67 已部署）：proxySubscriptionUpdate/Delete 准确返回 404 而非 400(R30-F1)；消除代理订阅查空时的状态码语义混淆；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（0.99s）、DB 无损（21/60/sealed 60）
+- Round 31（Sub2API 账号探测语义收敛修复，63e58c0 / v0.79.68 已部署）：sub2apiAccountProbe 准确返回 404 而非 502(R31-F1)；消除账号查空时的假性网关故障误报；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（0.99s）、DB 无损（21/60/sealed 60）
 - 下次 Server 酱汇报阈值：Round 10
 - Round 5 已部署上线（v0.79.42，HK4H8G apidate，验证：Version/Commit、匿名 401、资产 hash 一致、DB 无损 channels=21/keys=60/sealed=60/groups=349）。
 Round 6 已部署上线（v0.79.43 @ 7adf6fa，含前端改动）：线上资产 index-DKJ-G_RL.js 与本地构建一致、匿名 401、Version/Commit 正确、DB 无损（21/60/sealed60/349）。

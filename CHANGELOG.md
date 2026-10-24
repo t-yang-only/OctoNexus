@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.68] - 2026-10-25
+### Usability & Reliability
+- **Sub2API 账号探测状态语义收敛修复 (Round 31)**：
+  - **R31-F1 (HIGH) sub2apiAccountProbe 探测不存在账号时返回 404**：此前 Sub2APIAccountProbe 查找账号记录不存在时直接返回 gorm.ErrRecordNotFound，且 Handler 层（sub2apiAccountProbe）统一包裹为 502 Bad Gateway 报错（探测失败: record not found），让调用方误以为是上游节点网络不可达，破坏了 HTTP 契约规范。现通过 errors.Is(err, gorm.ErrRecordNotFound) 转换为 op.ErrSub2APIAccountNotFound，并在 Handler 中捕获该哨兵错误返回 404 StatusNotFound。
+
 ## [v0.79.67] - 2026-10-25
 ### Usability & Reliability
 - **代理订阅更新与删除状态语义收敛修复 (Round 30)**：
