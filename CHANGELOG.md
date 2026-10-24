@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.67] - 2026-10-25
+### Usability & Reliability
+- **代理订阅更新与删除状态语义收敛修复 (Round 30)**：
+  - **R30-F1 (HIGH) proxySubscriptionUpdate 与 proxySubscriptionDelete 未找到订阅时返回 404**：此前 ProxySubscriptionUpdate 在查找订阅记录不存在时直接返回 gorm.ErrRecordNotFound，ProxySubscriptionDelete 在未找到行时未检查 RowsAffected，且 Handler 层（proxySubscriptionUpdate / proxySubscriptionDelete）统一以 400 BadRequest 报错，破坏了 RESTful 规范（资源不存在应为 404）。现通过 RowsAffected 检查、op.NotFoundf 与 writeOpError 统一收口，对不存在的代理订阅精确返回 404 Not Found。
+
 ## [v0.79.66] - 2026-10-25
 ### Usability & Reliability
 - **代理节点更新与删除状态语义收敛修复 (Round 29)**：
