@@ -45,7 +45,12 @@ func login(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
 		return
 	}
-	if err := op.UserVerify(user.Username, user.Password); err != nil {
+	// R13-F1: 走带节流的登录校验 —— 锁定期间即使口令正确也拒绝, 防公网管理面暴力破解
+	if err := op.UserLoginVerify(user.Username, user.Password); err != nil {
+		if strings.Contains(err.Error(), "已锁定") {
+			resp.Error(c, http.StatusTooManyRequests, err.Error())
+			return
+		}
 		resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
 		return
 	}

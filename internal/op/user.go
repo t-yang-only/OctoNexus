@@ -31,6 +31,15 @@ func UserChangePassword(oldPassword, newPassword string) error {
 		return fmt.Errorf("incorrect old password: %w", err)
 	}
 
+	// R13-F2: 密码强度下限 —— 此前只拒空, "1" 这种口令能直接落库。
+	// 管理面是全域凭据的入口, 口令不值得在这里省。
+	if len([]rune(newPassword)) < minPasswordLength {
+		return fmt.Errorf("新密码长度不足 %d 位", minPasswordLength)
+	}
+	if newPassword == oldPassword {
+		return fmt.Errorf("新密码不能与旧密码相同")
+	}
+
 	userCache.Password = newPassword
 	if err := userCache.HashPassword(); err != nil {
 		return fmt.Errorf("failed to hash new password: %w", err)
