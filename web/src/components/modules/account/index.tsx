@@ -249,18 +249,20 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
 
             <div className="mt-5 flex items-center justify-between border-t border-border/50 pt-3">
                 <div className="flex items-center gap-2">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-xl text-xs"
-                        onClick={handleProbe}
-                        disabled={probeMutation.isPending}
-                    >
-                        {probeMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 size-3.5" />}
-                        测试连接
-                    </Button>
-                    {account.channel_id && account.channel_id > 0 ? (
+                    {account.enabled ? (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 rounded-xl text-xs"
+                            onClick={handleProbe}
+                            disabled={probeMutation.isPending}
+                        >
+                            {probeMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 size-3.5" />}
+                            测试连接
+                        </Button>
+                    ) : null}
+                    {account.enabled && account.channel_id && account.channel_id > 0 ? (
                         <Button
                             type="button"
                             variant="outline"

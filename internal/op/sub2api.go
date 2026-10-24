@@ -604,6 +604,12 @@ func Sub2APIAccountProbe(ctx context.Context, id int) (string, error) {
 		return "", err
 	}
 
+	// R12-F1: 停用账号不得探测 (与 sync/clean-stale 对齐的同类交叉点)。
+	// 账号停用通常意味着上游欠费/故障/主动下线, 此时探测只会白打一趟上游。
+	if !account.Enabled {
+		return "", fmt.Errorf("该账号已停用，请先在面板启用后再探测")
+	}
+
 	// R10-F1: 与 Sub2APIAccountSyncModels 的无凭据守卫对齐 (R5-F3 的同款交叉点):
 	// 无凭据时若照样发出请求, 上游 401 只会回一句 "上游返回错误状态: HTTP 401",
 	// 运维看不出是该补凭据。probe 与 sync 走同一套凭据语义, 此处必须在入口拦截。
@@ -727,6 +733,12 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) (*Sub2APISyncModelsRe
 	}
 	if account.ChannelID == 0 {
 		return nil, fmt.Errorf("该账号尚未物化为渠道，请先开启物化渠道")
+	}
+
+	// R12-F1: 停用账号不得同步 (与 probe/clean-stale 对齐)。
+	// 停用意味着上游欠费/故障/主动下线, 此时拉取模型只会白打一趟上游。
+	if !account.Enabled {
+		return nil, fmt.Errorf("该账号已停用，请先在面板启用后再同步模型")
 	}
 
 	// R5-F3: 无凭据时直接给出可执行错误, 不再静默发出无认证请求后让上游 401 替我们报错
@@ -984,6 +996,11 @@ func Sub2APIAccountCleanStaleModels(ctx context.Context, id int) (*Sub2APICleanS
 	}
 	if account.ChannelID == 0 {
 		return nil, fmt.Errorf("该账号尚未物化为渠道，请先开启物化渠道")
+	}
+
+	// R12-F1: 停用账号不得清理 (与 probe/sync 对齐): 停用期间的渠道变更应整体冻结
+	if !account.Enabled {
+		return nil, fmt.Errorf("该账号已停用，请先在面板启用后再清理")
 	}
 
 	var summary struct {
