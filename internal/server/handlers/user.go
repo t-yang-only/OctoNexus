@@ -20,7 +20,11 @@ func init() {
 		AddRoute(
 			router.NewRoute("/login", http.MethodPost).
 				Handle(login),
-		).
+		)
+	// 登出单独成组: 不挂 RequireJSON(登出无 body, 线上验证曾因挂在 JSON 组返回 415,
+	// 前端清不掉 HttpOnly cookie)、不挂 Auth(过期后也要能登出)。
+	router.NewGroupRouter("/api/v1/user").
+		ServeOn(router.ServerAdmin).
 		AddRoute(
 			router.NewRoute("/logout", http.MethodPost).
 				Handle(logout),
