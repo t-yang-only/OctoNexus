@@ -154,7 +154,7 @@ func updateChannel(c *gin.Context) {
 	}
 	channel, err := op.ChannelUpdate(&req, c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	if err := addChannelModelPrices(channel.Models, c.Request.Context()); err != nil {

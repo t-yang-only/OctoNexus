@@ -105,7 +105,7 @@ func ChannelCreate(detail *model.ChannelDetail, ctx context.Context) (*model.Cha
 // 未列出的凭据与模型会被删除并级联删除其授权。
 func ChannelUpdate(detail *model.ChannelDetail, ctx context.Context) (*model.ChannelDetail, error) {
 	if _, ok := channelCache.Get(detail.ID); !ok {
-		return nil, fmt.Errorf("channel not found")
+		return nil, NotFoundf("channel %d not found", detail.ID)
 	}
 	if err := normalizeChannelDetail(detail); err != nil {
 		return nil, err
