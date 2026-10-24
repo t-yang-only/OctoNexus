@@ -19,7 +19,7 @@ var apiKeyIDMap = cache.New[string, int](16)
 // 反而建出启用 Key。显式列出这些列后按入参原样落库。
 func APIKeyCreate(key *model.APIKey, ctx context.Context) error {
 	if err := db.GetDB().WithContext(ctx).
-		Select("name", "api_key", "enabled", "expire_at", "max_cost", "rpm", "tpm", "supported_models").
+		Select("name", "api_key", "enabled", "expire_at", "max_cost", "rpm", "tpm", "supported_models", "allowed_cidrs").
 		Create(key).Error; err != nil {
 		return fmt.Errorf("failed to create API key: %w", err)
 	}
