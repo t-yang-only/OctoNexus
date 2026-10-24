@@ -3,6 +3,7 @@ package op
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -601,6 +602,9 @@ func Sub2APIAccountProbe(ctx context.Context, id int) (string, error) {
 	}
 	var account model.Sub2APIAccount
 	if err := conn.First(&account, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrSub2APIAccountNotFound
+		}
 		return "", err
 	}
 

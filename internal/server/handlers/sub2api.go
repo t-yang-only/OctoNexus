@@ -98,6 +98,10 @@ func sub2apiAccountProbe(c *gin.Context) {
 	}
 	status, err := op.Sub2APIAccountProbe(c.Request.Context(), id)
 	if err != nil {
+		if errors.Is(err, op.ErrSub2APIAccountNotFound) {
+			resp.Error(c, http.StatusNotFound, "账号不存在")
+			return
+		}
 		resp.Error(c, http.StatusBadGateway, "探测失败: "+err.Error())
 		return
 	}
