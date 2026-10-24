@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.54] - 2026-10-24
+### Security
+- **渠道模型拉取与探测专属出口节点接入 (Round 17)**：
+  - **R17-F1 (HIGH) fetchModel 优先路由至渠道绑定的专属出口节点**：此前渠道配置了专属出口节点时，模型拉取与探测仅判断 \	arget.Proxy / target.ChannelProxy\，导致拉取与探测可能绕过节点直连上游泄露真实 IP，或节点未就绪时未严格 fail-closed。现严格与 elay/upstream\ 保持一致：\ProxyNodeID > 0\ 时通过 \op.ProxyNodeEndpoint\ 解析节点本地入站，不可用时严格返回 502 Bad Gateway 阻断泄露。
+
 ## [v0.79.53] - 2026-10-24
 ### Security
 - **敏感设置项回显脱敏加固 (Round 16)**：
