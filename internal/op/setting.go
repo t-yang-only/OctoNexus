@@ -16,6 +16,10 @@ var settingCache = cache.New[model.SettingKey, string](16)
 func SettingList(ctx context.Context) ([]model.Setting, error) {
 	settings := make([]model.Setting, 0, settingCache.Len())
 	for key, value := range settingCache.GetAll() {
+		// R16-F1: 凭据型敏感设置项绝不通过设置列表明文回显 (pool_declarative_adapters 存放声明式适配器全量 JSON 密文)
+		if key == model.SettingKeyPoolDeclarativeAdapters {
+			continue
+		}
 		settings = append(settings, model.Setting{
 			Key:   key,
 			Value: value,
