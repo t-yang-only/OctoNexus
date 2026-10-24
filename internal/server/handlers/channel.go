@@ -79,7 +79,7 @@ func getChannelDetail(c *gin.Context) {
 	}
 	detail, err := op.ChannelDetailGet(id)
 	if err != nil {
-		resp.Error(c, http.StatusNotFound, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, detail)
@@ -178,7 +178,7 @@ func enableChannel(c *gin.Context) {
 		return
 	}
 	if err := op.ChannelEnabled(request.ID, request.Enabled, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, nil)

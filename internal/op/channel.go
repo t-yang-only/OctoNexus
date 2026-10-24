@@ -32,7 +32,7 @@ const definedProtocols = model.ProtocolOpenAIChatCompletion | model.ProtocolOpen
 func ChannelDetailGet(id int) (model.ChannelDetail, error) {
 	channel, ok := channelCache.Get(id)
 	if !ok {
-		return model.ChannelDetail{}, fmt.Errorf("channel not found")
+		return model.ChannelDetail{}, NotFoundf("channel %d not found", id)
 	}
 	return channelDetail(channel), nil
 }
@@ -252,7 +252,7 @@ func syncChannelChildren(tx *gorm.DB, channelID int, detail *model.ChannelDetail
 func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
 	channel, ok := channelCache.Get(id)
 	if !ok {
-		return fmt.Errorf("channel not found")
+		return NotFoundf("channel %d not found", id)
 	}
 	if err := db.GetDB().WithContext(ctx).Model(&model.Channel{}).Where("id = ?", id).Update("enabled", enabled).Error; err != nil {
 		return err
