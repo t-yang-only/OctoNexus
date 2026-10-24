@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.63] - 2026-10-25
+### Usability & Reliability
+- **模型映射更新与状态切换语义收敛修复 (Round 26)**：
+  - **R26-F1 (HIGH) toggleModelMapping 与 updateModelMapping 未找到规则时返回 404**：此前 ModelMappingUpdate、ModelMappingGet 与 ModelMappingToggle 在目标模型映射规则主键 ID 不存在时，仅返回裸字符串错误，并在 Handler 层被错误包装为 400 Bad Request。资源不存在本属于 404 范畴，报 400 会误导客户端认为是载荷语法问题。现通过 op.NotFoundf 与 writeOpError 统一收口，对不存在的模型映射规则精确返回 404 Not Found。
+
 ## [v0.79.62] - 2026-10-25
 ### Usability & Reliability
 - **渠道启停与详情查询状态语义收敛修复 (Round 25)**：
