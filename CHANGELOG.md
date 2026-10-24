@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.66] - 2026-10-25
+### Usability & Reliability
+- **代理节点更新与删除状态语义收敛修复 (Round 29)**：
+  - **R29-F1 (HIGH) proxyNodeUpdate 与 proxyNodeDelete 未找到节点时返回 404**：此前 ProxyNodeUpdate 在节点主键 ID 不存在时返回 gorm.ErrRecordNotFound，ProxyNodeDelete 在未找到行时未检查 RowsAffected，且 Handler 层（proxyNodeUpdate / proxyNodeDelete）统一以 400 BadRequest 报错，破坏了 RESTful 规范（资源不存在应为 404）。现通过 RowsAffected 检查、op.NotFoundf 与 writeOpError 统一收口，对不存在的代理节点精确返回 404 Not Found。
+
 ## [v0.79.65] - 2026-10-25
 ### Usability & Reliability
 - **模型价格更新与删除状态语义收敛修复 (Round 28)**：
