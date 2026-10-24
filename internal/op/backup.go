@@ -663,9 +663,20 @@ func createUpsertSettings(tx *gorm.DB, rows []model.Setting) (int64, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}
+	// R24-F1: 导入设置时必须执行合法性校验，防止非法或越界的设置项写入系统产生异常
+	validRows := make([]model.Setting, 0, len(rows))
+	for _, row := range rows {
+		if err := row.Validate(); err != nil {
+			continue
+		}
+		validRows = append(validRows, row)
+	}
+	if len(validRows) == 0 {
+		return 0, nil
+	}
 	result := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
-	}).Create(&rows)
+	}).Create(&validRows)
 	return result.RowsAffected, result.Error
 }
