@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.59] - 2026-10-25
+### Usability & Reliability
+- **分组创建与子分组引用状态语义收敛修复 (Round 22)**：
+  - **R22-F1 (HIGH) GroupCreate 引用不存在子分组准确回 404**：此前 createGroup 在请求引用不存在的子分组时、以及 GroupUpdate 传入不存在的 active_item_id 时，因未实现 NotFound 接口返回裸错误并被包装为 500 Internal Server Error，导致监控误报网关故障。现通过 op.NotFoundf 与 writeOpError 统一收口，对不存在的子分组引用或当前活跃项精确返回 404 Not Found。
+
 ## [v0.79.58] - 2026-10-25
 ### Usability & Reliability
 - **分组更新与查询状态语义收敛修复 (Round 21)**：
