@@ -278,7 +278,7 @@ func GroupUpdate(id int, req *model.GroupUpdateRequest, ctx context.Context) (*m
 		// 先写会被它覆盖; 归属校验同样只对最终集合成立。
 		if req.ActiveItemID != nil {
 			if *req.ActiveItemID != 0 && !slices.ContainsFunc(group.Items, func(item model.GroupItem) bool { return item.ID == *req.ActiveItemID }) {
-				return fmt.Errorf("group item not found")
+				return NotFoundf("active item %d not found in group", *req.ActiveItemID)
 			}
 			if err := tx.Model(&model.Group{}).Where("id = ?", id).Update("active_item_id", *req.ActiveItemID).Error; err != nil {
 				return fmt.Errorf("failed to update active item: %w", err)
@@ -388,7 +388,7 @@ func validateChildGroupRefs(tx *gorm.DB, groupID int, requested []model.GroupIte
 			return fmt.Errorf("failed to load child group %d: %w", item.ChildGroupID, err)
 		}
 		if count == 0 {
-			return fmt.Errorf("child group %d not found", item.ChildGroupID)
+			return NotFoundf("child group %d not found", item.ChildGroupID)
 		}
 	}
 

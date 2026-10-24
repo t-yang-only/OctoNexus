@@ -187,7 +187,7 @@ func createGroup(c *gin.Context) {
 	}
 	group, err := op.GroupCreate(&req, c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	response := groupResponse{Group: *group, Runtime: relay.RouteStateOf(*group)}
