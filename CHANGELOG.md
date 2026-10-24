@@ -2,6 +2,13 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.52] - 2026-10-24
+### Security
+- **备份导入导出凭据加固与基准往返 (Round 15)**：
+  - **R15-F1 (HIGH) 异机凭据解密警告**：在 \importSecretWarnings\ 中补齐对 \Sub2APIAccounts\ 的解密校验。跨实例恢复或密钥轮换导致密文无法解开时，如实生成警告提示重新录入 API Key，杜绝静默黑盒报错。
+  - **R15-F2 (HIGH) 明文凭据导入自动加密**：在 \DBImportIncremental\ 导入 \Sub2APIAccounts\ 时，通过 \sealSub2APICredentialsForStore\ 对未加密明文凭据自动执行 AES-GCM 加密落库，保证静态加密契约在导入路径生效。
+  - **R15-F3 (MEDIUM) 下架基准跨机往返**：在 \Sub2APIAccountExport\ 增加 \LastSyncModelsOut\，使 \LastSyncModels\（上次成功同步的模型基准集合）随备份持久化与恢复，避免换机后丢失下架判定基准。
+
 ## [v0.79.51] - 2026-10-24
 ### Security
 - **auth cookie 安全加固 (Round 14, R14-F1/F3)**：auth cookie 新增 \HttpOnly=true\（防止 XSS 读取 JWT，此前为 false）；\Secure\ 属性按链路判定（直连 TLS 或 \X-Forwarded-Proto: https\），反代 HTTPS 链路下自动生效，本地 http 开发环境不被破坏。

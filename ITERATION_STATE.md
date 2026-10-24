@@ -55,7 +55,7 @@
 ---
 
 ## 5. 汇报状态
-- 当前周期累计已完成轮次：14 / 10（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
+- 当前周期累计已完成轮次：15 / 10（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
 - Round 7（部署闭环补全）：v0.79.43 上线后真实 Key 打 relay，High-flash 分组 → deepseek-flash 上游 200（0.98s，正常 completion），满足 T-deploy-003「真实 Key 发一条 200」；另实证 apidate 的 Sub2API 账号数为 0（官方备份 version 5 不含该表），sync 系列功能（Round 4/6）在此实例仅有单测覆盖，在线验证待用户在面板创建账号后自然发生
 - Round 8（最小间隔保护，fa36c4e / v0.79.44 已部署）：账号级 10s 同步间隔 + 剩余等待提示，误连打不再反复打上游；R4/R5/R6 连续同步判据拨开间隔（各守卫互不掩盖，R5-F1 去锁变异复验命中）；R8 变异命中；全仓 21 包 0 FAIL；上线后真实转发 200（0.78s）、DB 无损（21/60/sealed60）
 - Round 9（摘要持久可见，05efda5 / v0.79.45 已部署）：last_sync_summary 落库 + 账号卡片常驻「新增 X / 下架 Y」与下架模型清单；R5-F1 用例按设计边界重建（锁不覆盖 sync 与面板保存交错，注释如实记录；判据改为并发 sync 无库竞争错误 + 并发前人工模型必存活，5 次复跑稳定、去锁变异红）；R9 变异命中；上线后新资产 index-CTqC2uiu.js、真实转发 200（0.98s）、DB 无损
@@ -64,6 +64,7 @@
 - Round 12（停用账号守卫，5c71f82 / v0.79.48 已部署）：probe/sync/clean-stale 三入口对齐 enabled 检查（交叉点纪律第 N 例：修一类要把同类路径一次做全）+ 前端按钮隐藏；三变异全命中；上线后新资产 index-Dml3c1cV.js、真实转发 200（0.78s）
 - Round 13（登录防爆破+密码强度，8a5c703 / v0.79.49 已部署）：模块扫描转向安全面——公网管理面登录无限次试密(HIGH, 5 次失败锁 5 分钟/锁定期口令正确也拒/429+剩余秒数)；改密码只拒空(MEDIUM, op 层 8 位下限+新旧不同)；双变异命中；在线验证 3 次错误密码均 401 不触锁、真实转发 200（0.89s）
 - Round 14（cookie 安全加固+服务端登出，ec4c4f5 / v0.79.51 已部署）：auth cookie 加 HttpOnly+Secure 判定(R14-F1/F3)；新增 POST /api/v1/user/logout 服务端清 cookie(R14-F2)；v0.79.50 部署验证抓出登出挂在 RequireJSON 组报 415，当场修正为独立组(v0.79.51)；双变异均命中；线上验证无 body 登出 200、Set-Cookie 含 auth=; Path=/; Max-Age=0; HttpOnly; Secure、资产 index-JM8xRsR6.js、真实转发 200（0.90s）
+- Round 15（备份导入导出凭据加固与基准往返，2799d34 / v0.79.52 已部署）：importSecretWarnings 补齐 Sub2APIAccounts 异机解密失败警告(R15-F1)；导入明文凭据自动落库加密(R15-F2)；LastSyncModels 备份往返持久化(R15-F3)；3 项独立用例全过；3 项变异全部命中(去警告红、去加密红、去基准红)；上线后真实转发 200（0.84s）、DB 无损（21/60/sealed 60）
 - 下次 Server 酱汇报阈值：Round 10
 - Round 5 已部署上线（v0.79.42，HK4H8G apidate，验证：Version/Commit、匿名 401、资产 hash 一致、DB 无损 channels=21/keys=60/sealed=60/groups=349）。
 Round 6 已部署上线（v0.79.43 @ 7adf6fa，含前端改动）：线上资产 index-DKJ-G_RL.js 与本地构建一致、匿名 401、Version/Commit 正确、DB 无损（21/60/sealed60/349）。
