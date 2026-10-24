@@ -139,7 +139,7 @@ func updateLLM(c *gin.Context) {
 		return
 	}
 	if err := op.LLMUpdate(model, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, model)
@@ -160,7 +160,7 @@ func deleteLLM(c *gin.Context) {
 		return
 	}
 	if err := op.LLMDelete(req.Name, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, nil)

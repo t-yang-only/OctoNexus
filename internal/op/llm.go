@@ -29,7 +29,7 @@ func LLMList() []model.LLMInfo {
 func LLMUpdate(model model.LLMInfo, ctx context.Context) error {
 	_, ok := llmModelCache.Get(model.Name)
 	if !ok {
-		return fmt.Errorf("model not found")
+		return NotFoundf("model %q not found", model.Name)
 	}
 	if err := db.GetDB().WithContext(ctx).Save(model).Error; err != nil {
 		return err
@@ -42,7 +42,7 @@ func LLMUpdate(model model.LLMInfo, ctx context.Context) error {
 func LLMDelete(modelName string, ctx context.Context) error {
 	_, ok := llmModelCache.Get(modelName)
 	if !ok {
-		return fmt.Errorf("model not found")
+		return NotFoundf("model %q not found", modelName)
 	}
 	for _, channelModel := range channelModelCache.GetAll() {
 		if strings.ToLower(channelModel.Name) == modelName {
@@ -144,7 +144,7 @@ func LLMBatchSave(llmInfos []model.LLMInfo, ctx context.Context) error {
 func LLMGet(name string) (model.LLMPrice, error) {
 	price, ok := llmModelCache.Get(strings.ToLower(name))
 	if !ok {
-		return model.LLMPrice{}, fmt.Errorf("model not found")
+		return model.LLMPrice{}, NotFoundf("model %q not found", name)
 	}
 	return price, nil
 }
