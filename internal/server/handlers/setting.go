@@ -88,20 +88,14 @@ func setSetting(c *gin.Context) {
 	}
 	switch setting.Key {
 	case model.SettingKeyModelInfoUpdateInterval:
-		hours, err := strconv.Atoi(setting.Value)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
+		if hours, err := strconv.Atoi(setting.Value); err == nil {
+			task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
 		}
-		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
 	case model.SettingKeyRouteBalanceEnabled:
 		// 加权轮询热路径开关即时生效: relay 不耦合配置源, 由装配层在此注入。
-		enabled, err := strconv.ParseBool(setting.Value)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
+		if enabled, err := strconv.ParseBool(setting.Value); err == nil {
+			relay.SetRouteBalanceEnabled(enabled)
 		}
-		relay.SetRouteBalanceEnabled(enabled)
 	case model.SettingKeyRouteSlowLatencyMs:
 		// 慢成员分区阈值即时生效 (T-route-003): relay 不耦合配置源, 由装配层在此注入。
 		// 解析失败不拦保存 —— 与其它数值设置同口径, 使用侧上次注入的值继续生效。
