@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.69] - 2026-10-25
+### Usability & Reliability
+- **手动订阅更新与删除状态语义收敛修复 (Round 32)**：
+  - **R32-F1 (HIGH) updateManualSubscription 与 deleteManualSubscription 未找到记录时返回 404**：此前 ManualSubscriptionGet 在未找到目标手动订阅时仅返回普通 error，导致 updateManualSubscription 出错时统一以 400 BadRequest 报错，破坏了 RESTful 规范（资源不存在应为 404）；同时 deleteManualSubscription 无论发生何种错误（含内部数据库故障）一律固定返回 404，掩盖了真实的内部错误。现通过 op.NotFoundf 与 writeOpError 统一收口，对不存在的手动订阅记录精确返回 404 Not Found，数据库内部异常则规范回退为 500。
+
 ## [v0.79.68] - 2026-10-25
 ### Usability & Reliability
 - **Sub2API 账号探测状态语义收敛修复 (Round 31)**：
