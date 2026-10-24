@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.56] - 2026-10-25
+### Usability & Reliability
+- **API Key 更新状态语义收敛修复 (Round 19)**：
+  - **R19-F1 (HIGH) updateAPIKey 更新不存在 Key 准确回 404**：此前 deleteAPIKey 已使用 writeOpError 处理资源不存在场景（404），但 updateAPIKey 在查找不到目标 Key 时依然固定返回 500 Internal Server Error，破坏 RESTful 语义并导致监控误报网关故障。现通过 op.NotFoundf 与 writeOpError 统一收口，对不存在的 Key 精确返回 404 Not Found。
+
 ## [v0.79.55] - 2026-10-24
 ### Security
 - **API Key 新建来源白名单字段持久化修复 (Round 18)**：
