@@ -115,7 +115,7 @@ func proxyNodeUpdate(c *gin.Context) {
 	}
 	node, err := op.ProxyNodeUpdate(nil, id, in)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"item": node})
@@ -132,7 +132,7 @@ func proxyNodeDelete(c *gin.Context) {
 			resp.Error(c, http.StatusConflict, err.Error())
 			return
 		}
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"id": id, "removed": true})

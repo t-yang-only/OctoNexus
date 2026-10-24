@@ -127,6 +127,9 @@ func ProxyNodeUpdate(conn *gorm.DB, id int, in model.ProxyNodeInput) (model.Prox
 	}
 	var node model.ProxyNode
 	if err := conn.First(&node, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.ProxyNode{}, NotFoundf("proxy node %d not found", id)
+		}
 		return model.ProxyNode{}, err
 	}
 	updates := map[string]any{}
@@ -175,7 +178,14 @@ func ProxyNodeDelete(conn *gorm.DB, id int) error {
 	if len(usedBy) > 0 {
 		return fmt.Errorf("%w：仍被 %s 引用，先解绑再删除", ErrProxyNodeInUse, strings.Join(usedBy, "、"))
 	}
-	return conn.Delete(&model.ProxyNode{}, id).Error
+	res := conn.Delete(&model.ProxyNode{}, id)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return NotFoundf("proxy node %d not found", id)
+	}
+	return nil
 }
 
 // ProxyNodeMarkProbe 把一次出口探活的结果写回节点（出口 IP 写进 LastExitIP，面板直接显示）。
