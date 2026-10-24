@@ -113,8 +113,12 @@ func ModelMappingUpdate(ctx context.Context, id int, req *model.ModelMappingUpda
 
 // ModelMappingDelete 按主键删除规则。
 func ModelMappingDelete(ctx context.Context, id int) error {
-	if err := db.GetDB().WithContext(ctx).Delete(&model.ModelMapping{}, id).Error; err != nil {
-		return fmt.Errorf("delete model mapping %d: %w", id, err)
+	res := db.GetDB().WithContext(ctx).Delete(&model.ModelMapping{}, id)
+	if res.Error != nil {
+		return fmt.Errorf("delete model mapping %d: %w", id, res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return NotFoundf("model mapping %d not found", id)
 	}
 	return ModelMappingRefresh(ctx)
 }

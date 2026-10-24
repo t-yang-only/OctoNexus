@@ -95,7 +95,7 @@ func deleteModelMapping(c *gin.Context) {
 		return
 	}
 	if err := op.ModelMappingDelete(c.Request.Context(), id); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, "deleted")
