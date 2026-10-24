@@ -248,13 +248,23 @@ func fetchModel(c *gin.Context) {
 	var httpClient *http.Client
 	var err error
 	switch {
+	case target.ProxyNodeID > 0:
+		// R17-F1: 探测时优先路由至渠道绑定的专属出口节点 (fail-closed, 杜绝绕过节点直连泄露真实 IP)
+		var endpoint string
+		endpoint, err = op.ProxyNodeEndpoint(target.ProxyNodeID)
+		if err == nil {
+			httpClient, err = rhttp.New(endpoint)
+			if httpClient != nil {
+				defer httpClient.CloseIdleConnections()
+			}
+		}
 	case !target.Proxy:
 		httpClient, err = rhttp.Direct()
 	case target.ChannelProxy == "":
 		httpClient, err = rhttp.Proxy()
 	default:
 		httpClient, err = rhttp.New(target.ChannelProxy)
-		// 渠道专用代理的客户端不再共享, 探测完就得关掉空闲连接; 探测收的是未落库的输入, 留着也无从复用。
+		// 专有代理客户端单独管理生命周期
 		if httpClient != nil {
 			defer httpClient.CloseIdleConnections()
 		}
