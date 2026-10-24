@@ -25,6 +25,7 @@ import {
     useProbeSub2APIAccount,
     useUpdateSub2APIAccount,
     useSyncSub2APIModels,
+    useCleanSub2APIStaleModels,
     type Sub2APIAccount,
     type Sub2APIPlatform,
     type Sub2APIAccountType,
@@ -47,6 +48,7 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
     const probeMutation = useProbeSub2APIAccount();
     const updateMutation = useUpdateSub2APIAccount();
     const syncModelsMutation = useSyncSub2APIModels();
+    const cleanStaleMutation = useCleanSub2APIStaleModels();
     const [probeResult, setProbeResult] = useState<string | null>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState(account.name);
@@ -89,6 +91,15 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
             },
         });
     };
+    const handleCleanStale = () => {
+        if (!syncSummary || syncSummary.stale_count <= 0) return;
+        if (!confirm(`确认从关联渠道移除以下 ${syncSummary.stale_count} 个上游已下架的模型？\n\n${syncSummary.stale.join('\n')}\n\n仅移除清单内模型，其他模型不受影响。`)) return;
+        cleanStaleMutation.mutate(account.id, {
+            onSuccess: (res) => toast.success(`已清理 ${res.removed_count} 个下架模型`),
+            onError: (err) => toast.error('清理失败: ' + err.message),
+        });
+    };
+
     const handleProbe = () => {
         setProbeResult(null);
         probeMutation.mutate(account.id, {
@@ -260,6 +271,19 @@ function Sub2APIAccountCard({ account }: { account: Sub2APIAccount }) {
                         >
                             {syncModelsMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Download className="mr-1.5 size-3.5" />}
                             同步模型
+                        </Button>
+                    ) : null}
+                    {syncSummary && syncSummary.stale_count > 0 ? (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 rounded-xl text-xs text-amber-600 dark:text-amber-500"
+                            onClick={handleCleanStale}
+                            disabled={cleanStaleMutation.isPending}
+                        >
+                            {cleanStaleMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Trash2 className="mr-1.5 size-3.5" />}
+                            清理下架模型({syncSummary.stale_count})
                         </Button>
                     ) : null}
                     <Button

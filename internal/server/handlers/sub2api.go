@@ -41,6 +41,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/accounts/:id/sync-models", http.MethodPost).
 				Handle(sub2apiAccountSyncModels),
+		).
+		AddRoute(
+			router.NewRoute("/accounts/:id/clean-stale", http.MethodPost).
+				Handle(sub2apiAccountCleanStale),
 		)
 }
 
@@ -149,5 +153,29 @@ func sub2apiAccountSyncModels(c *gin.Context) {
 		"added_count": len(result.Added),
 		"stale":       result.Stale,
 		"stale_count": len(result.Stale),
+	})
+}
+
+func sub2apiAccountCleanStale(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, "非法账号 ID")
+		return
+	}
+	result, err := op.Sub2APIAccountCleanStaleModels(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, op.ErrSub2APIAccountNotFound) {
+			resp.Error(c, http.StatusNotFound, "账号不存在")
+			return
+		}
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, gin.H{
+		"id":            id,
+		"cleaned":       true,
+		"removed":       result.Removed,
+		"removed_count": len(result.Removed),
 	})
 }

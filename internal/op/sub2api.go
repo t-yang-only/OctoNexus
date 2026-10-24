@@ -964,3 +964,95 @@ func Sub2APIAccountSyncModels(ctx context.Context, id int) (*Sub2APISyncModelsRe
 		Stale:  staleModels,
 	}, nil
 }
+
+// Sub2APICleanStaleModelsResult 清理上游已下架模型的结果。
+type Sub2APICleanStaleModelsResult struct {
+	Removed []string `json:"removed"` // 本次实际从渠道移除的模型
+}
+
+// Sub2APIAccountCleanStaleModels 把上次同步发现的下架模型(R9 的 stale 清单)从物化渠道移除。
+// 安全边界: 只删「上次同步基准里已不在上游」的模型, 且删前重新读取渠道现状逐一核对,
+// 绝不按名单盲删; 名单为空时明确告知无需清理。
+func Sub2APIAccountCleanStaleModels(ctx context.Context, id int) (*Sub2APICleanStaleModelsResult, error) {
+	conn := db.GetDB()
+	if conn == nil {
+		return nil, fmt.Errorf("数据库连接不可用")
+	}
+	var account model.Sub2APIAccount
+	if err := conn.First(&account, id).Error; err != nil {
+		return nil, ErrSub2APIAccountNotFound
+	}
+	if account.ChannelID == 0 {
+		return nil, fmt.Errorf("该账号尚未物化为渠道，请先开启物化渠道")
+	}
+
+	var summary struct {
+		Stale []string `json:"stale"`
+	}
+	if account.LastSyncSummary != "" {
+		if err := json.Unmarshal([]byte(account.LastSyncSummary), &summary); err != nil {
+			return nil, fmt.Errorf("读取上次同步摘要失败: %w", err)
+		}
+	}
+	if len(summary.Stale) == 0 {
+		return nil, fmt.Errorf("没有待清理的下架模型（上次同步未发现上游已下架的模型）")
+	}
+
+	// 持渠道锁, 与 sync 的读-改-写窗口互斥 (R5-F1)
+	syncLock := syncModelsLockFor(account.ChannelID)
+	syncLock.Lock()
+	defer syncLock.Unlock()
+
+	detail, err := ChannelDetailGet(account.ChannelID)
+	if err != nil {
+		return nil, fmt.Errorf("读取关联渠道(%d)失败: %w", account.ChannelID, err)
+	}
+
+	// 删前核对: 只删名单与渠道现状交集中的模型, 名单外的模型绝不动
+	toRemove := make(map[string]struct{}, len(summary.Stale))
+	for _, m := range summary.Stale {
+		toRemove[m] = struct{}{}
+	}
+	keptModels := make([]string, 0, len(detail.Models))
+	var removed []string
+	for _, m := range detail.Models {
+		if _, hit := toRemove[m]; hit {
+			removed = append(removed, m)
+			continue
+		}
+		keptModels = append(keptModels, m)
+	}
+	if len(removed) == 0 {
+		return nil, fmt.Errorf("下架模型已不在渠道中（可能已被手动清理）")
+	}
+	detail.Models = keptModels
+	keptGrants := make([]model.ChannelGrantConfig, 0, len(detail.Grants))
+	for _, g := range detail.Grants {
+		if _, hit := toRemove[g.ModelName]; hit {
+			continue
+		}
+		keptGrants = append(keptGrants, g)
+	}
+	detail.Grants = keptGrants
+
+	if _, err := ChannelUpdate(&detail, ctx); err != nil {
+		return nil, fmt.Errorf("清理下架模型失败: %w", err)
+	}
+
+	// 摘要归零: stale 清单已处理, 避免卡片持续显示待清理
+	clearedPayload, err := json.Marshal(map[string]any{
+		"added_count": 0,
+		"stale_count": 0,
+		"stale":       []string{},
+		"cleaned":     removed,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("生成清理摘要失败: %w", err)
+	}
+	if err := conn.Model(&model.Sub2APIAccount{}).Where("id = ?", account.ID).
+		Update("last_sync_summary", string(clearedPayload)).Error; err != nil {
+		return nil, fmt.Errorf("回写清理摘要失败: %w", err)
+	}
+
+	return &Sub2APICleanStaleModelsResult{Removed: removed}, nil
+}

@@ -104,6 +104,22 @@ export function useProbeSub2APIAccount() {
     });
 }
 
+export function useCleanSub2APIStaleModels() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (id: number) =>
+            apiRequest<{ id: number; cleaned: boolean; removed: string[]; removed_count: number }>(
+                `/api/v1/sub2api/accounts/${id}/clean-stale`,
+                { method: 'POST' }
+            ),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: sub2apiAccountListQueryKey });
+            void queryClient.invalidateQueries({ queryKey: ['channel', 'list'] });
+            void queryClient.invalidateQueries({ queryKey: ['group', 'list'] });
+        },
+    });
+}
+
 export function useUpdateSub2APIAccount() {
     const queryClient = useQueryClient();
     return useMutation({
