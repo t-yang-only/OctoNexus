@@ -63,7 +63,7 @@ func balanceChannelSet(c *gin.Context) {
 		return
 	}
 	if err := op.ChannelManualBalanceSet(id, body.Points, body.Note); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, op.BalanceSummaryGet())

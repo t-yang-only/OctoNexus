@@ -1,12 +1,14 @@
 package op
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/t-yang-only/OctoNexus/internal/db"
 	"github.com/t-yang-only/OctoNexus/internal/model"
+	"gorm.io/gorm"
 )
 
 // 余额的「读不到时怎么办」（R-balance-002）。
@@ -108,8 +110,12 @@ func ChannelManualBalanceSet(channelID int, points float64, note string) error {
 	} else {
 		updates["balance_at"] = ""
 	}
-	if err := db.GetDB().Model(&model.Channel{}).Where("id = ?", channelID).Updates(updates).Error; err != nil {
-		return err
+	res := db.GetDB().Model(&model.Channel{}).Where("id = ?", channelID).Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return NotFoundf("channel %d not found", channelID)
 	}
 	return ReloadChannel(channelID)
 }
@@ -118,6 +124,9 @@ func ChannelManualBalanceSet(channelID int, points float64, note string) error {
 func ReloadChannel(channelID int) error {
 	var channel model.Channel
 	if err := db.GetDB().First(&channel, channelID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return NotFoundf("channel %d not found", channelID)
+		}
 		return err
 	}
 	channelCache.Set(channel.ID, channel)
