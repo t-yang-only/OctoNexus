@@ -553,6 +553,9 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				if err == nil && n != len(result.body) {
 					err = io.ErrShortWrite
 				}
+				if err == nil {
+					c.Writer.Flush()
+				}
 				if err != nil {
 					if ctx.Err() != nil {
 						request.markCanceled(ctx.Err(), string(result.body), result.usage)
