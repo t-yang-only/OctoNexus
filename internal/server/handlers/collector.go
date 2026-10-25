@@ -132,7 +132,7 @@ func collectorSourceGet(c *gin.Context) {
 	}
 	item, err := op.CredentialSourceGet(c.Request.Context(), id)
 	if err != nil {
-		resp.Error(c, http.StatusNotFound, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"item": item})
@@ -164,7 +164,7 @@ func collectorSourceUpdate(c *gin.Context) {
 	}
 	item, err := op.CredentialSourceSave(c.Request.Context(), id, in)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"item": item})
@@ -176,7 +176,7 @@ func collectorSourceDelete(c *gin.Context) {
 		return
 	}
 	if err := op.CredentialSourceDelete(c.Request.Context(), id); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{})
@@ -190,7 +190,7 @@ func collectorSourceRun(c *gin.Context) {
 	}
 	reading, result, err := op.CredentialSourceRunNow(c.Request.Context(), id)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	item, _ := op.CredentialSourceGet(c.Request.Context(), id)
@@ -212,7 +212,7 @@ func collectorSourceExport(c *gin.Context) {
 	}
 	item, pack, err := op.CredentialSourceExportPack(c.Request.Context(), id)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{
@@ -267,7 +267,7 @@ func collectorSourceLoginStart(c *gin.Context) {
 	}
 	item, err := op.CredentialSourceStartLogin(c.Request.Context(), id)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"item": item, "login_url": item.LoginURL})
@@ -282,7 +282,7 @@ func collectorSourceLoginFinish(c *gin.Context) {
 	item, err := op.CredentialSourceFinishLogin(c.Request.Context(), id)
 	if err != nil {
 		// 会话可能已经存下、只是试读失败：把最新状态一并带回，面板才能显示真实处境。
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"item": item})
@@ -295,7 +295,7 @@ func collectorSourceSessionClear(c *gin.Context) {
 	}
 	item, err := op.CredentialSourceClearSession(c.Request.Context(), id)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"item": item})

@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	"github.com/t-yang-only/OctoNexus/internal/db"
 	"github.com/t-yang-only/OctoNexus/internal/model"
 	"github.com/t-yang-only/OctoNexus/internal/secret"
+	"gorm.io/gorm"
 )
 
 // 三类密文用不同 AAD 做用途隔离：采集包（可能含站点内网路径）、登录凭据、登录会话，互不通用。
@@ -197,8 +199,12 @@ func CredentialSourceSave(ctx context.Context, id int, in model.CredentialSource
 
 // CredentialSourceDelete 删除采集凭据并清掉内存会话（密文随之作废）。
 func CredentialSourceDelete(ctx context.Context, id int) error {
-	if err := db.GetDB().WithContext(ctx).Where("id = ?", id).Delete(&model.CredentialSource{}).Error; err != nil {
-		return err
+	res := db.GetDB().WithContext(ctx).Where("id = ?", id).Delete(&model.CredentialSource{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return NotFoundf("credential source %d not found", id)
 	}
 	collectorState.Lock()
 	delete(collectorState.sessions, id)
@@ -517,6 +523,9 @@ func credentialSourceRow(ctx context.Context, id int) (model.CredentialSource, e
 		return row, fmt.Errorf("采集凭据 id 非法")
 	}
 	if err := db.GetDB().WithContext(ctx).First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return row, NotFoundf("credential source %d not found", id)
+		}
 		return row, fmt.Errorf("采集凭据 #%d 不存在：%v", id, err)
 	}
 	return row, nil
