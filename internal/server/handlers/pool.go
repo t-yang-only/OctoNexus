@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/csv"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -106,6 +107,10 @@ func poolEntries(c *gin.Context) {
 	}
 	result, err := pool.List(c.Request.Context(), filter, time.Now())
 	if err != nil {
+		if errors.Is(err, pool.ErrUnknownKind) {
+			resp.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
 		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -144,6 +149,10 @@ func poolExport(c *gin.Context) {
 	}
 	rows, failures, err := pool.ExportRows(c.Request.Context(), filter, time.Now())
 	if err != nil {
+		if errors.Is(err, pool.ErrUnknownKind) {
+			resp.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
 		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -241,6 +250,10 @@ func poolBatch(c *gin.Context) {
 	}
 	result, err := pool.Batch(c.Request.Context(), request, time.Now())
 	if err != nil {
+		if errors.Is(err, pool.ErrUnknownKind) {
+			resp.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
 		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}

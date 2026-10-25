@@ -121,6 +121,20 @@ func Register(spec pool.DeclarativeSpec) (pool.DeclarativeSpec, error) {
 }
 
 // Remove 移除一个声明式适配器（内置适配器不可移除）。
+// Get 按 kind 读取单个声明式适配器（已脱敏）。
+func Get(kind string) (pool.DeclarativeSpec, error) {
+	stored, err := specs()
+	if err != nil {
+		return pool.DeclarativeSpec{}, err
+	}
+	for _, spec := range stored {
+		if spec.Kind == kind {
+			return Redact(spec), nil
+		}
+	}
+	return pool.DeclarativeSpec{}, fmt.Errorf("%w: kind %q not found", pool.ErrUnknownKind, kind)
+}
+
 func Remove(kind string) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -129,12 +143,23 @@ func Remove(kind string) error {
 	if kind == "" {
 		return fmt.Errorf("%w: 空 kind", pool.ErrUnknownKind)
 	}
+	if pool.BuiltinKind(kind) {
+		return fmt.Errorf("%w: kind %q 是内置适配器，不能移除", pool.ErrUnknownKind, kind)
+	}
 	stored, err := specs()
 	if err != nil {
 		return err
 	}
-	if err := pool.UnregisterRuntime(kind); err != nil {
-		return err
+	foundInStore := false
+	for _, s := range stored {
+		if s.Kind == kind {
+			foundInStore = true
+			break
+		}
+	}
+	runtimeErr := pool.UnregisterRuntime(kind)
+	if !foundInStore && runtimeErr != nil {
+		return fmt.Errorf("%w: kind %q not found", pool.ErrUnknownKind, kind)
 	}
 	return save(drop(stored, kind))
 }

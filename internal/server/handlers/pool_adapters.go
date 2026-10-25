@@ -40,6 +40,10 @@ func init() {
 				Handle(poolAdapterTemplates),
 		).
 		AddRoute(
+			router.NewRoute("/adapters/:kind", http.MethodGet).
+				Handle(poolAdapterGet),
+		).
+		AddRoute(
 			router.NewRoute("/adapters/:kind", http.MethodDelete).
 				Handle(poolAdapterRemove),
 		)
@@ -83,6 +87,21 @@ func poolAdapterRegister(c *gin.Context) {
 		return
 	}
 	resp.Success(c, gin.H{"item": registered})
+}
+
+// poolAdapterGet 获取单个声明式适配器详情（已脱敏）。
+func poolAdapterGet(c *gin.Context) {
+	kind := c.Param("kind")
+	spec, err := poolstore.Get(kind)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, pool.ErrUnknownKind) {
+			status = http.StatusNotFound
+		}
+		resp.Error(c, status, err.Error())
+		return
+	}
+	resp.Success(c, gin.H{"item": spec})
 }
 
 // poolAdapterRemove 移除一个声明式适配器（内置适配器会被拒绝）。
