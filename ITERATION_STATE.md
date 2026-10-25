@@ -55,7 +55,7 @@
 ---
 
 ## 5. 汇报状态
-- 当前周期累计已完成轮次：8 / 10 (第四周期 Round 38)（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
+- 当前周期累计已完成轮次：9 / 10 (第四周期 Round 39)（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
 - Round 7（部署闭环补全）：v0.79.43 上线后真实 Key 打 relay，High-flash 分组 → deepseek-flash 上游 200（0.98s，正常 completion），满足 T-deploy-003「真实 Key 发一条 200」；另实证 apidate 的 Sub2API 账号数为 0（官方备份 version 5 不含该表），sync 系列功能（Round 4/6）在此实例仅有单测覆盖，在线验证待用户在面板创建账号后自然发生
 - Round 8（最小间隔保护，fa36c4e / v0.79.44 已部署）：账号级 10s 同步间隔 + 剩余等待提示，误连打不再反复打上游；R4/R5/R6 连续同步判据拨开间隔（各守卫互不掩盖，R5-F1 去锁变异复验命中）；R8 变异命中；全仓 21 包 0 FAIL；上线后真实转发 200（0.78s）、DB 无损（21/60/sealed60）
 - Round 9（摘要持久可见，05efda5 / v0.79.45 已部署）：last_sync_summary 落库 + 账号卡片常驻「新增 X / 下架 Y」与下架模型清单；R5-F1 用例按设计边界重建（锁不覆盖 sync 与面板保存交错，注释如实记录；判据改为并发 sync 无库竞争错误 + 并发前人工模型必存活，5 次复跑稳定、去锁变异红）；R9 变异命中；上线后新资产 index-CTqC2uiu.js、真实转发 200（0.98s）、DB 无损
@@ -88,6 +88,7 @@
 - Round 36（采集凭据源更新与删除语义收敛修复，86ca9a7 / v0.79.73 已部署）：collectorSourceUpdate/collectorSourceDelete 准确返回 404 而非 400 或空删除 200(R36-F1)；消除采集凭据源查空时的状态码语义混淆与误报成功；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（1.12s）、DB 无损（21/60/sealed 60）
 - Round 37（一键建组与渠道/分组读操作语义收敛修复，89a4ca1 / v0.79.74 已部署）：groupQuickCreate 准确返回 404 而非 400(R37-F1)；getGroup/verifyChannelModels/checkChannelUpstream 接入 writeOpError 防误报(R37-F2)；消除一键建组查空时的状态码语义混淆；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（0.79s）、DB 无损（21/60/sealed 60）
 - Round 38（系统设置更新语义收敛修复，aefb050 / v0.79.75 已部署）：setSetting 准确返回 404 而非 500(R38-F1)；SettingSetString/SettingGetString/SettingSetInt 统一封装 NotFoundf 哨兵错误；消除未知设置项写入时的状态码语义混淆与服务器内部错误误报；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（0.85s）、DB 无损（21/60/sealed 60）
+- Round 39（号池查询与声明式适配器语义收敛修复，e28ded3 / v0.79.76 已部署）：poolEntries/poolExport/poolBatch 准确返回 404 而非 400(R39-F1)；新增 poolAdapterGet 并优化 Remove 容错清理(R39-F2)；消除号池未注册 kind 时的状态码语义混淆；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（0.84s）、DB 无损（21/60/sealed 60）
 - 下次 Server 酱汇报阈值：Round 10
 - Round 5 已部署上线（v0.79.42，HK4H8G apidate，验证：Version/Commit、匿名 401、资产 hash 一致、DB 无损 channels=21/keys=60/sealed=60/groups=349）。
 Round 6 已部署上线（v0.79.43 @ 7adf6fa，含前端改动）：线上资产 index-DKJ-G_RL.js 与本地构建一致、匿名 401、Version/Commit 正确、DB 无损（21/60/sealed60/349）。
