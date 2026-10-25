@@ -55,7 +55,7 @@
 ---
 
 ## 5. 汇报状态
-- 当前周期累计已完成轮次：2 / 10 (第五周期 Round 42)（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
+- 当前周期累计已完成轮次：3 / 10 (第五周期 Round 43)（第 10 轮 Server酱汇报已发送 pushid 63592729；新周期自 Round 11 起）
 - Round 7（部署闭环补全）：v0.79.43 上线后真实 Key 打 relay，High-flash 分组 → deepseek-flash 上游 200（0.98s，正常 completion），满足 T-deploy-003「真实 Key 发一条 200」；另实证 apidate 的 Sub2API 账号数为 0（官方备份 version 5 不含该表），sync 系列功能（Round 4/6）在此实例仅有单测覆盖，在线验证待用户在面板创建账号后自然发生
 - Round 8（最小间隔保护，fa36c4e / v0.79.44 已部署）：账号级 10s 同步间隔 + 剩余等待提示，误连打不再反复打上游；R4/R5/R6 连续同步判据拨开间隔（各守卫互不掩盖，R5-F1 去锁变异复验命中）；R8 变异命中；全仓 21 包 0 FAIL；上线后真实转发 200（0.78s）、DB 无损（21/60/sealed60）
 - Round 9（摘要持久可见，05efda5 / v0.79.45 已部署）：last_sync_summary 落库 + 账号卡片常驻「新增 X / 下架 Y」与下架模型清单；R5-F1 用例按设计边界重建（锁不覆盖 sync 与面板保存交错，注释如实记录；判据改为并发 sync 无库竞争错误 + 并发前人工模型必存活，5 次复跑稳定、去锁变异红）；R9 变异命中；上线后新资产 index-CTqC2uiu.js、真实转发 200（0.98s）、DB 无损
@@ -92,6 +92,7 @@
 - Round 40（用量报告周期校验消除静默降级与分页限额治理，5e8db25 / v0.79.77 已部署）：preview/sendUsageReport 准确返回 400 拒绝非法周期(R40-F1)；usageReportHistory 支持 1-100 校验(R40-F2)；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（1.32s）、DB 无损（21/60/sealed 60）
 - Round 41（流式反代防缓冲响应头与流式收尾终止原因归因收敛，da991e1 / v0.79.78 已部署）：补齐 Cache-Control/Connection/X-Accel-Buffering(R41-F1)；流式收尾失败精准标注 stream_idle_timeout/response_committed(R41-F2)；终结全仓唯一 unrecorded 盲区；独立单元测试通过；变异测试精准杀灭；上线后真实转发 200（1.10s）、DB 无损（21/60/sealed 60）
 - Round 42（非流式响应写出立即 Flush 消除反代缓冲延迟，4854efa / v0.79.79 已部署）：非流式写入成功后立即调用 c.Writer.Flush()(R42-F1)；建立确定性立即可读响应边界；独立源码守卫测试通过；变异测试精准杀灭；上线后真实转发 200（0.27s）、DB 无损（21/60/sealed 60）
+- Round 43（响应头透传 X-Octopus-Request-Id 端到端可观测，8f3a07e / v0.79.80 已部署）：响应头注入 X-Octopus-Request-Id(R43-F1)；关联客户端请求与审计日志；独立源码不变量守卫测试通过；变异测试精准杀灭；上线后真实转发 200（X-Octopus-Request-Id: 1 实测透传）、DB 无损（21/60/sealed 60）
 - 下次 Server 酱汇报阈值：Round 10
 - Round 5 已部署上线（v0.79.42，HK4H8G apidate，验证：Version/Commit、匿名 401、资产 hash 一致、DB 无损 channels=21/keys=60/sealed=60/groups=349）。
 Round 6 已部署上线（v0.79.43 @ 7adf6fa，含前端改动）：线上资产 index-DKJ-G_RL.js 与本地构建一致、匿名 401、Version/Commit 正确、DB 无损（21/60/sealed60/349）。

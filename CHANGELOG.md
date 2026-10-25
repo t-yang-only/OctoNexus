@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.80] - 2026-10-25
+### Observability & Traceability
+- **出站与终态响应头透传 X-Octopus-Request-Id 实现端到端全链路可观测 (Round 43)**：
+  - **R43-F1 (HIGH) 网关响应头显式透传 X-Octopus-Request-Id**：在 `publishDecision`（正常及故障转移出站）以及 `failRequest`（最终失败返回）逻辑中，向客户端响应头注入 `X-Octopus-Request-Id: <request.ID>`，与现有的 `X-Octopus-Route` 共同构成完全自洽的请求侧可观测协议；客户端收到任意成功或失败响应时，均可据此头与服务端的请求状态机、审计日志表（`relay_logs.id`）进行 100% 精确的一对一溯源关联。
+
 ## [v0.79.79] - 2026-10-25
 ### Usability & Reliability
 - **非流式响应写出立即 Flush 消除反代缓冲延迟 (Round 42)**：
