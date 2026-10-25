@@ -66,6 +66,8 @@ const (
 	stopReasonClientCancel = "client_canceled"
 	// stopReasonCommitGuard 已向上游提交（首字节已写出）后的失败，不能再换成员。
 	stopReasonCommitGuard = "response_committed"
+	// stopReasonStreamIdle 流式响应在首个事件之后长时间无进展超时（T-timeout-001）。
+	stopReasonStreamIdle = "stream_idle_timeout"
 	// stopReasonUnrecorded 该出口没有标注终止原因。
 	//
 	// 它不是一种"终止规则"，而是一个**实现缺陷的可见信号**：留空会与

@@ -572,11 +572,16 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			if c.Writer.Header().Get("Content-Type") == "" {
 				c.Header("Content-Type", "text/event-stream")
 			}
+			c.Header("Cache-Control", "no-cache")
+			c.Header("Connection", "keep-alive")
+			c.Header("X-Accel-Buffering", "no")
 			var encoded bytes.Buffer
 			var chunks []*httpclient.StreamEvent
 			event := result.first
 			last := result.last // 已转发的最后一个事件是否已按客户端协议结束整个响应流。
 			committed := false
+			streamErrReason := stopReasonCommitGuard
+			streamErrSource := stopSourceUpstream
 			// 首个事件之后的「无进展」看门狗: 上游吐了首帧就不再出字时, 不能把客户端无限挂着。
 			// 每收到一个上游事件、每成功写给客户端一帧都重置计时; 0 表示关闭（保持旧行为）。
 			idleSeconds := group.RelayConfig.MemberStreamIdleTimeoutSeconds
@@ -610,6 +615,8 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					}
 					if writeErr != nil {
 						err = writeErr
+						streamErrReason = stopReasonCommitGuard
+						streamErrSource = stopSourceClient
 						break
 					}
 					c.Writer.Flush()
@@ -620,6 +627,11 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 				}
 				if !result.events.Next() {
 					err = result.events.Err()
+					if err == nil && !last {
+						err = io.ErrUnexpectedEOF
+					}
+					streamErrReason = stopReasonCommitGuard
+					streamErrSource = stopSourceUpstream
 					break
 				}
 				event = result.events.Current()
@@ -630,6 +642,8 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 			// 看门狗命中时上层读到的是被取消的读错误, 这里把它还原成明确的失败原因。
 			if context.Cause(roundCtx) == errStreamIdleTimeout {
 				err = errStreamIdleTimeout
+				streamErrReason = stopReasonStreamIdle
+				streamErrSource = stopSourceConfig
 			}
 			result.events.Close()
 			// 事件流已读完, 渠道专用代理的独占连接池到此归还。
@@ -671,7 +685,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 					// 流式收尾失败：读上下游（网络中断）还是写客户端，这里分不出来，
 					// 因此传空让它落成 unrecorded —— 如实表示"这个出口没有细分原因"，
 					// 不为了好看硬安一个可能错的来源。
-					request.markFailed(err, string(responseBody), result.usage, "", "")
+					request.markFailed(err, string(responseBody), result.usage, streamErrReason, streamErrSource)
 				}
 				return
 			}
