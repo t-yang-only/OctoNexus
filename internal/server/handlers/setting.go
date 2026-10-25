@@ -83,7 +83,7 @@ func setSetting(c *gin.Context) {
 		return
 	}
 	if err := op.SettingSetString(setting.Key, setting.Value); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	switch setting.Key {

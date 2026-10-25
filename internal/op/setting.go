@@ -31,7 +31,7 @@ func SettingList(ctx context.Context) ([]model.Setting, error) {
 func SettingGetString(key model.SettingKey) (string, error) {
 	setting, ok := settingCache.Get(key)
 	if !ok {
-		return "", fmt.Errorf("setting not found")
+		return "", NotFoundf("setting %q not found", key)
 	}
 	return setting, nil
 }
@@ -67,7 +67,7 @@ func parseTrustedProxies(value string) []string {
 func SettingSetString(key model.SettingKey, value string) error {
 	valueCache, ok := settingCache.Get(key)
 	if !ok {
-		return fmt.Errorf("setting not found")
+		return NotFoundf("setting %q not found", key)
 	}
 	if valueCache == value {
 		return nil
@@ -77,7 +77,7 @@ func SettingSetString(key model.SettingKey, value string) error {
 		return fmt.Errorf("failed to set setting: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("failed to set setting, key not found")
+		return NotFoundf("setting %q not found", key)
 	}
 	settingCache.Set(key, value)
 	return nil
@@ -86,7 +86,7 @@ func SettingSetString(key model.SettingKey, value string) error {
 func SettingGetInt(key model.SettingKey) (int, error) {
 	setting, ok := settingCache.Get(key)
 	if !ok {
-		return 0, fmt.Errorf("setting not found")
+		return 0, NotFoundf("setting %q not found", key)
 	}
 	return strconv.Atoi(setting)
 }
@@ -94,7 +94,7 @@ func SettingGetInt(key model.SettingKey) (int, error) {
 func SettingGetBool(key model.SettingKey) (bool, error) {
 	setting, ok := settingCache.Get(key)
 	if !ok {
-		return false, fmt.Errorf("setting not found")
+		return false, NotFoundf("setting %q not found", key)
 	}
 	return strconv.ParseBool(setting)
 }
@@ -112,7 +112,7 @@ func SettingSetStringForTest(key model.SettingKey, value string, present bool) {
 func SettingSetInt(key model.SettingKey, value int) error {
 	valueCache, ok := settingCache.Get(key)
 	if !ok {
-		return fmt.Errorf("setting not found")
+		return NotFoundf("setting %q not found", key)
 	}
 	valueCacheNum, err := strconv.Atoi(valueCache)
 	if err != nil {
@@ -126,7 +126,7 @@ func SettingSetInt(key model.SettingKey, value int) error {
 		return fmt.Errorf("failed to set setting: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("failed to set setting, key not found")
+		return NotFoundf("setting %q not found", key)
 	}
 	settingCache.Set(key, strconv.Itoa(value))
 	return nil
