@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.73] - 2026-10-25
+### Usability & Reliability
+- **采集凭据源更新与删除状态语义收敛修复 (Round 36)**：
+  - **R36-F1 (HIGH) collectorSourceUpdate 与 collectorSourceDelete 对不存在凭据源返回 404**：此前 credentialSourceRow 在通过 ID 查找采集源未命中时仅返回普通 error，导致 collectorSourceUpdate 出错时统一以 400 BadRequest 报错，破坏了 RESTful 规范（资源不存在应为 404）；同时 CredentialSourceDelete 在未找到行时未检查 RowsAffected 导致空删除误报成功 200。现通过 RowsAffected 检查、op.NotFoundf 与 writeOpError 统一收口，对不存在的采集凭据源精确返回 404 Not Found。
+
 ## [v0.79.72] - 2026-10-25
 ### Usability & Reliability
 - **渠道人工余额设置状态语义收敛修复 (Round 35)**：
