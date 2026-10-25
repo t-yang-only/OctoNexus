@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.79] - 2026-10-25
+### Usability & Reliability
+- **非流式响应写出立即 Flush 消除反代缓冲延迟 (Round 42)**：
+  - **R42-F1 (HIGH) 核心模型非流式响应写入客户端后立即调用 c.Writer.Flush()**：此前流式循环在每帧写入后均调用了 Flush，但非流式响应在 c.Writer.Write(result.body) 成功后未显式 Flush，在底层基于 chunked 传输或经过 Caddy/Nginx 反代时可能滞留在内存缓冲中；现补齐立即 Flush，确保客户端在收到完备字节的同时建立立即可读响应边界，进一步降低长响应端到端延迟。
+
 ## [v0.79.78] - 2026-10-25
 ### Usability & Reliability
 - **流式反代防缓冲响应头与流式收尾终止原因归因收敛 (Round 41)**：
