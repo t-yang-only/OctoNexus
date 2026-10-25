@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.75] - 2026-10-25
+### Usability & Reliability
+- **系统设置更新状态语义收敛修复 (Round 38)**：
+  - **R38-F1 (HIGH) setSetting 对不存在的设置项返回 404**：此前 SettingSetString 在未命中缓存或更新行数为空时仅返回普通 error，导致 setSetting 无论遇到何种错误一律返回 500 InternalServerError，将业务层“配置项不存在”误报为服务端内部故障，破坏了 RESTful 契约；现通过 SettingSetString/SettingGetString 封装返回 op.NotFoundf，并在 setSetting 中统一由 writeOpError 收口，对不存在的配置项精确返回 404 Not Found。
+
 ## [v0.79.74] - 2026-10-25
 ### Usability & Reliability
 - **一键建组与渠道/分组读操作状态语义收敛修复 (Round 37)**：
