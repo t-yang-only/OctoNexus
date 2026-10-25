@@ -2,6 +2,12 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.77] - 2026-10-25
+### Usability & Reliability
+- **用量报告周期校验消除静默降级与分页限额治理 (Round 40)**：
+  - **R40-F1 (HIGH) previewUsageReport / sendUsageReport 对非法 period 返回 400**：此前 reportPeriod 在遇到非法周期参数时直接静默回退为系统默认值或 Daily，严重误导调用方；现通过 parseReportPeriod 显式校验非法值并返回 400 BadRequest，请求体带格式错误时亦严格返回 400。
+  - **R40-F2 (MEDIUM) usageReportHistory 增加可选 limit 参数合法性校验**：限制在 1-100 区间，杜绝越界与类型解析异常。
+
 ## [v0.79.76] - 2026-10-25
 ### Usability & Reliability
 - **号池查询、批量操作及声明式适配器状态语义收敛修复 (Round 39)**：
