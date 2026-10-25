@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.72] - 2026-10-25
+### Usability & Reliability
+- **渠道人工余额设置状态语义收敛修复 (Round 35)**：
+  - **R35-F1 (HIGH) balanceChannelSet 对不存在渠道返回 404**：此前 ChannelManualBalanceSet 在更新渠道余额时未检查 RowsAffected，且 ReloadChannel 未将 gorm.ErrRecordNotFound 转换为 NotFoundf，导致 balanceChannelSet 无论发生何种错误（包括渠道根本不存在）一律返回 500 InternalServerError，破坏了 RESTful 规范（资源不存在应为 404）；现通过 RowsAffected 检查、ReloadChannel 哨兵封装与 writeOpError 统一收口，对不存在的渠道精确返回 404 Not Found。
+
 ## [v0.79.71] - 2026-10-25
 ### Usability & Reliability
 - **扩展插件更新与删除状态语义收敛修复 (Round 34)**：
