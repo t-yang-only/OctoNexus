@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -150,7 +151,10 @@ func Get(ctx context.Context, slug string) (model.Plugin, error) {
 	}
 	var row model.Plugin
 	if err := conn.WithContext(ctx).Where("slug = ?", slug).First(&row).Error; err != nil {
-		return model.Plugin{}, fmt.Errorf("插件不存在：%s", slug)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Plugin{}, op.NotFoundf("plugin %q not found", slug)
+		}
+		return model.Plugin{}, fmt.Errorf("查询插件失败：%w", err)
 	}
 	return row, nil
 }
@@ -200,7 +204,14 @@ func Remove(ctx context.Context, slug string) error {
 	if running, _ := IsRunning(slug); running {
 		return fmt.Errorf("插件 %s 正在运行，请先停止再删除", slug)
 	}
-	return conn.WithContext(ctx).Where("slug = ?", slug).Delete(&model.Plugin{}).Error
+	res := conn.WithContext(ctx).Where("slug = ?", slug).Delete(&model.Plugin{})
+	if res.Error != nil {
+		return fmt.Errorf("删除插件记录失败：%w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return op.NotFoundf("plugin %q not found", slug)
+	}
+	return nil
 }
 
 // tokenFor 取（必要时生成）插件令牌：同一把明文既作渠道凭据落库、也在启动时注入插件进程。

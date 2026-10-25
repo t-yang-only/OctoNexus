@@ -84,7 +84,7 @@ func pluginScan(c *gin.Context) {
 func pluginStart(c *gin.Context) {
 	status, err := plugin.Start(c.Request.Context(), c.Param("slug"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"item": status})
@@ -106,7 +106,7 @@ func pluginStop(c *gin.Context) {
 func pluginStatus(c *gin.Context) {
 	status, err := plugin.Status(c.Request.Context(), c.Param("slug"))
 	if err != nil {
-		resp.Error(c, http.StatusNotFound, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"item": status})
@@ -120,7 +120,7 @@ func pluginUpdate(c *gin.Context) {
 	}
 	row, err := plugin.Update(c.Request.Context(), c.Param("slug"), in)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	status, err := plugin.Status(c.Request.Context(), row.Slug)
@@ -133,7 +133,7 @@ func pluginUpdate(c *gin.Context) {
 
 func pluginRemove(c *gin.Context) {
 	if err := plugin.Remove(c.Request.Context(), c.Param("slug")); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{})
