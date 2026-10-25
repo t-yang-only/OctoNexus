@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.71] - 2026-10-25
+### Usability & Reliability
+- **扩展插件更新与删除状态语义收敛修复 (Round 34)**：
+  - **R34-F1 (HIGH) pluginUpdate 与 pluginRemove 未找到插件时返回 404**：此前 plugin.Get 在未找到目标插件时仅返回普通 error，导致 pluginUpdate 出错时统一以 400 BadRequest 报错，破坏了 RESTful 规范（资源不存在应为 404）；同时 pluginRemove 在未找到行时未检查 RowsAffected 导致空删除误报成功 200。现通过 RowsAffected 检查、op.NotFoundf 与 writeOpError 统一收口，对不存在的插件精确返回 404 Not Found。
+
 ## [v0.79.70] - 2026-10-25
 ### Usability & Reliability
 - **告警规则更新与删除状态语义收敛修复 (Round 33)**：
