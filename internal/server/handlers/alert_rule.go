@@ -87,7 +87,7 @@ func updateAlertRule(c *gin.Context) {
 	}
 	item, err := op.AlertRuleUpdate(c.Request.Context(), id, &req)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, item)
@@ -100,7 +100,7 @@ func deleteAlertRule(c *gin.Context) {
 		return
 	}
 	if err := op.AlertRuleDelete(c.Request.Context(), id); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, "deleted")
@@ -121,7 +121,7 @@ func evaluateAlertRule(c *gin.Context) {
 	}
 	rule, err := op.AlertRuleGet(c.Request.Context(), body.RuleID)
 	if err != nil {
-		resp.Error(c, http.StatusNotFound, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	evals, err := op.AlertRuleDue(c.Request.Context(), *rule, timeNow())

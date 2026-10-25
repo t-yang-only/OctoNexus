@@ -2,12 +2,14 @@ package op
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/t-yang-only/OctoNexus/internal/db"
 	"github.com/t-yang-only/OctoNexus/internal/model"
+	"gorm.io/gorm"
 )
 
 // 告警规则引擎的评估与写路径（吸收上游 lingyuins/octopus 的 Alerts）。
@@ -64,6 +66,9 @@ func AlertFireList(ctx context.Context, limit int) []model.AlertFire {
 func AlertRuleGet(ctx context.Context, id int) (*model.AlertRule, error) {
 	var item model.AlertRule
 	if err := db.GetDB().WithContext(ctx).First(&item, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, NotFoundf("alert rule %d not found", id)
+		}
 		return nil, fmt.Errorf("get alert rule %d: %w", id, err)
 	}
 	return &item, nil
@@ -168,8 +173,12 @@ func AlertRuleUpdate(ctx context.Context, id int, req *model.AlertRuleUpdateRequ
 
 // AlertRuleDelete 删除规则（触发历史保留，便于回溯"这条规则报过什么"）。
 func AlertRuleDelete(ctx context.Context, id int) error {
-	if err := db.GetDB().WithContext(ctx).Delete(&model.AlertRule{}, id).Error; err != nil {
-		return fmt.Errorf("delete alert rule %d: %w", id, err)
+	res := db.GetDB().WithContext(ctx).Delete(&model.AlertRule{}, id)
+	if res.Error != nil {
+		return fmt.Errorf("delete alert rule %d: %w", id, res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return NotFoundf("alert rule %d not found", id)
 	}
 	return nil
 }
