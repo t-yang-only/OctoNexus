@@ -173,7 +173,7 @@ func getGroup(c *gin.Context) {
 	}
 	group, err := op.GroupGet(id)
 	if err != nil {
-		resp.Error(c, http.StatusNotFound, err.Error())
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, groupResponse{Group: group, Runtime: relay.RouteStateOf(group)})

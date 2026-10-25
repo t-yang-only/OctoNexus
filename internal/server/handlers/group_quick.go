@@ -36,8 +36,10 @@ func groupQuickCreate(c *gin.Context) {
 	}
 	result, err := op.GroupQuickCreate(c.Request.Context(), &req)
 	if err != nil {
-		// 这些错误都是"用户该改输入"型（渠道不存在/模型无可用凭据/同名分组成员不同），
-		// 一律 400 并带上原文，不回 500 —— 500 会让人以为是服务端故障。
+		if op.IsNotFound(err) {
+			resp.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
 		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}

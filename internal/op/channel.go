@@ -318,7 +318,7 @@ func ChannelDel(id int, ctx context.Context) error {
 func ChannelGet(id int) (model.Channel, error) {
 	channel, ok := channelCache.Get(id)
 	if !ok {
-		return model.Channel{}, fmt.Errorf("channel not found")
+		return model.Channel{}, NotFoundf("channel %d not found", id)
 	}
 	return channel, nil
 }
@@ -328,7 +328,7 @@ func ChannelGet(id int) (model.Channel, error) {
 func ChannelModelGet(id int) (model.ChannelModel, error) {
 	channelModel, ok := channelModelCache.Get(id)
 	if !ok {
-		return model.ChannelModel{}, fmt.Errorf("channel model not found")
+		return model.ChannelModel{}, NotFoundf("channel model %d not found", id)
 	}
 	return channelModel, nil
 }

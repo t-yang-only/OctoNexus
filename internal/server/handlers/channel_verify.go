@@ -57,7 +57,7 @@ func verifyChannelModels(c *gin.Context) {
 	}
 	detail, err := op.ChannelDetailGet(id)
 	if err != nil {
-		resp.Error(c, http.StatusNotFound, err.Error())
+		writeOpError(c, err)
 		return
 	}
 
