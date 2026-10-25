@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,15 +41,19 @@ func init() {
 		)
 }
 
-// reportPeriod 解析请求里的周期，缺省按设置项当前值。
-func reportPeriod(raw string) model.UsageReportPeriod {
-	if model.IsValidUsageReportPeriod(raw) {
-		return model.UsageReportPeriod(raw)
+// parseReportPeriod 解析请求里的周期：传了非法值直接报错（防静默降级），未传时回退到设置项当前值。
+func parseReportPeriod(raw string) (model.UsageReportPeriod, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed != "" {
+		if !model.IsValidUsageReportPeriod(trimmed) {
+			return "", fmt.Errorf("invalid period %q (want daily, weekly, or monthly)", trimmed)
+		}
+		return model.UsageReportPeriod(trimmed), nil
 	}
 	if value, err := op.SettingGetString(model.SettingKeyUsageReportPeriod); err == nil && model.IsValidUsageReportPeriod(value) {
-		return model.UsageReportPeriod(value)
+		return model.UsageReportPeriod(value), nil
 	}
-	return model.UsageReportDaily
+	return model.UsageReportDaily, nil
 }
 
 // previewUsageReport 只组装不发送：让用户在真正开启报告之前先看清会收到什么。
@@ -54,10 +61,20 @@ func previewUsageReport(c *gin.Context) {
 	var body struct {
 		Period string `json:"period"`
 	}
-	_ = c.ShouldBindJSON(&body)
-	report, err := op.UsageReportPrepare(c.Request.Context(), reportPeriod(body.Period), timeNow())
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&body); err != nil {
+			resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+			return
+		}
+	}
+	period, err := parseReportPeriod(body.Period)
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	report, err := op.UsageReportPrepare(c.Request.Context(), period, timeNow())
+	if err != nil {
+		writeOpError(c, err)
 		return
 	}
 	resp.Success(c, report)
@@ -71,8 +88,18 @@ func sendUsageReport(c *gin.Context) {
 	var body struct {
 		Period string `json:"period"`
 	}
-	_ = c.ShouldBindJSON(&body)
-	report, results, err := task.UsageReportSendNow(c.Request.Context(), reportPeriod(body.Period), true)
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&body); err != nil {
+			resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+			return
+		}
+	}
+	period, err := parseReportPeriod(body.Period)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	report, results, err := task.UsageReportSendNow(c.Request.Context(), period, true)
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
@@ -81,5 +108,14 @@ func sendUsageReport(c *gin.Context) {
 }
 
 func usageReportHistory(c *gin.Context) {
-	resp.Success(c, op.UsageReportHistory(c.Request.Context(), 20))
+	limit := 20
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 || parsed > 100 {
+			resp.Error(c, http.StatusBadRequest, "invalid limit (must be 1-100)")
+			return
+		}
+		limit = parsed
+	}
+	resp.Success(c, op.UsageReportHistory(c.Request.Context(), limit))
 }
