@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -705,6 +706,7 @@ func Forward(format llm.APIFormat) gin.HandlerFunc {
 //
 // 客户端拿到它就能解释「这次为什么走了这条路」，服务端排障也不必再对着分组配置反推。
 const decisionHeaderName = "X-Octopus-Route"
+const requestIDHeaderName = "X-Octopus-Request-Id"
 
 // publishDecision 记录并对外公布本轮的选路判定: 写进请求状态（随历史日志/导出回看）
 // 与响应头（客户端当场可见）。首字节提交之前可以反复覆盖, 因此每轮尝试与竞速胜出者
@@ -714,6 +716,7 @@ func publishDecision(c *gin.Context, request *RequestState, group model.Group, f
 	decision := DescribeDecision(group, itemID, DecisionTier(group.Mode, complexRequest), round,
 		TopSlot(flat, topCounts, itemID))
 	c.Writer.Header().Set(decisionHeaderName, decision.Text())
+	c.Writer.Header().Set(requestIDHeaderName, strconv.FormatUint(request.ID, 10))
 	request.setDecision(decision.Text())
 }
 
@@ -735,6 +738,7 @@ func failRequest(c *gin.Context, inbound transformer.Inbound, request *RequestSt
 	// 终止原因随 markFailed 一起进锁：markFailed 内部会落库历史快照，
 	// 原因必须在落库**之前**写好，否则写进去的是空值（v0.61.0 生产实证）。
 	request.markFailed(err, "", nil, reason, source)
+	c.Writer.Header().Set(requestIDHeaderName, strconv.FormatUint(request.ID, 10))
 	response := inbound.TransformError(c.Request.Context(), &llm.ResponseError{
 		StatusCode: http.StatusBadGateway,
 		Detail:     llm.ErrorDetail{Message: message, Type: "upstream_error"},
