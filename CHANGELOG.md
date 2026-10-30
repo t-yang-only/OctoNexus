@@ -2,6 +2,11 @@
 
 所有重大技术更新与架构迭代均遵循 Keep a Changelog 格式记录。
 
+## [v0.79.81] - 2026-10-30
+### Network & Reliability
+- **渠道级专用代理加固与跨环境网络韧性对齐 (Round 44)**：
+  - **R44-F1 (HIGH) apigoto 等跨地域抖动渠道绑定 channel_proxy 消除 TLS/首帧超时**：由于部分上游机房（如 api.apigoto.com 45.124.77.55）与海外云节点之间偶发丢包与 TLS 1.3 握手阻塞，导致出现 `TLS handshake timeout` 与 `stream first event timeout`；现将正式版与测试版平台全部对齐渠道级独立代理机制（`proxy=1, channel_proxy='socks5://127.0.0.1:7890'`），实现针对特定服务商的低延迟隧道出站，测试版（apidate.yangonly.com）端到端实测首帧 <300ms 畅通。
+
 ## [v0.79.80] - 2026-10-25
 ### Observability & Traceability
 - **出站与终态响应头透传 X-Octopus-Request-Id 实现端到端全链路可观测 (Round 43)**：
